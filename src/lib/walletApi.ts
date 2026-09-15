@@ -26,12 +26,15 @@ export interface WalletLedgerLine {
   projectId: string | null; debit: number; credit: number;
 }
 
-/** Every wallet in the org with its DERIVED balance (v_wallet_balance). */
+/** Every LIVE wallet in the org with its DERIVED balance (v_wallet_balance). Revoked (inactive)
+ *  wallets are hidden here — the rail, spend matching and top-up matching all read this — while their
+ *  cash-book history stays intact under v_wallet_ledger_line, keyed by wallet_id. */
 export async function loadWallets(orgId: string): Promise<WalletBalance[]> {
   const { data, error } = await supabase
     .from('v_wallet_balance')
     .select('wallet_id, holder_name, holder_user_id, active, balance, total_in, total_out, last_activity')
     .eq('org_id', orgId)
+    .eq('active', true)
     .order('holder_name');
   if (error) throw error;
   return (data ?? []).map((r: any) => ({
@@ -88,6 +91,21 @@ export async function createWallet(input: { orgId: string; holderUserId?: string
   }).select().single();
   if (error) throw error;
   return rowToWallet(data);
+}
+
+/** Open a wallet for a member, reusing (and reactivating) an existing one if present. A member can
+ *  hold only one wallet per org (unique index on org_id+holder_user_id), so a fresh createWallet would
+ *  fail for someone whose wallet was previously revoked — reactivate that row instead. */
+export async function ensureWallet(input: { orgId: string; holderUserId?: string | null; holderName: string; holderPhone?: string | null; note?: string | null }): Promise<Wallet> {
+  if (input.holderUserId) {
+    const { data } = await supabase
+      .from('wallets').select('*').eq('org_id', input.orgId).eq('holder_user_id', input.holderUserId).maybeSingle();
+    if (data) {
+      if (!data.active) await setWalletActive(data.wallet_id, true);
+      return rowToWallet({ ...data, active: true });
+    }
+  }
+  return createWallet(input);
 }
 
 export async function setWalletActive(walletId: string, active: boolean): Promise<void> {

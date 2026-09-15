@@ -171,6 +171,10 @@ export interface TxnDetailMobileProps {
   /** One row per allocation. The reference shows a single site because its example has one;
    *  a payment split across sites repeats the same row rather than inventing a second design. */
   sites: { name: string; sub: string; amount: string }[];
+  /** Wallet deep-link: a float/return/wallet-spend links out to the wallet screen. */
+  wallet?: { title: string; sub: string; onOpen: () => void } | null;
+  /** Hide the project allocation rows (a wallet transfer has no project allocation). */
+  hideSites?: boolean;
   linked: boolean;
   statusTitle: string;
   statusSub: string;
@@ -251,7 +255,20 @@ export default function TxnDetailMobile(p: TxnDetailMobileProps) {
         </div>
 
         <div className="group alloc">
-          {p.sites.map((st, i) => (
+          {p.wallet && (
+            <button type="button" onClick={p.wallet.onOpen}
+              style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%', textAlign: 'left', padding: '13px 14px', background: 'var(--terra-tint,#F8E7DE)', border: 0, borderBottom: '1px solid var(--hair,#EFE9DF)', cursor: 'pointer' }}>
+              <span style={{ flex: 'none', width: 38, height: 38, borderRadius: 10, display: 'grid', placeItems: 'center', color: 'var(--terra,#C4613A)', background: '#fff', border: '1px solid #F0D8CC' }}>
+                <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M4 9h15a1 1 0 0 1 1 1v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V9Z"/><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H18a2 2 0 0 1 2 2"/><circle cx="16.5" cy="13.5" r="1.2" fill="currentColor" stroke="none"/></svg>
+              </span>
+              <span style={{ flex: 1, minWidth: 0 }}>
+                <b style={{ display: 'block', fontWeight: 600, fontSize: 14, color: 'var(--ink,#2F2622)' }}>{p.wallet.title}</b>
+                <small style={{ display: 'block', color: 'var(--ink-2,#6E635B)', fontSize: 12, marginTop: 2 }}>{p.wallet.sub}</small>
+              </span>
+              <span style={{ flex: 'none', color: 'var(--terra,#C4613A)', fontWeight: 600, fontSize: 13 }}>Open ›</span>
+            </button>
+          )}
+          {!p.hideSites && p.sites.map((st, i) => (
             <div className="site" key={i} style={i > 0 ? { borderTop: '1px solid var(--hair)' } : undefined}>
               <div className="n">
                 <div className="nm">{st.name}</div>

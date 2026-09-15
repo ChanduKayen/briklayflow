@@ -4,9 +4,10 @@
 // All CSS is scoped under .wrail-root so nothing else on the page is touched.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  loadWallets, loadWalletLedger, loadAssignableMembers, createWallet, issueFloat, returnCash,
+  loadWallets, loadWalletLedger, loadAssignableMembers, ensureWallet, issueFloat, returnCash, removeWallet,
   type WalletBalance, type WalletLedgerLine,
 } from '../../lib/walletApi';
 
@@ -39,6 +40,16 @@ export default function WalletRail({ orgId, canManage }: { orgId: string; canMan
   const [toast, setToast] = useState<string | null>(null);
   const [lit, setLit] = useState<string | null>(null);
   const totRef = useRef<HTMLDivElement>(null);
+  const [sp, setSp] = useSearchParams();
+
+  // Deep-link from a transaction's "Open wallet": /ledger?wallet=<id> expands the rail and opens that peek.
+  useEffect(() => {
+    const wid = sp.get('wallet');
+    if (wid && wallets.some(w => w.walletId === wid)) {
+      setOpen(true); setPeekId(wid);
+      const next = new URLSearchParams(sp); next.delete('wallet'); setSp(next, { replace: true });
+    }
+  }, [sp, wallets, setSp]);
 
   const roleOf = useMemo(() => { const m = new Map(members.map(x => [x.userId, x.role])); return (uid: string | null) => (uid && m.get(uid) ? cap(m.get(uid)!) : 'Site cash'); }, [members]);
 
@@ -74,7 +85,7 @@ export default function WalletRail({ orgId, canManage }: { orgId: string; canMan
       <div className={`rail${open ? ' open' : ''}`}>
         <div className="wrap">
           <div className="bar" role="button" tabIndex={0} aria-expanded={open}
-            onClick={(e) => { if ((e.target as HTMLElement).closest('.give,.seg')) return; setOpen(o => !o); }}
+            onClick={(e) => { if ((e.target as HTMLElement).closest('.give')) return; setOpen(o => !o); }}
             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpen(o => !o); } }}>
             <div className="total">
               <div className="fig mono" ref={totRef}><span className="r">₹</span>{inr(total)}</div>
@@ -84,8 +95,7 @@ export default function WalletRail({ orgId, canManage }: { orgId: string; canMan
               <div className="track">
                 {live.length ? live.map(w => (
                   <div key={w.walletId} className={`seg${lit === w.walletId ? ' lit' : ''}`} style={{ background: w.tone.tone, flex: w.balance } as any}
-                    onMouseEnter={() => setLit(w.walletId)} onMouseLeave={() => setLit(null)}
-                    onClick={(e) => { e.stopPropagation(); setOpen(true); setPeekId(w.walletId); }} />
+                    onMouseEnter={() => setLit(w.walletId)} onMouseLeave={() => setLit(null)} />
                 )) : <div className="seg" style={{ background: 'rgba(242,233,220,.1)', flex: 1 }} />}
               </div>
               <div className="legend">
@@ -109,14 +119,30 @@ export default function WalletRail({ orgId, canManage }: { orgId: string; canMan
                 return (
                   <button key={w.walletId} className={`card${w.balance <= 0 ? ' zero' : ''}${freshId === w.walletId ? ' fresh' : ''}`}
                     style={{ ['--i' as any]: i, ['--tone' as any]: w.tone.tone, ['--grad' as any]: w.tone.grad, ['--grad-hi' as any]: w.tone.gradHi, ['--glow' as any]: w.tone.glow }}
-                    onMouseMove={(e) => { const r = e.currentTarget.getBoundingClientRect(); e.currentTarget.style.setProperty('--mx', (e.clientX - r.left) + 'px'); e.currentTarget.style.setProperty('--my', (e.clientY - r.top) + 'px'); }}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onMouseMove={(e) => {
+                      const el = e.currentTarget, r = el.getBoundingClientRect();
+                      const px = (e.clientX - r.left) / r.width, py = (e.clientY - r.top) / r.height;
+                      el.style.setProperty('--mx', (e.clientX - r.left) + 'px');
+                      el.style.setProperty('--my', (e.clientY - r.top) + 'px');
+                      el.style.setProperty('--ry', ((px - 0.5) * 6).toFixed(2) + 'deg');
+                      el.style.setProperty('--rx', ((0.5 - py) * 6).toFixed(2) + 'deg');
+                    }}
+                    onMouseLeave={(e) => { e.currentTarget.style.setProperty('--rx', '0deg'); e.currentTarget.style.setProperty('--ry', '0deg'); }}
                     onClick={(e) => { if ((e.target as HTMLElement).closest('[data-give]')) { e.stopPropagation(); setPeekId(w.walletId); return; } setPeekId(w.walletId); }}>
                     <div className="head"><div className="av" style={{ background: w.tone.tone }}>{ini(w.holderName)}</div>
                       <div style={{ minWidth: 0 }}><div className="nm">{w.holderName}</div><div className="role">{w.role}</div></div></div>
                     <div className="bal mono"><span className="r">₹</span>{inr(w.balance)}</div>
                     <div className="burn"><i style={{ ['--w' as any]: pct + '%', background: w.tone.tone }} /></div>
-                    <div className="note">{w.balance < 0 ? 'Spent beyond float' : w.note}</div>
-                    {canManage && <div className="acts"><span className="chip" data-give style={{ ['--tone' as any]: w.tone.tone }}>Give cash</span></div>}
+                    <div className="cardfoot">
+                      <span className="note">{w.balance < 0 ? 'Spent beyond float' : w.note}</span>
+                      {canManage && (
+                        <span className="give-cash" data-give style={{ ['--tone' as any]: w.tone.tone }}>
+                          <svg viewBox="0 0 14 14" width="11" height="11" data-give><path d="M7 1.6v10.8M1.6 7h10.8" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" data-give/></svg>
+                          {w.balance <= 0 ? 'Top up' : 'Give cash'}
+                        </span>
+                      )}
+                    </div>
                   </button>
                 );
               })}
@@ -143,41 +169,46 @@ function GiveTile({ members, existing, orgId, forming, setForming, onGiven }: {
   const [amt, setAmt] = useState('');
   const [done, setDone] = useState<{ name: string; v: number } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
   const amtRef = useRef<HTMLInputElement>(null);
   const v = parseInt((amt || '').replace(/\D/g, ''), 10) || 0;
   const valid = !!pick && v > 0;
   useEffect(() => { if (forming) setTimeout(() => amtRef.current?.focus(), 120); }, [forming]);
 
-  const cancel = () => { setForming(false); setPick(''); setAmt(''); };
+  const cancel = () => { setForming(false); setPick(''); setAmt(''); setErr(null); };
   const submit = async () => {
-    if (!valid || busy) return; setBusy(true);
+    if (!valid || busy) return; setBusy(true); setErr(null);
     const m = options.find(o => o.userId === pick)!;
     try {
-      const w = await createWallet({ orgId, holderUserId: m.userId, holderName: m.name });
+      const w = await ensureWallet({ orgId, holderUserId: m.userId, holderName: m.name });
       await issueFloat({ orgId, walletId: w.walletId, amount: v, date: new Date().toISOString().slice(0, 10), mode: 'Cash', note: 'Wallet opened' });
       setDone({ name: m.name, v });
-      window.setTimeout(() => { setForming(false); setDone(null); setPick(''); setAmt(''); onGiven(w.walletId, `₹${inr(v)} given to ${m.name}`); }, 1100);
-    } catch { setBusy(false); }
+      window.setTimeout(() => { setForming(false); setDone(null); setPick(''); setAmt(''); onGiven(w.walletId, `${m.name}'s wallet is open with ₹${inr(v)} — their site spends now draw from it`); }, 1500);
+    } catch (e: any) { setErr(e?.message || 'Could not give cash — please try again'); setBusy(false); }
   };
 
   return (
     <div className={`tile${forming ? ' forming' : ''}${done ? ' done' : ''}`}>
-      <div className="prompt" onClick={() => options.length && setForming(true)}>
-        <div className="ring">+</div><div className="t1">Give a wallet</div>
-        <div className="t2">{options.length ? 'Hand cash to someone and track what they spend.' : 'Everyone already has a wallet.'}</div>
-      </div>
+      <button type="button" className="prompt" disabled={!options.length} onMouseDown={e => e.preventDefault()} onClick={() => options.length && setForming(true)}>
+        <span className="give-ic"><svg viewBox="0 0 20 20" width="19" height="19"><path d="M10 3.4v13.2M3.4 10h13.2" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" /></svg></span>
+        <span className="t1">Give a wallet</span>
+        <span className="t2">{options.length ? 'Hand cash to someone and track what they spend.' : 'Everyone already has a wallet.'}</span>
+      </button>
       <div className="form">
         <div className="lbl">Who is holding it</div>
         <div className="parties">{options.map(m => <button key={m.userId} className={`party${pick === m.userId ? ' on' : ''}`} onClick={() => setPick(m.userId)}>{m.name}</button>)}</div>
         <div className="lbl">Amount</div>
         <div className="amt"><span className="r">₹</span><input ref={amtRef} inputMode="numeric" placeholder="0" value={amt} onChange={e => setAmt(e.target.value)} /></div>
         <div className="quick">{[10000, 25000, 50000].map(q => <button key={q} onClick={() => setAmt(inr((v || 0) + q))}>+{inr(q)}</button>)}</div>
-        <button className="solid" disabled={!valid || busy} onClick={submit}>{v > 0 ? `Give ₹${inr(v)}` : 'Give cash'}</button>
-        <button className="cancel" onClick={cancel}>Cancel</button>
+        <button className={`solid${busy ? ' loading' : ''}`} disabled={!valid || busy} onClick={submit}>
+          {busy ? <><span className="spin" />Handing over…</> : v > 0 ? `Give ₹${inr(v)}` : 'Give cash'}
+        </button>
+        {err && <div className="tile-err">{err}</div>}
+        <button className="cancel" onClick={cancel} disabled={busy}>Cancel</button>
       </div>
       <div className="doneIn">
         <svg className="tick" viewBox="0 0 40 40"><circle cx="20" cy="20" r="18.5" /><path d="M12 20.5l5.5 5.5L28 14.5" /></svg>
-        <div className="d1">₹{done ? inr(done.v) : 0} given</div><div className="d2">{done?.name} is holding it</div>
+        <div className="d1">₹{done ? inr(done.v) : 0} handed over</div><div className="d2">{done?.name}'s wallet is open — spends draw from it</div>
       </div>
     </div>
   );
@@ -190,7 +221,13 @@ function Peek({ wallet, orgId, canManage, onClose, onChanged }: {
   const { data: lines = [] } = useQuery({ queryKey: ['wallet_ledger', wallet.walletId], queryFn: () => loadWalletLedger(wallet.walletId) });
   const [give, setGive] = useState('');
   const [busy, setBusy] = useState(false);
+  const [flash, setFlash] = useState<{ text: string; ok: boolean } | null>(null);
+  const [pulse, setPulse] = useState(false);
+  const giveRef = useRef<HTMLInputElement>(null);
+  const flashMsg = (text: string, ok = true) => { setFlash({ text, ok }); window.clearTimeout((flashMsg as any)._x); (flashMsg as any)._x = window.setTimeout(() => setFlash(null), 5000); };
   useEffect(() => { const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); }; document.addEventListener('keydown', h); return () => document.removeEventListener('keydown', h); }, [onClose]);
+  // Autofocus the money field when the drawer opens (esp. arriving via "Give cash"), after the slide-in.
+  useEffect(() => { if (canManage) { const t = window.setTimeout(() => giveRef.current?.focus(), 380); return () => window.clearTimeout(t); } }, [canManage]);
 
   // Oldest→newest running balance; render newest-first, grouped by day.
   const days = useMemo(() => {
@@ -204,17 +241,41 @@ function Peek({ wallet, orgId, canManage, onClose, onChanged }: {
   const lineTitle = (l: WalletLedgerLine) => l.kind === 'float' ? 'Given (site advance)' : l.kind === 'return' ? 'Returned to office' : (l.category || 'Spend');
 
   const giveVal = parseInt((give || '').replace(/\D/g, ''), 10) || 0;
+  const first = wallet.totalIn <= 0;
   const doGive = async () => {
-    if (giveVal <= 0 || busy) return; setBusy(true);
-    try { await issueFloat({ orgId, walletId: wallet.walletId, amount: giveVal, date: new Date().toISOString().slice(0, 10), mode: 'Cash', note: 'Top-up' }); setGive(''); setBusy(false); onChanged(`₹${inr(giveVal)} given to ${wallet.holderName}`); }
-    catch { setBusy(false); }
+    if (giveVal <= 0 || busy) return;
+    const v = giveVal; setBusy(true);
+    try {
+      await issueFloat({ orgId, walletId: wallet.walletId, amount: v, date: new Date().toISOString().slice(0, 10), mode: 'Cash', note: first ? 'Wallet opened' : 'Top-up' });
+      setGive(''); setBusy(false);
+      setPulse(true); window.setTimeout(() => setPulse(false), 900);
+      flashMsg(`₹${inr(v)} added to ${wallet.holderName}'s wallet. Whatever they spend on site now draws from this balance.`);
+      onChanged();   // refresh silently — the inline note below is the confirmation
+      window.setTimeout(() => giveRef.current?.focus(), 60);
+    } catch (e: any) { setBusy(false); flashMsg(e?.message || 'Could not add cash — please try again', false); }
   };
   const settle = async () => {
     if (busy || wallet.balance <= 0) return;
     if (!window.confirm(`Return ${wallet.holderName}'s remaining ₹${inr(wallet.balance)} to the office? The wallet settles to zero.`)) return;
     setBusy(true);
     try { await returnCash({ orgId, walletId: wallet.walletId, amount: wallet.balance, date: new Date().toISOString().slice(0, 10), mode: 'Cash', note: 'Wallet settled' }); setBusy(false); onChanged('Wallet settled'); onClose(); }
-    catch { setBusy(false); }
+    catch (e: any) { setBusy(false); flashMsg(e?.message || 'Could not settle — please try again', false); }
+  };
+  // Revoke the wallet: never used → hard-deleted; otherwise deactivated so its cash-book history stays.
+  // A live balance is left untracked, so warn before removing when there's still cash in hand.
+  const remove = async () => {
+    if (busy) return;
+    const warn = wallet.balance > 0
+      ? `${wallet.holderName} still holds ₹${inr(wallet.balance)}. Removing the wallet leaves that cash untracked — settle it first if you can.\n\nRemove anyway?`
+      : `Remove ${wallet.holderName}'s wallet? Its cash-book history is kept, but it can no longer hold cash.`;
+    if (!window.confirm(warn)) return;
+    setBusy(true);
+    try {
+      const what = await removeWallet(wallet.walletId);
+      setBusy(false);
+      onChanged(what === 'deleted' ? 'Wallet removed' : 'Wallet revoked — history kept');
+      onClose();
+    } catch (e: any) { setBusy(false); flashMsg(e?.message || 'Could not remove — please try again', false); }
   };
 
   return createPortal(
@@ -227,15 +288,38 @@ function Peek({ wallet, orgId, canManage, onClose, onChanged }: {
             <div><div className="nm">{wallet.holderName}</div><div className="role">{wallet.role}</div></div>
             <button className="close" onClick={onClose} aria-label="Close"><svg width="12" height="12" viewBox="0 0 13 13" fill="none"><path d="M1 1l11 11M12 1L1 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg></button>
           </div>
-          <div className="pbal mono"><span className="r">₹</span>{inr(wallet.balance)}</div>
+          <div className={`pbal mono${pulse ? ' pulse' : ''}`}><span className="r">₹</span>{inr(wallet.balance)}</div>
           <div className="psub">{wallet.balance > 0 ? `in hand · ₹${inr(wallet.totalIn)} given, ₹${inr(Math.max(0, wallet.totalIn - wallet.balance))} spent` : 'wallet settled · nothing in hand'}</div>
           {canManage && (
-            <div className="pacts">
-              <div className="giveinline"><span className="r">₹</span><input inputMode="numeric" placeholder="Give cash" value={give} onChange={e => setGive(e.target.value)} />
-                {giveVal > 0 && <button className="givego" disabled={busy} onClick={doGive}>Give</button>}</div>
-              <button className="give" disabled={busy || wallet.balance <= 0} onClick={settle}>Settle wallet</button>
+            <div className="pgive">
+              <div className={`moneyfield${busy ? ' busy' : ''}`}>
+                <span className="mf-cur">₹</span>
+                <input ref={giveRef} className="mf-input own-size" inputMode="numeric" placeholder="0" value={give} disabled={busy}
+                  onChange={e => setGive(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') doGive(); }} />
+                <button className="mf-go" disabled={busy || giveVal <= 0} onClick={doGive}>
+                  {busy ? <><span className="spin sm" />Adding…</> : first ? 'Open wallet' : 'Add cash'}
+                </button>
+              </div>
+              <div className="pquick">{[5000, 10000, 25000].map(q => (
+                <button key={q} disabled={busy} onClick={() => setGive(inr((giveVal || 0) + q))}>+{inr(q)}</button>
+              ))}</div>
+              <div className="prow">
+                <button className="subtle" disabled={busy || wallet.balance <= 0} onClick={settle}
+                  title={wallet.balance > 0 ? `Return the remaining ₹${inr(wallet.balance)} to the office and zero the wallet` : 'Nothing to settle — the wallet is already empty'}>
+                  <svg viewBox="0 0 16 16" width="13" height="13"><path d="M13 5H3m0 0 3.2-3M3 5l3.2 3M3 11h10m0 0-3.2-3M13 11l-3.2 3" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                  Settle wallet
+                </button>
+                <button className="subtle danger" disabled={busy} onClick={remove}
+                  title="Revoke this wallet — it can no longer hold cash, but its cash-book history is kept">
+                  <svg viewBox="0 0 16 16" width="13" height="13"><path d="M3 4.5h10M6.5 4.5V3.2c0-.4.3-.7.7-.7h1.6c.4 0 .7.3.7.7v1.3M5 4.5l.5 8c0 .5.4.8.8.8h3.4c.4 0 .8-.3.8-.8l.5-8" stroke="currentColor" strokeWidth="1.3" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                  Remove
+                </button>
+              </div>
             </div>
           )}
+          {flash && <div className={`pflash${flash.ok ? '' : ' bad'}`}><span className="ck">{flash.ok
+            ? <svg viewBox="0 0 20 20" width="13" height="13"><path d="M4 10.5l4 4 8-9" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            : <svg viewBox="0 0 20 20" width="13" height="13"><path d="M10 5v6M10 14.5v.5" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round"/></svg>}</span><span>{flash.text}</span></div>}
         </div>
         <div className="pbody">
           {days.length === 0 ? <div className="lday">No entries yet. Give a float to start.</div> : days.map(([d, rows]) => (
@@ -258,7 +342,7 @@ function Peek({ wallet, orgId, canManage, onClose, onChanged }: {
 }
 
 const CSS = `
-.wrail-root{--band:#2E231B;--band-hi:#382B21;--drawer:#221912;--seam:rgba(255,255,255,.075);--on-dark:#F2E9DC;--on-dark-mute:#A2907C;--cream:#F6F2EA;--paper:#FCF8F1;--walnut:#2B211A;--walnut-2:#544435;--rule:#E5DCCE;--rule-soft:#EFE8DC;--muted:#8E8274;--terra:#C2653A;--terra-lit:#D8794C;--sage:#8CA07C;--ease:cubic-bezier(.22,.61,.36,1);--out:cubic-bezier(.16,1,.3,1);font-family:"DM Sans",system-ui,sans-serif}
+.wrail-root{--band:#201812;--band-hi:#2A1F17;--drawer:#0E0A07;--seam:rgba(255,255,255,.06);--on-dark:#F2E9DC;--on-dark-mute:#A2907C;--cream:#F6F2EA;--paper:#FCF8F1;--walnut:#2B211A;--walnut-2:#544435;--rule:#E5DCCE;--rule-soft:#EFE8DC;--muted:#8E8274;--terra:#C2653A;--terra-lit:#D8794C;--sage:#8CA07C;--ease:cubic-bezier(.22,.61,.36,1);--out:cubic-bezier(.16,1,.3,1);font-family:"DM Sans",system-ui,sans-serif}
 .wrail-root .mono{font-family:"DM Mono",ui-monospace,monospace;font-feature-settings:"tnum";letter-spacing:-.02em}
 .wrail-root .wrap{max-width:1180px;margin:0 auto;padding:0 28px}
 .wrail-root button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;-webkit-tap-highlight-color:transparent;user-select:none}
@@ -293,39 +377,54 @@ const CSS = `
 .rail .drawer{display:grid;grid-template-rows:0fr;transition:grid-template-rows .6s var(--out)}
 .rail.open .drawer{grid-template-rows:1fr}
 .rail .din{overflow:hidden}
-.rail .tray{padding:6px 0 32px;position:relative}
-.rail .tray::before{content:"";position:absolute;left:-40px;right:-40px;top:-6px;height:24px;background:linear-gradient(180deg,rgba(0,0,0,.4),transparent)}
-.rail .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(262px,1fr));gap:14px}
-.rail .card{position:relative;text-align:left;width:100%;border-radius:14px;padding:18px 18px 16px;color:var(--walnut);background-color:var(--paper);background-image:var(--grad);opacity:0;transform:translateY(16px);box-shadow:0 1px 0 rgba(255,255,255,.55) inset,0 16px 34px -26px rgba(0,0,0,.95);transition:transform .42s var(--ease),box-shadow .45s var(--ease)}
+.rail .tray{padding:26px 0;position:relative}
+.rail .tray::before{content:"";position:absolute;left:-40px;right:-40px;top:0;height:20px;background:linear-gradient(180deg,rgba(0,0,0,.35),transparent)}
+.rail .cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(214px,1fr));gap:14px;align-items:stretch}
+.rail .card{position:relative;text-align:left;width:100%;border-radius:13px;padding:16px 16px 15px;color:var(--walnut);background-color:var(--paper);background-image:var(--grad);opacity:0;transform:translateY(16px);box-shadow:0 1px 0 rgba(255,255,255,.55) inset,0 10px 24px -22px rgba(0,0,0,.9);transition:box-shadow .45s var(--ease),background-image .45s var(--ease);transform-style:preserve-3d;transform-origin:center center;will-change:transform;backface-visibility:hidden}
+.rail .card:not(:hover){transition:transform .5s var(--out),box-shadow .45s var(--ease),background-image .45s var(--ease)}
 .rail.open .card{animation:wrise .62s var(--out) forwards;animation-delay:calc(var(--i)*60ms + 70ms)}
 @keyframes wrise{to{opacity:1;transform:none}}
-.rail .card::after{content:"";position:absolute;inset:0;border-radius:14px;pointer-events:none;opacity:0;background:radial-gradient(230px 165px at var(--mx,50%) var(--my,50%),var(--glow),transparent 66%);transition:opacity .4s var(--ease)}
-.rail .card:hover::after{opacity:1}
-.rail .card:hover{transform:translateY(-4px);background-image:var(--grad-hi);box-shadow:0 1px 0 rgba(255,255,255,.65) inset,0 30px 52px -30px rgba(0,0,0,1)}
-.rail .card:active{transform:translateY(-1px) scale(.995)}
-.rail .head{display:flex;align-items:center;gap:11px}
-.rail .av{width:32px;height:32px;border-radius:50%;display:grid;place-items:center;color:#FCF8F1;font-size:11px;font-weight:600;letter-spacing:.02em;flex:none}
+.rail .card::after{content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;opacity:0;background:radial-gradient(240px 175px at var(--mx,50%) var(--my,50%),var(--glow),transparent 64%);transition:opacity .4s var(--ease)}
+.rail .card:hover::after{opacity:1.0}
+/* cool silver sheen that tracks the cursor (the ::after glow below is the warm terracotta light) */
+.rail .card::before{content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;opacity:0;background:radial-gradient(150px 150px at var(--mx,50%) var(--my,50%),rgba(233,238,245,.75) 0%,rgba(233,238,245,.2) 34%,transparent 62%);mix-blend-mode:overlay;transition:opacity .3s var(--ease);z-index:1}
+.rail .card:hover::before{opacity:1}
+.rail .card>*{position:relative;z-index:2}
+.rail .card:hover{transform:perspective(900px) rotateX(var(--rx,0deg)) rotateY(var(--ry,0deg)) !important;background-image:var(--grad-hi);box-shadow:0 1px 0 rgba(255,255,255,.72) inset,0 26px 46px -26px rgba(0,0,0,1),0 8px 20px -16px rgba(0,0,0,.65)}
+.rail .card:active{transform:perspective(900px) rotateX(var(--rx,0deg)) rotateY(var(--ry,0deg)) scale(.99) !important}
+.rail .head{display:flex;align-items:center;gap:10px}
+.rail .av{width:29px;height:29px;border-radius:50%;display:grid;place-items:center;color:#FCF8F1;font-size:10.5px;font-weight:600;letter-spacing:.02em;flex:none}
 .rail .av.lg,.wrail-root .av.lg{width:42px;height:42px;font-size:14px}
-.rail .nm{font-size:14px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.rail .role{font-size:11.5px;color:var(--muted);margin-top:1px}
-.rail .bal{font-family:"DM Mono",ui-monospace,monospace;font-size:28px;letter-spacing:-.035em;margin:18px 0 0;color:#1C140E}
-.rail .bal .r{color:var(--muted);font-size:20px;margin-right:1px}
-.rail .burn{margin-top:14px;height:2px;border-radius:2px;background:rgba(43,33,26,.09);overflow:hidden}
+.rail .nm{font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rail .role{font-size:11px;color:var(--muted);margin-top:1px}
+.rail .bal{font-family:"DM Mono",ui-monospace,monospace;font-size:23px;letter-spacing:-.035em;margin:13px 0 0;color:#1C140E}
+.rail .bal .r{color:var(--muted);font-size:16px;margin-right:1px}
+.rail .burn{margin-top:11px;height:2px;border-radius:2px;background:rgba(43,33,26,.09);overflow:hidden}
 .rail .burn i{display:block;height:100%;border-radius:2px;width:0;transition:width 1s var(--out) .35s}
 .rail.open .burn i{width:var(--w)}
-.rail .note{font-size:11.5px;color:var(--muted);margin-top:9px;letter-spacing:.005em}
+.rail .cardfoot{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px}
+.rail .note{font-size:11px;color:var(--muted);letter-spacing:.005em;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rail .give-cash{display:inline-flex;align-items:center;gap:5px;flex:none;font-size:11px;padding:5px 11px;border-radius:999px;color:var(--tone);background:rgba(255,255,255,.62);border:1px solid rgba(43,33,26,.1);box-shadow:0 1px 2px rgba(43,33,26,.06);transition:background .25s var(--ease),border-color .25s,color .25s,transform .2s var(--ease),box-shadow .25s;white-space:nowrap;cursor:pointer}
+.rail .give-cash svg{transition:transform .35s var(--ease)}
+.rail .give-cash:hover{background:var(--tone);border-color:var(--tone);color:#FCF8F1;transform:translateY(-1px);box-shadow:0 6px 14px -8px var(--tone)}
+.rail .give-cash:hover svg{transform:rotate(90deg)}
+.rail .card.zero .give-cash{color:#8C8172}
+.rail .card.zero .give-cash:hover{background:#8C8172;border-color:#8C8172;color:#FCF8F1}
 .rail .card.zero{box-shadow:0 1px 0 rgba(255,255,255,.45) inset,0 12px 26px -24px rgba(0,0,0,.85)}
 .rail .card.zero .bal{color:#BDB2A2}.rail .card.zero .nm{color:#6F6558}.rail .card.zero .av{opacity:.62}.rail .card.zero .burn{display:none}
-.rail .acts{position:absolute;right:15px;bottom:14px;display:flex;gap:7px;opacity:0;transform:translateY(6px);transition:opacity .3s var(--ease),transform .35s var(--ease)}
+.rail .acts{position:absolute;right:13px;bottom:12px;display:flex;gap:7px;opacity:0;transform:translateY(6px);transition:opacity .3s var(--ease),transform .35s var(--ease);z-index:3}
 .rail .card:hover .acts,.rail .card:focus-visible .acts{opacity:1;transform:none}
-.rail .chip{font-size:11.5px;padding:6px 11px;border-radius:999px;border:1px solid var(--rule);background:rgba(255,255,255,.7);transition:background .25s,border-color .25s,color .25s}
+.rail .chip{font-size:11px;padding:5px 10px;border-radius:999px;border:1px solid var(--rule);background:rgba(255,255,255,.7);transition:background .25s,border-color .25s,color .25s}
 .rail .chip:hover{background:var(--tone);border-color:var(--tone);color:#FCF8F1}
-.rail .tile{border:1px dashed rgba(242,233,220,.2);border-radius:14px;min-height:160px;padding:18px;display:grid;place-items:center;text-align:center;color:var(--on-dark);opacity:0;transform:translateY(16px);transition:border-color .35s var(--ease),background .35s var(--ease)}
+.rail .tile{border:1px dashed rgba(242,233,220,.22);border-radius:13px;min-height:132px;padding:18px;display:grid;place-items:center;text-align:center;color:var(--on-dark);opacity:0;transform:translateY(16px);transition:border-color .35s var(--ease),background .35s var(--ease)}
 .rail.open .tile{animation:wrise .62s var(--out) forwards;animation-delay:calc(var(--i)*60ms + 70ms)}
-.rail .tile .prompt{cursor:pointer}
-.rail .tile:hover{border-color:rgba(194,101,58,.7);background:rgba(194,101,58,.06)}
-.rail .ring{width:32px;height:32px;border-radius:50%;border:1px solid rgba(242,233,220,.22);display:grid;place-items:center;margin:0 auto 11px;color:var(--terra-lit);font-size:17px;line-height:0;transition:transform .45s var(--ease),border-color .3s}
-.rail .tile:hover .ring{transform:rotate(90deg) scale(1.08);border-color:var(--terra)}
+.rail .tile .prompt{cursor:pointer;display:flex;flex-direction:column;align-items:center;width:100%;text-align:center;background:none;border:0;color:inherit;padding:0;outline:none}
+.rail .tile .prompt[disabled]{cursor:default;opacity:.6}
+.rail .tile:hover{border-color:rgba(194,101,58,.5);background:rgba(194,101,58,.05)}
+.rail .give-ic{width:46px;height:46px;border-radius:50%;display:grid;place-items:center;margin:0 auto 14px;color:#FCF8F1;background:radial-gradient(130% 130% at 32% 24%,var(--terra-lit),var(--terra) 74%);box-shadow:0 10px 22px -10px rgba(194,101,58,.75),0 1px 0 rgba(255,255,255,.28) inset;transition:transform .5s var(--ease),box-shadow .4s var(--ease);outline:none}
+.rail .give-ic svg{display:block}
+.rail .tile:hover .give-ic{transform:rotate(90deg) scale(1.07);box-shadow:0 14px 28px -10px rgba(194,101,58,.9),0 1px 0 rgba(255,255,255,.32) inset}
+.rail .tile .prompt:focus-visible .give-ic{box-shadow:0 0 0 3px rgba(194,101,58,.38),0 10px 22px -10px rgba(194,101,58,.75)}
 .rail .tile .t1{font-size:13.5px;font-weight:500}
 .rail .tile .t2{font-size:11.5px;color:var(--on-dark-mute);margin-top:5px;max-width:172px;line-height:1.45}
 .rail .form{display:none;width:100%;text-align:left}
@@ -376,10 +475,58 @@ const CSS = `
 .wrail-root .pacts .give{display:inline-flex;align-items:center;gap:9px;padding:9px 14px;border-radius:999px;border:1px solid rgba(242,233,220,.2);color:var(--on-dark);font-size:12.5px;background:rgba(242,233,220,.04);transition:.3s}
 .wrail-root .pacts .give:hover:not([disabled]){background:var(--terra);border-color:var(--terra)}
 .wrail-root .pacts .give[disabled]{opacity:.4;pointer-events:none}
+.wrail-root .pacts .give.danger{color:var(--on-dark-mute)}
+.wrail-root .pacts .give.danger:hover:not([disabled]){background:rgba(180,74,52,.9);border-color:rgba(180,74,52,.9);color:#FCF8F1}
 .wrail-root .giveinline{display:flex;align-items:center;gap:6px;padding:8px 12px;border-radius:999px;border:1px solid rgba(242,233,220,.2);background:rgba(242,233,220,.04)}
 .wrail-root .giveinline .r{color:var(--on-dark-mute);font-family:"DM Mono",ui-monospace,monospace;font-size:13px}
 .wrail-root .giveinline input{border:0;background:none;color:var(--on-dark);width:84px;font-family:"DM Mono",ui-monospace,monospace;font-size:13px;outline:none}
-.wrail-root .giveinline .givego{color:var(--terra-lit);font-size:12.5px;font-weight:500}
+.wrail-root .giveinline .givego{color:var(--terra-lit);font-size:12.5px;font-weight:500;min-width:34px;display:inline-flex;align-items:center;justify-content:center}
+.wrail-root .giveinline .givego[disabled]{opacity:.5}
+.wrail-root .giveinline.busy{border-color:rgba(216,121,76,.5)}
+.wrail-root .giveinline input[disabled]{opacity:.6}
+.wrail-root .spin{width:15px;height:15px;border-radius:50%;border:2px solid rgba(255,255,255,.28);border-top-color:#fff;display:inline-block;margin-right:8px;vertical-align:-2px;animation:wspin .62s linear infinite}
+.wrail-root .spin.sm{width:13px;height:13px;border-width:2px;margin:0;border-color:rgba(216,121,76,.35);border-top-color:var(--terra-lit)}
+@keyframes wspin{to{transform:rotate(360deg)}}
+.wrail-root .solid.loading{background:var(--terra);opacity:.9}
+.wrail-root .pflash{margin-top:14px;display:flex;align-items:flex-start;gap:9px;padding:11px 13px;border-radius:11px;background:rgba(140,160,124,.14);border:1px solid rgba(140,160,124,.3);color:#DCE6D2;font-size:12.5px;line-height:1.5;animation:wflash .5s var(--out)}
+.wrail-root .pflash .ck{flex:none;width:20px;height:20px;border-radius:50%;background:var(--sage);color:#22301A;display:grid;place-items:center;margin-top:1px}
+.wrail-root .pflash.bad{background:rgba(180,74,52,.16);border-color:rgba(180,74,52,.4);color:#ECC0B4}
+.wrail-root .pflash.bad .ck{background:#B44A34;color:#fff}
+@keyframes wflash{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
+/* subtle success: the balance blooms sage then settles */
+.wrail-root .pbal.pulse{animation:wbloom .85s var(--out)}
+@keyframes wbloom{0%{transform:scale(1);color:var(--on-dark)}22%{transform:scale(1.06);color:#B7C9A8}100%{transform:scale(1);color:var(--on-dark)}}
+.wrail-root .pbal{transform-origin:left center;transition:color .3s}
+/* give-a-wallet inline error */
+.rail .tile-err{font-size:11.5px;line-height:1.45;color:#ECC0B4;background:rgba(180,74,52,.16);border:1px solid rgba(180,74,52,.4);border-radius:9px;padding:8px 11px;margin-top:12px}
+/* ── the money field (Peek) ── */
+.wrail-root .pgive{margin-top:18px;display:flex;flex-direction:column;gap:11px}
+.wrail-root .moneyfield{display:flex;align-items:center;gap:12px;background:rgba(242,233,220,.055);border:1px solid rgba(242,233,220,.18);border-radius:15px;padding:9px 9px 9px 17px;transition:border-color .3s var(--ease),background .3s var(--ease),box-shadow .3s var(--ease)}
+.wrail-root .moneyfield:focus-within{border-color:var(--terra);background:rgba(194,101,58,.09);box-shadow:0 0 0 3px rgba(194,101,58,.13)}
+.wrail-root .moneyfield.busy{border-color:rgba(216,121,76,.5)}
+.wrail-root .mf-cur{font-family:"DM Mono",ui-monospace,monospace;font-size:27px;line-height:1;color:var(--on-dark-mute);letter-spacing:-.02em}
+.wrail-root .mf-input{flex:1;min-width:0;border:0;background:none;outline:none;color:var(--on-dark);font-family:"DM Mono",ui-monospace,monospace;font-size:30px;line-height:1;letter-spacing:-.03em;padding:0}
+.wrail-root .mf-input::placeholder{color:rgba(162,144,124,.5)}
+.wrail-root .mf-go{flex:none;padding:12px 18px;border-radius:11px;background:var(--terra);color:#fff;font-size:13.5px;font-weight:500;min-width:118px;display:inline-flex;align-items:center;justify-content:center;transition:background .3s,transform .2s var(--ease),box-shadow .4s,opacity .3s}
+.wrail-root .mf-go:hover:not([disabled]){background:var(--terra-lit);transform:translateY(-1px);box-shadow:0 14px 26px -16px rgba(194,101,58,.95)}
+.wrail-root .mf-go:active:not([disabled]){transform:translateY(0) scale(.985)}
+.wrail-root .mf-go[disabled]{opacity:.34;pointer-events:none}
+.wrail-root .mf-go .spin.sm{border-color:rgba(255,255,255,.32);border-top-color:#fff;margin-right:8px}
+.wrail-root .pquick{display:flex;gap:7px}
+.wrail-root .pquick button{font-family:"DM Mono",ui-monospace,monospace;font-size:11.5px;color:var(--on-dark-mute);padding:6px 12px;border-radius:8px;border:1px solid rgba(242,233,220,.14);transition:.2s}
+.wrail-root .pquick button:hover:not([disabled]){background:rgba(242,233,220,.08);color:var(--on-dark);border-color:rgba(242,233,220,.32)}
+.wrail-root .pquick button[disabled]{opacity:.4;pointer-events:none}
+.wrail-root .prow{display:flex;gap:9px;margin-top:3px}
+.wrail-root .subtle{flex:1;display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:10px 12px;border-radius:11px;border:1px solid rgba(242,233,220,.14);background:rgba(242,233,220,.03);color:var(--on-dark-mute);font-size:12.5px;transition:background .25s var(--ease),border-color .25s,color .25s,transform .18s var(--ease)}
+.wrail-root .subtle svg{opacity:.8;transition:opacity .25s}
+.wrail-root .subtle:hover:not([disabled]){background:rgba(242,233,220,.08);border-color:rgba(242,233,220,.3);color:var(--on-dark)}
+.wrail-root .subtle:hover:not([disabled]) svg{opacity:1}
+.wrail-root .subtle:active:not([disabled]){transform:scale(.98)}
+.wrail-root .subtle[disabled]{opacity:.32;cursor:not-allowed}
+.wrail-root .subtle.danger:hover:not([disabled]){background:rgba(180,74,52,.16);border-color:rgba(180,74,52,.5);color:#ECC0B4}
+/* focus rings stay terracotta, never the browser's blue; mouse focus shows nothing */
+.wrail-root :focus:not(:focus-visible){outline:none}
+.wrail-root .give-ic,.wrail-root .give-cash{outline:none}
 .wrail-root .pbody{overflow:auto;padding:0 26px 40px;flex:1}
 .wrail-root .lday{font-size:11.5px;color:var(--muted);padding:20px 0 8px;position:sticky;top:0;background:linear-gradient(180deg,var(--paper) 72%,rgba(252,248,241,0))}
 .wrail-root .lrow{display:flex;gap:14px;align-items:baseline;padding:11px 0;border-bottom:1px solid var(--rule-soft)}

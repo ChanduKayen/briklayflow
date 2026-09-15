@@ -18,6 +18,9 @@ export type TxnDirection = 'in' | 'out';
  * getTxnType never checked for them. This is the single source of truth.
  */
 export function deriveDirection(txn: any): TxnDirection {
+  // A wallet RETURN / settle (wallet → bank, a transfer out of the wallet) brings cash BACK to the
+  // office — it's money IN on the bank ledger, not another payment. Without this it wrongly reads −.
+  if (txn?.wallet_dir === 'out' && txn?.is_transfer) return 'in';
   if (
     txn?.stakeholders?.type === 'Client' ||
     txn?.category === 'CLIENT-RECEIPT' ||

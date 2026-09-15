@@ -84,6 +84,15 @@ const TXNX_CSS = `
 .txnx .who .av{grid-row:span 2;width:34px;height:34px;border-radius:50%;background:var(--terra-tint);color:var(--terra);display:grid;place-items:center;font:600 13px "DM Sans"}
 .txnx .hdr a:hover{border-bottom-style:solid;color:var(--terra)}
 .txnx .pill{display:inline-flex;align-items:center;gap:6px;font:500 12px "DM Mono";letter-spacing:.05em;background:var(--paper-2);border:1px solid var(--line-2);padding:5px 8px;border-radius:5px;color:var(--ink-2)}
+.txnx .wgo{display:flex;align-items:center;gap:14px;width:100%;text-align:left;background:transparent;border:0;padding:15px 16px;cursor:pointer;border-radius:10px;transition:background .18s var(--ease)}
+.txnx .wgo:hover{background:var(--terra-tint)}
+.txnx .wgo-ic{flex:none;width:40px;height:40px;border-radius:10px;display:grid;place-items:center;color:var(--terra);background:var(--terra-tint);border:1px solid #F0D8CC}
+.txnx .wgo:hover .wgo-ic{background:#fff}
+.txnx .wgo-txt{flex:1;min-width:0}
+.txnx .wgo-txt b{display:block;font-weight:600;font-size:14.5px;color:var(--ink)}
+.txnx .wgo-txt small{display:block;color:var(--ink-2);font-size:12.5px;margin-top:2px}
+.txnx .wgo-go{flex:none;display:inline-flex;align-items:center;gap:6px;font:500 12.5px "DM Sans";color:var(--terra);background:#fff;border:1px solid #F0D8CC;padding:7px 12px;border-radius:999px;transition:background .18s,transform .12s}
+.txnx .wgo:hover .wgo-go{background:var(--terra);color:#fff;border-color:var(--terra);transform:translateX(2px)}
 .txnx .sheet.alloc{overflow:visible;position:relative;z-index:5}
 .txnx .alloc td{height:56px}
 .txnx .lnk{display:inline-flex;align-items:center;gap:8px}
@@ -497,7 +506,7 @@ export default function TransactionDetail({ session }: { session: Session }) {
   const { data: txn, isLoading: txnLoading } = useQuery({
     queryKey: ['transaction', txnId],
     queryFn: async () => {
-      const { data, error } = await supabase.from('transactions').select('*, stakeholders(*)').eq('txn_id', txnId).single();
+      const { data, error } = await supabase.from('transactions').select('*, stakeholders(*), wallets(wallet_id, holder_name, holder_user_id)').eq('txn_id', txnId).single();
       if (error) throw error;
       return data;
     },
@@ -798,6 +807,14 @@ export default function TransactionDetail({ session }: { session: Session }) {
   const anyBillIdAlloc = (allocs || []).some((a: any) => a?.bill_id);
   const billLinked = !!primaryAlloc?.order_type || anyBillIdAlloc || !!txn.bill_doc_url;
   const rupee = (n: number) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');
+  // ── wallet dimension: a transfer (float in / return out) MOVED money to/from a site-cash wallet;
+  //    a wallet spend was funded FROM a wallet. Both link out to the wallet screen (/ledger?wallet=…).
+  const walletId: string | null = txn.wallet_id ?? null;
+  const walletHolder: string = txn.wallets?.holder_name || 'a wallet';
+  const isWTransfer = !!txn.wallet_dir && !!txn.is_transfer;
+  const isWFloat = isWTransfer && txn.wallet_dir === 'in';
+  const isWSpend = txn.wallet_dir === 'out' && !txn.is_transfer;
+  const openWallet = () => { if (walletId) navigate(`/ledger?wallet=${walletId}`); };
   // (vendor bill attach now routes to BillAllocateSheet; the old inline PO picker below is inert)
   void setPickerStep; void setMappingAllocId;
   const openLightbox = (url: string, title: string) => { setLightboxTitle(title); setLightboxUrl(url); };
@@ -896,6 +913,12 @@ export default function TransactionDetail({ session }: { session: Session }) {
                 amount: rupee(Number(a.allocated_amount)),
               }))
             : [{ name: 'Unassigned', sub: 'No allocation yet', amount: rupee(Number(effective.total_amount) || 0) }]}
+          wallet={walletId && (isWTransfer || isWSpend) ? {
+            title: isWFloat ? `Money moved into ${walletHolder}'s wallet` : isWSpend ? `Paid from ${walletHolder}'s wallet` : `Cash returned from ${walletHolder}'s wallet`,
+            sub: isWFloat ? 'Site advance — company money until spent' : isWSpend ? 'Site cash — drew down their wallet' : 'Returned to the office',
+            onOpen: openWallet,
+          } : null}
+          hideSites={isWTransfer}
           linked={st.linked}
           statusTitle={st.linked ? st.k : 'Not settled against a bill'}
           statusSub={st.sub}
@@ -1011,7 +1034,23 @@ export default function TransactionDetail({ session }: { session: Session }) {
 
         {/* where this money went */}
         <div className="sec" id="txnx-alloc"><h2>Where this money went</h2></div>
-        <div className="sheet alloc">
+        {walletId && (isWTransfer || isWSpend) && (
+          <div className="sheet" style={{ marginBottom: isWTransfer ? 0 : 12, padding: 0 }}>
+            <button className="wgo" onClick={openWallet} title={`Open ${walletHolder}'s wallet`}>
+              <span className="wgo-ic" aria-hidden>
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H18a2 2 0 0 1 2 2v0H6a2 2 0 0 0-2 2v7.5"/><path d="M4 9h15a1 1 0 0 1 1 1v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V9Z"/><circle cx="16.5" cy="13.5" r="1.2" fill="currentColor" stroke="none"/></svg>
+              </span>
+              <span className="wgo-txt">
+                <b>{isWFloat ? `Money moved into ${walletHolder}'s wallet` : isWSpend ? `Paid from ${walletHolder}'s wallet` : `Cash returned from ${walletHolder}'s wallet`}</b>
+                <small>{isWFloat ? 'Site advance — still the company’s money until it’s spent'
+                  : isWSpend ? 'Site cash — this spend drew down their wallet balance'
+                  : 'Returned to the office — the wallet was settled down'}</small>
+              </span>
+              <span className="wgo-go">Open wallet<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M4 8h8M8.5 4.5 12 8l-3.5 3.5"/></svg></span>
+            </button>
+          </div>
+        )}
+        {!isWTransfer && <div className="sheet alloc">
           <table>
             <colgroup><col style={{ width: '34%' }} /><col /><col style={{ width: '20%' }} /></colgroup>
             <thead><tr><th>Project</th><th>Bill</th><th className="num">Amount</th></tr></thead>
@@ -1097,7 +1136,7 @@ export default function TransactionDetail({ session }: { session: Session }) {
             </tbody>
             <tfoot><tr><td colSpan={2} style={{ textAlign: 'right' }}>Total allocated</td><td className="num">{rupee(totalAllocated)}</td></tr></tfoot>
           </table>
-        </div>
+        </div>}
         <input ref={billInputRef} type="file" accept="image/*,.pdf" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) { setMappingAllocId(null); setAttachBill({ file: f, mode: 'upload' }); } }} />
 
         {/* proof of payment — a SEPARATE doc from the bill (receipt / UPI screenshot / Day-Book
