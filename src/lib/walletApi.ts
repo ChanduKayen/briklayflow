@@ -146,19 +146,32 @@ export async function notifyWalletRecharge(input: {
   orgId: string; wallet: { walletId: string; holderName: string; holderUserId?: string | null; holderPhone?: string | null };
   amount: number; newBalance: number;
 }): Promise<{ sent: boolean; reason?: string }> {
+  const TAG = '[wallet-recharge]';
+  const mask = (p: string) => p.length > 4 ? '••••' + p.slice(-4) : p;
   try {
     const to = await resolveHolderPhone(input.orgId, input.wallet);
-    if (!to) return { sent: false, reason: 'no phone' };
+    if (!to) {
+      console.warn(`${TAG} no WhatsApp number for holder`, { holder: input.wallet.holderName, holderUserId: input.wallet.holderUserId, walletId: input.wallet.walletId });
+      return { sent: false, reason: 'no phone' };
+    }
     const grp = (n: number) => Math.round(Math.abs(n)).toLocaleString('en-IN');
-    const { error } = await supabase.functions.invoke('send-template', {
-      body: {
-        templateKey: 'wallet_recharge', to,
-        params: { name: input.wallet.holderName.split(' ')[0] || input.wallet.holderName, amount: grp(input.amount), balance: grp(input.newBalance) },
-      },
-    });
-    if (error) throw error;
+    const params = { name: input.wallet.holderName.split(' ')[0] || input.wallet.holderName, amount: grp(input.amount), balance: grp(input.newBalance) };
+    console.log(`${TAG} invoking send-template`, { to: mask(to), template: 'wallet_recharge', params });
+    const { data, error } = await supabase.functions.invoke('send-template', { body: { templateKey: 'wallet_recharge', to, params } });
+    if (error) {
+      // FunctionsHttpError hides the body — read it off error.context (a Response) so the real Meta / edge reason shows.
+      let body = '';
+      try { const ctx: any = (error as any).context; if (ctx && typeof ctx.text === 'function') body = await ctx.text(); } catch { /* ignore */ }
+      console.error(`${TAG} send-template errored`, error.message, body);
+      return { sent: false, reason: body || error.message };
+    }
+    if (data && data.ok === false) {
+      console.error(`${TAG} send-template returned failure`, data.error);
+      return { sent: false, reason: String(data.error) };
+    }
+    console.log(`${TAG} sent`, data);
     return { sent: true };
-  } catch (e) { console.warn('[wallet] recharge notify failed', e); return { sent: false, reason: String((e as any)?.message ?? e) }; }
+  } catch (e) { console.error(`${TAG} threw`, e); return { sent: false, reason: String((e as any)?.message ?? e) }; }
 }
 
 export interface AssignableMember { userId: string; name: string; role: string }

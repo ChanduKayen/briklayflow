@@ -136,7 +136,7 @@ export default function WalletRail({ orgId, canManage }: { orgId: string; canMan
                     onClick={(e) => { if ((e.target as HTMLElement).closest('[data-give]')) { e.stopPropagation(); setPeekId(w.walletId); return; } setPeekId(w.walletId); }}>
                     <div className="head"><div className="av" style={{ background: w.tone.tone }}>{ini(w.holderName)}</div>
                       <div style={{ minWidth: 0 }}><div className="nm">{w.holderName}</div><div className="role">{w.isMine ? 'This is yours' : w.role}</div></div>
-                      {w.isMine && <span className="mine-tag"><svg viewBox="0 0 20 20" width="10" height="10" fill="currentColor"><path d="M10 10a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Zm0 1.4c-3 0-5.6 1.6-5.6 3.8v1.2h11.2v-1.2c0-2.2-2.6-3.8-5.6-3.8Z"/></svg>My wallet</span>}
+                      {w.isMine && <span className="mine-tag">My wallet</span>}
                     </div>
                     <div className="bal mono"><span className="r">₹</span>{inr(w.balance)}</div>
                     <div className="burn"><i style={{ ['--w' as any]: pct + '%', background: w.tone.tone }} /></div>
@@ -424,8 +424,9 @@ const CSS = `
 .rail .card.mine{outline:1.6px solid rgba(194,101,58,.6);outline-offset:2px}
 .rail .card.mine .av{box-shadow:0 0 0 2px var(--paper),0 0 0 3.5px rgba(194,101,58,.55)}
 .rail .head{position:relative}
-.rail .mine-tag{margin-left:auto;flex:none;display:inline-flex;align-items:center;gap:4px;font-size:10.5px;font-weight:600;letter-spacing:.02em;color:#FCF8F1;background:linear-gradient(135deg,var(--terra-lit),var(--terra));padding:4px 9px 4px 7px;border-radius:999px;box-shadow:0 4px 10px -5px rgba(194,101,58,.9);align-self:flex-start}
-.rail .mine-tag svg{opacity:.92}
+/* a quiet ownership LABEL (not a button) — small terracotta caps with a leading dot */
+.rail .mine-tag{margin-left:auto;align-self:flex-start;flex:none;display:inline-flex;align-items:center;gap:5px;font-size:9px;font-weight:700;letter-spacing:.13em;text-transform:uppercase;color:var(--terra);background:none;border:0;box-shadow:none;padding:2px 0;line-height:1}
+.rail .mine-tag::before{content:"";width:5px;height:5px;border-radius:50%;background:var(--terra);box-shadow:0 0 0 3px rgba(194,101,58,.15)}
 .rail .card.mine .role{color:var(--terra);font-weight:500}
 .rail .acts{position:absolute;right:13px;bottom:12px;display:flex;gap:7px;opacity:0;transform:translateY(6px);transition:opacity .3s var(--ease),transform .35s var(--ease);z-index:3}
 .rail .card:hover .acts,.rail .card:focus-visible .acts{opacity:1;transform:none}

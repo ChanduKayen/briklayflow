@@ -21,18 +21,26 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
     const { templateKey, to, params } = await req.json();
+    // Log every request so a send is never invisible in the function logs (mask the number).
+    const masked = typeof to === "string" && to.length > 4 ? "••••" + to.slice(-4) : String(to);
+    console.log("[send-template] request", { templateKey, to: masked, params });
     if (!templateKey || !to) {
+      console.error("[send-template] bad request: templateKey and to are required", { templateKey, to: masked });
       return new Response(JSON.stringify({ error: "templateKey and to are required" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
     const result = await sendTemplate(templateKey as TemplateKey, to, params ?? {});
+    console.log("[send-template] sent", { templateKey, to: masked, wamid: result.wamid });
     return new Response(JSON.stringify({ ok: true, wamid: result.wamid }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (e) {
-    return new Response(JSON.stringify({ ok: false, error: String((e as Error).message ?? e) }), {
+    const err = e as Error;
+    // Full error + stack in the logs; the message goes back to the caller too.
+    console.error("[send-template] FAILED", err?.message ?? String(e), err?.stack ?? "");
+    return new Response(JSON.stringify({ ok: false, error: String(err?.message ?? e) }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
