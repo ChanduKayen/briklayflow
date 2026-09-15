@@ -10,6 +10,7 @@ import {
   loadWallets, loadWalletLedger, loadAssignableMembers, ensureWallet, issueFloat, returnCash, removeWallet,
   notifyWalletRecharge, type WalletBalance, type WalletLedgerLine,
 } from '../../lib/walletApi';
+import { supabase } from '../../lib/supabase';
 
 const inr = (n: number) => Math.round(Math.abs(Number(n) || 0)).toLocaleString('en-IN');
 const ini = (n: string) => n.split(' ').filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase();
@@ -27,7 +28,7 @@ const LADDER = [
 const SETTLED = { tone: '#BCB0A0', grad: 'linear-gradient(158deg,rgba(138,146,152,.055) 0%,#FCF8F1 48%)', gradHi: 'linear-gradient(158deg,rgba(138,146,152,.075) 0%,#FCF8F1 54%)', glow: 'rgba(43,33,26,.045)' };
 
 type Tone = typeof SETTLED;
-interface WCard extends WalletBalance { role: string; note: string; tone: Tone }
+interface WCard extends WalletBalance { role: string; note: string; tone: Tone; isMine: boolean }
 
 export default function WalletRail({ orgId, canManage }: { orgId: string; canManage: boolean }) {
   const qc = useQueryClient();
@@ -41,6 +42,7 @@ export default function WalletRail({ orgId, canManage }: { orgId: string; canMan
   const [lit, setLit] = useState<string | null>(null);
   const totRef = useRef<HTMLDivElement>(null);
   const [sp, setSp] = useSearchParams();
+  const { data: myUid } = useQuery({ queryKey: ['auth_uid'], queryFn: async () => (await supabase.auth.getUser()).data.user?.id ?? null, staleTime: Infinity });
 
   // Deep-link from a transaction's "Open wallet": /ledger?wallet=<id> expands the rail and opens that peek.
   useEffect(() => {
@@ -62,9 +64,11 @@ export default function WalletRail({ orgId, canManage }: { orgId: string; canMan
     return wallets.map(w => {
       const used = Math.max(0, w.totalIn - w.balance);
       const note = w.balance <= 0 ? 'Settled' : used > 0 ? `₹${inr(used)} used` : 'Nothing spent yet';
-      return { ...w, role: roleOf(w.holderUserId), note, tone: toneOf.get(w.walletId) || SETTLED };
-    });
-  }, [wallets, roleOf]);
+      return { ...w, role: roleOf(w.holderUserId), note, tone: toneOf.get(w.walletId) || SETTLED, isMine: !!myUid && w.holderUserId === myUid };
+    })
+    // The viewer's own wallet leads the row — it's the one that's theirs.
+    .sort((a, b) => Number(b.isMine) - Number(a.isMine));
+  }, [wallets, roleOf, myUid]);
 
   const live = cards.filter(w => w.balance > 0);
   const settledCount = cards.length - live.length;
@@ -117,7 +121,7 @@ export default function WalletRail({ orgId, canManage }: { orgId: string; canMan
               {cards.map((w, i) => {
                 const pct = w.totalIn ? Math.round(w.balance / w.totalIn * 100) : 0;
                 return (
-                  <button key={w.walletId} className={`card${w.balance <= 0 ? ' zero' : ''}${freshId === w.walletId ? ' fresh' : ''}`}
+                  <button key={w.walletId} className={`card${w.balance <= 0 ? ' zero' : ''}${freshId === w.walletId ? ' fresh' : ''}${w.isMine ? ' mine' : ''}`}
                     style={{ ['--i' as any]: i, ['--tone' as any]: w.tone.tone, ['--grad' as any]: w.tone.grad, ['--grad-hi' as any]: w.tone.gradHi, ['--glow' as any]: w.tone.glow }}
                     onMouseDown={(e) => e.preventDefault()}
                     onMouseMove={(e) => {
@@ -131,7 +135,9 @@ export default function WalletRail({ orgId, canManage }: { orgId: string; canMan
                     onMouseLeave={(e) => { e.currentTarget.style.setProperty('--rx', '0deg'); e.currentTarget.style.setProperty('--ry', '0deg'); }}
                     onClick={(e) => { if ((e.target as HTMLElement).closest('[data-give]')) { e.stopPropagation(); setPeekId(w.walletId); return; } setPeekId(w.walletId); }}>
                     <div className="head"><div className="av" style={{ background: w.tone.tone }}>{ini(w.holderName)}</div>
-                      <div style={{ minWidth: 0 }}><div className="nm">{w.holderName}</div><div className="role">{w.role}</div></div></div>
+                      <div style={{ minWidth: 0 }}><div className="nm">{w.holderName}</div><div className="role">{w.isMine ? 'This is yours' : w.role}</div></div>
+                      {w.isMine && <span className="mine-tag"><svg viewBox="0 0 20 20" width="10" height="10" fill="currentColor"><path d="M10 10a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Zm0 1.4c-3 0-5.6 1.6-5.6 3.8v1.2h11.2v-1.2c0-2.2-2.6-3.8-5.6-3.8Z"/></svg>My wallet</span>}
+                    </div>
                     <div className="bal mono"><span className="r">₹</span>{inr(w.balance)}</div>
                     <div className="burn"><i style={{ ['--w' as any]: pct + '%', background: w.tone.tone }} /></div>
                     <div className="cardfoot">
@@ -414,6 +420,13 @@ const CSS = `
 .rail .card.zero .give-cash:hover{background:#8C8172;border-color:#8C8172;color:#FCF8F1}
 .rail .card.zero{box-shadow:0 1px 0 rgba(255,255,255,.45) inset,0 12px 26px -24px rgba(0,0,0,.85)}
 .rail .card.zero .bal{color:#BDB2A2}.rail .card.zero .nm{color:#6F6558}.rail .card.zero .av{opacity:.62}.rail .card.zero .burn{display:none}
+/* the viewer's OWN wallet — a warm terracotta ring + a "My wallet" badge so it reads as theirs */
+.rail .card.mine{outline:1.6px solid rgba(194,101,58,.6);outline-offset:2px}
+.rail .card.mine .av{box-shadow:0 0 0 2px var(--paper),0 0 0 3.5px rgba(194,101,58,.55)}
+.rail .head{position:relative}
+.rail .mine-tag{margin-left:auto;flex:none;display:inline-flex;align-items:center;gap:4px;font-size:10.5px;font-weight:600;letter-spacing:.02em;color:#FCF8F1;background:linear-gradient(135deg,var(--terra-lit),var(--terra));padding:4px 9px 4px 7px;border-radius:999px;box-shadow:0 4px 10px -5px rgba(194,101,58,.9);align-self:flex-start}
+.rail .mine-tag svg{opacity:.92}
+.rail .card.mine .role{color:var(--terra);font-weight:500}
 .rail .acts{position:absolute;right:13px;bottom:12px;display:flex;gap:7px;opacity:0;transform:translateY(6px);transition:opacity .3s var(--ease),transform .35s var(--ease);z-index:3}
 .rail .card:hover .acts,.rail .card:focus-visible .acts{opacity:1;transform:none}
 .rail .chip{font-size:11px;padding:5px 10px;border-radius:999px;border:1px solid var(--rule);background:rgba(255,255,255,.7);transition:background .25s,border-color .25s,color .25s}
