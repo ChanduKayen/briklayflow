@@ -60,7 +60,7 @@ returns table (
   category       text,
   remarks        text,
   stakeholder_id text,
-  project_id     uuid,
+  project_id     text,   -- txn_allocations.project_id is TEXT in this schema, not uuid
   debit          numeric,
   credit         numeric
 )
