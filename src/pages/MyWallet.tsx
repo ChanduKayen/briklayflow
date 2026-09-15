@@ -7,7 +7,7 @@ import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import type { Session } from '@supabase/supabase-js';
 import { useOrgId } from '../lib/auth/AuthProvider';
-import { loadMyWallet, loadWalletLedger, type WalletLedgerLine } from '../lib/walletApi';
+import { loadMyWallets, loadMyWalletLedger, type WalletLedgerLine } from '../lib/walletApi';
 
 const inr = (n: number) => Math.round(Math.abs(Number(n) || 0)).toLocaleString('en-IN');
 const ini = (s: string) => s.split(' ').filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase();
@@ -18,14 +18,17 @@ export default function MyWallet({ session }: { session: Session }) {
   const userId = session.user.id;
   const nav = useNavigate();
 
-  const { data: wallet, isLoading } = useQuery({
-    queryKey: ['my_wallet', orgId, userId],
-    queryFn: () => loadMyWallet(orgId, userId),
-    enabled: !!orgId && !!userId,
+  // Definer-RPC path: works for any role and doesn't depend on org resolution (a supervisor's own cash).
+  const { data: wallets = [], isLoading } = useQuery({
+    queryKey: ['my_wallets', userId],
+    queryFn: () => loadMyWallets(),
+    enabled: !!userId,
   });
+  // Prefer the wallet in the current org when it resolves; otherwise the first one they hold.
+  const wallet = useMemo(() => wallets.find(w => !orgId || w.orgId === orgId) ?? wallets[0] ?? null, [wallets, orgId]);
   const { data: lines = [] } = useQuery({
-    queryKey: ['wallet_ledger', wallet?.walletId],
-    queryFn: () => loadWalletLedger(wallet!.walletId),
+    queryKey: ['my_wallet_ledger', wallet?.walletId],
+    queryFn: () => loadMyWalletLedger(wallet!.walletId),
     enabled: !!wallet?.walletId,
   });
 

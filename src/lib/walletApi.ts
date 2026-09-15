@@ -43,6 +43,30 @@ export async function loadWallets(orgId: string): Promise<WalletBalance[]> {
   }));
 }
 
+/** The signed-in user's OWN wallets with derived balances, via the SECURITY DEFINER my_wallets() RPC.
+ *  This is the /mywallet path: it works for ANY role (a supervisor's holder view) because the RPC
+ *  computes over all the caller's own transaction rows regardless of their read-RLS on transactions —
+ *  the security_invoker views can under-count to ₹0 for a non-manager. Scoped to auth.uid() server-side. */
+export async function loadMyWallets(): Promise<(WalletBalance & { orgId: string })[]> {
+  const { data, error } = await supabase.rpc('my_wallets');
+  if (error) throw error;
+  return (data ?? []).map((r: any) => ({
+    walletId: r.wallet_id, orgId: r.org_id, holderName: r.holder_name, holderUserId: null, active: r.active,
+    balance: num(r.balance), totalIn: num(r.total_in), totalOut: num(r.total_out), lastActivity: r.last_activity ?? null,
+  }));
+}
+
+/** The signed-in user's own wallet cash book, via the SECURITY DEFINER my_wallet_ledger() RPC (ownership
+ *  guarded). Use this on /mywallet instead of loadWalletLedger, which reads the invoker-RLS view. */
+export async function loadMyWalletLedger(walletId: string): Promise<WalletLedgerLine[]> {
+  const { data, error } = await supabase.rpc('my_wallet_ledger', { p_wallet: walletId });
+  if (error) throw error;
+  return (data ?? []).map((r: any) => ({
+    txnId: r.txn_id, date: r.line_date, kind: r.kind, category: r.category, remarks: r.remarks,
+    stakeholderId: r.stakeholder_id, projectId: r.project_id, debit: num(r.debit), credit: num(r.credit),
+  }));
+}
+
 /** The current user's own wallet balance row, or null if they don't hold one. */
 export async function loadMyWallet(orgId: string, userId: string): Promise<WalletBalance | null> {
   const { data, error } = await supabase
