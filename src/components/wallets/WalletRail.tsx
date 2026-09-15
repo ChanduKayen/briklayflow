@@ -8,7 +8,7 @@ import { useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   loadWallets, loadWalletLedger, loadAssignableMembers, ensureWallet, issueFloat, returnCash, removeWallet,
-  type WalletBalance, type WalletLedgerLine,
+  notifyWalletRecharge, type WalletBalance, type WalletLedgerLine,
 } from '../../lib/walletApi';
 
 const inr = (n: number) => Math.round(Math.abs(Number(n) || 0)).toLocaleString('en-IN');
@@ -182,6 +182,7 @@ function GiveTile({ members, existing, orgId, forming, setForming, onGiven }: {
     try {
       const w = await ensureWallet({ orgId, holderUserId: m.userId, holderName: m.name });
       await issueFloat({ orgId, walletId: w.walletId, amount: v, date: new Date().toISOString().slice(0, 10), mode: 'Cash', note: 'Wallet opened' });
+      void notifyWalletRecharge({ orgId, wallet: { walletId: w.walletId, holderName: m.name, holderUserId: m.userId, holderPhone: w.holderPhone }, amount: v, newBalance: v });
       setDone({ name: m.name, v });
       window.setTimeout(() => { setForming(false); setDone(null); setPick(''); setAmt(''); onGiven(w.walletId, `${m.name}'s wallet is open with ₹${inr(v)} — their site spends now draw from it`); }, 1500);
     } catch (e: any) { setErr(e?.message || 'Could not give cash — please try again'); setBusy(false); }
@@ -247,6 +248,7 @@ function Peek({ wallet, orgId, canManage, onClose, onChanged }: {
     const v = giveVal; setBusy(true);
     try {
       await issueFloat({ orgId, walletId: wallet.walletId, amount: v, date: new Date().toISOString().slice(0, 10), mode: 'Cash', note: first ? 'Wallet opened' : 'Top-up' });
+      void notifyWalletRecharge({ orgId, wallet: { walletId: wallet.walletId, holderName: wallet.holderName, holderUserId: wallet.holderUserId }, amount: v, newBalance: wallet.balance + v });
       setGive(''); setBusy(false);
       setPulse(true); window.setTimeout(() => setPulse(false), 900);
       flashMsg(`₹${inr(v)} added to ${wallet.holderName}'s wallet. Whatever they spend on site now draws from this balance.`);

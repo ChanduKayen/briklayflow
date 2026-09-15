@@ -67,6 +67,7 @@ const RfqCompare = lazy(() => import('./pages/RfqCompare'));
 const Ledger = lazy(loadLedger);
 const NewTransaction = lazy(() => import('./pages/NewTransaction'));
 const ImportTransactions = lazy(() => import('./pages/ImportTransactions'));
+const MyWallet = lazy(() => import('./pages/MyWallet'));
 const Insights = lazy(() => import('./pages/Insights'));
 const Profile = lazy(() => import('./pages/Profile'));
 const FollowUpRules = lazy(() => import('./pages/FollowUpRules'));
@@ -562,6 +563,9 @@ function App() {
           <Route path="/ledger/new" element={<NewTransaction session={session} />} />
           <Route path="/ledger/import" element={<ImportTransactions session={session} />} />
           <Route path="/ledger/:txnId" element={<TransactionDetail session={session} />} />
+          {/* A wallet holder's own view of their site-cash wallet — open to ANY role (the wallet_recharge
+              WhatsApp "My Wallet" button lands here). Scoped to the signed-in user by loadMyWallet. */}
+          <Route path="/mywallet" element={<MyWallet session={session} />} />
           <Route path="/invoices" element={<Invoices />} />
           <Route path="/invoices/new" element={<NewInvoice session={session} />} />
           <Route path="/invoices/:invoiceId" element={<InvoiceDetail session={session} />} />

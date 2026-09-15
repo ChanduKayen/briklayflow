@@ -150,6 +150,23 @@ export const TEMPLATES = {
     buttonUrlParams: [{ index: 0, name: "token_path" }],
   },
 
+  // Wallet recharge — the holder is told their site-cash wallet was funded (out-of-window → template).
+  // Meta template `wallet_recharge` (English). STATIC text header "Wallet recharge successful" (no
+  // header component to send) + 3 body vars + a STATIC "My Wallet" URL button → briklay.com/mywallet.
+  // Approved body:
+  //   "Hi {{1}}, Briklay has sent *₹{{2}}* to your bank account. This is your site wallet money.
+  //    Every expense you report on WhatsApp will be deducted from it. *₹{{3}}* is your current balance now."
+  //   {{1}} = holder's first name · {{2}} = amount just added · {{3}} = current wallet balance.
+  // ⚠ Values carry NO "₹" (the template supplies it) and NO newlines. `language` assumed "en" — if the
+  // template's chip reads "English (US)", change to "en_US" (a mismatch → #132001).
+  wallet_recharge: {
+    name: "wallet_recharge",
+    language: "en",
+    header: { kind: "none" },
+    bodyParams: ["name", "amount", "balance"],
+    // static button → no buttonUrlParams
+  },
+
   // Team invite — sent to a cold number, so it's a template. Approved Meta template
   // `account_creation_confirmation_3` (English US). Body:
   //   "Hi {{1}}, {{2}} invited you to Briklay App. Tap below to accept the invite and get set up…"

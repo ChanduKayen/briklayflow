@@ -126,6 +126,41 @@ export async function removeWallet(walletId: string): Promise<'deleted' | 'deact
   return 'deleted';
 }
 
+/** Resolve a wallet holder's WhatsApp number: the wallet's own holder_phone, else their registered
+ *  WhatsApp number (wa_registered_numbers). Returns the canonical international string, or null. */
+async function resolveHolderPhone(orgId: string, wallet: { holderUserId?: string | null; holderPhone?: string | null }): Promise<string | null> {
+  if (wallet.holderPhone) return wallet.holderPhone;
+  if (wallet.holderUserId) {
+    const { data } = await supabase
+      .from('wa_registered_numbers').select('phone_number')
+      .eq('org_id', orgId).eq('user_id', wallet.holderUserId).eq('is_active', true).maybeSingle();
+    if (data?.phone_number) return data.phone_number as string;
+  }
+  return null;
+}
+
+/** Tell the holder over WhatsApp that their site-cash wallet was funded (the `wallet_recharge` template).
+ *  Fire-and-forget: never blocks or fails the give — a missing number or an unapproved template just
+ *  means no message goes out. Values carry no ₹ and no commas-in-a-way-Meta-rejects (plain grouped ok). */
+export async function notifyWalletRecharge(input: {
+  orgId: string; wallet: { walletId: string; holderName: string; holderUserId?: string | null; holderPhone?: string | null };
+  amount: number; newBalance: number;
+}): Promise<{ sent: boolean; reason?: string }> {
+  try {
+    const to = await resolveHolderPhone(input.orgId, input.wallet);
+    if (!to) return { sent: false, reason: 'no phone' };
+    const grp = (n: number) => Math.round(Math.abs(n)).toLocaleString('en-IN');
+    const { error } = await supabase.functions.invoke('send-template', {
+      body: {
+        templateKey: 'wallet_recharge', to,
+        params: { name: input.wallet.holderName.split(' ')[0] || input.wallet.holderName, amount: grp(input.amount), balance: grp(input.newBalance) },
+      },
+    });
+    if (error) throw error;
+    return { sent: true };
+  } catch (e) { console.warn('[wallet] recharge notify failed', e); return { sent: false, reason: String((e as any)?.message ?? e) }; }
+}
+
 export interface AssignableMember { userId: string; name: string; role: string }
 /** Active org members who could hold a wallet (name from user_profiles, two-step to dodge the
  *  org_id-ambiguous embed — same pattern as Day Book's team loader). */
