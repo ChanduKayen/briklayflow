@@ -92,7 +92,7 @@ export default function WalletRail({ orgId, canManage }: { orgId: string; canMan
             onClick={(e) => { if ((e.target as HTMLElement).closest('.give')) return; setOpen(o => !o); }}
             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpen(o => !o); } }}>
             <div className="total">
-              <div className="fig mono" ref={totRef}><span className="r">₹</span>{inr(total)}</div>
+              <div className="fig mono" ref={totRef}>{total < 0 ? '−' : ''}<span className="r">₹</span>{inr(total)}</div>
               <div className="cap">{live.length ? `held in ${live.length} wallet${live.length > 1 ? 's' : ''}` : 'no cash out'}</div>
             </div>
             <div className="meter">
@@ -105,7 +105,7 @@ export default function WalletRail({ orgId, canManage }: { orgId: string; canMan
               <div className="legend">
                 {live.slice(0, 4).map(w => (
                   <span key={w.walletId} onMouseEnter={() => setLit(w.walletId)} onMouseLeave={() => setLit(null)} style={{ color: lit === w.walletId ? '#F2E9DC' : undefined }}>
-                    <i className="pip" style={{ background: w.tone.tone }} /><b>{w.holderName.split(' ')[0]}</b> <i>₹{inr(w.balance)}</i>
+                    <i className="pip" style={{ background: w.tone.tone }} /><b>{w.holderName.split(' ')[0]}</b> <i>{w.balance < 0 ? '−' : ''}₹{inr(w.balance)}</i>
                   </span>
                 ))}
                 {settledCount > 0 && <span style={{ opacity: .55 }}>{settledCount} settled</span>}
@@ -121,7 +121,7 @@ export default function WalletRail({ orgId, canManage }: { orgId: string; canMan
               {cards.map((w, i) => {
                 const pct = w.totalIn ? Math.round(w.balance / w.totalIn * 100) : 0;
                 return (
-                  <button key={w.walletId} className={`card${w.balance <= 0 ? ' zero' : ''}${freshId === w.walletId ? ' fresh' : ''}${w.isMine ? ' mine' : ''}`}
+                  <button key={w.walletId} className={`card${w.balance < 0 ? ' over' : w.balance === 0 ? ' zero' : ''}${freshId === w.walletId ? ' fresh' : ''}${w.isMine ? ' mine' : ''}`}
                     style={{ ['--i' as any]: i, ['--tone' as any]: w.tone.tone, ['--grad' as any]: w.tone.grad, ['--grad-hi' as any]: w.tone.gradHi, ['--glow' as any]: w.tone.glow }}
                     onMouseDown={(e) => e.preventDefault()}
                     onMouseMove={(e) => {
@@ -138,7 +138,7 @@ export default function WalletRail({ orgId, canManage }: { orgId: string; canMan
                       <div style={{ minWidth: 0 }}><div className="nm">{w.holderName}</div><div className="role">{w.isMine ? 'This is yours' : w.role}</div></div>
                       {w.isMine && <span className="mine-tag">My wallet</span>}
                     </div>
-                    <div className="bal mono"><span className="r">₹</span>{inr(w.balance)}</div>
+                    <div className="bal mono">{w.balance < 0 ? '−' : ''}<span className="r">₹</span>{inr(w.balance)}</div>
                     <div className="burn"><i style={{ ['--w' as any]: pct + '%', background: w.tone.tone }} /></div>
                     <div className="cardfoot">
                       <span className="note">{w.balance < 0 ? 'Spent beyond float' : w.note}</span>
@@ -296,8 +296,10 @@ function Peek({ wallet, orgId, canManage, onClose, onChanged }: {
             <div><div className="nm">{wallet.holderName}</div><div className="role">{wallet.role}</div></div>
             <button className="close" onClick={onClose} aria-label="Close"><svg width="12" height="12" viewBox="0 0 13 13" fill="none"><path d="M1 1l11 11M12 1L1 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg></button>
           </div>
-          <div className={`pbal mono${pulse ? ' pulse' : ''}`}><span className="r">₹</span>{inr(wallet.balance)}</div>
-          <div className="psub">{wallet.balance > 0 ? `in hand · ₹${inr(wallet.totalIn)} given, ₹${inr(Math.max(0, wallet.totalIn - wallet.balance))} spent` : 'wallet settled · nothing in hand'}</div>
+          <div className={`pbal mono${pulse ? ' pulse' : ''}${wallet.balance < 0 ? ' neg' : ''}`}>{wallet.balance < 0 ? '−' : ''}<span className="r">₹</span>{inr(wallet.balance)}</div>
+          <div className="psub">{wallet.balance > 0 ? `in hand · ₹${inr(wallet.totalIn)} given, ₹${inr(Math.max(0, wallet.totalIn - wallet.balance))} spent`
+            : wallet.balance < 0 ? `overdrawn · ₹${inr(wallet.totalIn)} given, ₹${inr(wallet.totalIn - wallet.balance)} spent`
+            : 'wallet settled · nothing in hand'}</div>
           {canManage && (
             <div className="pgive">
               <div className={`moneyfield${busy ? ' busy' : ''}`}>
@@ -420,6 +422,9 @@ const CSS = `
 .rail .card.zero .give-cash:hover{background:#8C8172;border-color:#8C8172;color:#FCF8F1}
 .rail .card.zero{box-shadow:0 1px 0 rgba(255,255,255,.45) inset,0 12px 26px -24px rgba(0,0,0,.85)}
 .rail .card.zero .bal{color:#BDB2A2}.rail .card.zero .nm{color:#6F6558}.rail .card.zero .av{opacity:.62}.rail .card.zero .burn{display:none}
+/* overdrawn — spent beyond the float. The balance reads negative, in red. */
+.rail .card.over .bal{color:#B4402C}.rail .card.over .burn{display:none}
+.rail .card.over .note{color:#B4402C}
 /* the viewer's OWN wallet — a warm terracotta ring + a "My wallet" badge so it reads as theirs */
 .rail .card.mine{outline:1.6px solid rgba(194,101,58,.6);outline-offset:2px}
 .rail .card.mine .av{box-shadow:0 0 0 2px var(--paper),0 0 0 3.5px rgba(194,101,58,.55)}
@@ -486,6 +491,7 @@ const CSS = `
 .wrail-root .close:hover{background:rgba(242,233,220,.1);color:var(--on-dark)}
 .wrail-root .pbal{font-family:"DM Mono",ui-monospace,monospace;font-size:34px;letter-spacing:-.035em;margin:18px 0 4px}
 .wrail-root .pbal .r{color:var(--on-dark-mute);font-size:24px}
+.wrail-root .pbal.neg{color:#E9927E}.wrail-root .pbal.neg .r{color:#C97A66}
 .wrail-root .psub{font-size:12.5px;color:var(--on-dark-mute)}
 .wrail-root .pacts{display:flex;gap:9px;margin-top:18px;align-items:center}
 .wrail-root .pacts .give{display:inline-flex;align-items:center;gap:9px;padding:9px 14px;border-radius:999px;border:1px solid rgba(242,233,220,.2);color:var(--on-dark);font-size:12.5px;background:rgba(242,233,220,.04);transition:.3s}

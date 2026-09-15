@@ -69,10 +69,12 @@ export default function MyWallet({ session }: { session: Session }) {
               <div className="who"><span className="av">{ini(wallet.holderName)}</span>
                 <div><div className="nm">{wallet.holderName}</div><div className="role">Your site-cash wallet</div></div>
               </div>
-              <div className="bal mono"><span className="r">₹</span>{inr(wallet.balance)}</div>
+              <div className={`bal mono${wallet.balance < 0 ? ' neg' : ''}`}>{wallet.balance < 0 ? '−' : ''}<span className="r">₹</span>{inr(wallet.balance)}</div>
               <div className="sub">{wallet.balance > 0
                 ? 'in hand · every expense you report on WhatsApp is deducted from this'
-                : 'settled · nothing in hand right now'}</div>
+                : wallet.balance < 0
+                  ? 'overdrawn · you have spent beyond the cash given — ask your team to top up'
+                  : 'settled · nothing in hand right now'}</div>
               <div className="stats">
                 <div className="stat"><div className="k">Given so far</div><div className="v mono">₹{inr(wallet.totalIn)}</div></div>
                 <div className="stat"><div className="k">Spent</div><div className="v mono">₹{inr(spent)}</div></div>
@@ -123,6 +125,7 @@ const CSS = `
 .mywx .role{font-size:12.5px;color:var(--ink2);margin-top:1px}
 .mywx .bal{font-size:44px;line-height:1;margin:20px 0 4px;color:#1C140E;position:relative}
 .mywx .bal .r{color:var(--ink3);font-size:28px;margin-right:2px}
+.mywx .bal.neg{color:#B4402C}.mywx .bal.neg .r{color:#C9765E}
 .mywx .sub{font-size:12.5px;color:var(--ink2);line-height:1.5;position:relative}
 .mywx .stats{display:flex;gap:10px;margin-top:18px;position:relative}
 .mywx .stat{flex:1;background:#F6F1E8;border:1px solid var(--line);border-radius:12px;padding:11px 13px}
