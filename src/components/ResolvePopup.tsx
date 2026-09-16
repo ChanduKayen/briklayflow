@@ -663,7 +663,9 @@ export function ResolvePopup({ entry, onClose, onUpdated, only }: Props) {
     if (!nm) return null;
     const norm = (s: string) => s.trim().toLowerCase();
     const p = norm(nm);
-    return rpWallets.find(w => norm(w.holderName) === p || norm(w.holderName).split(' ')[0] === p.split(' ')[0]) || null;
+    // EXACT full-name match only — a first-name match refilled "Raju Kojjavarapu"'s wallet for a
+    // payment to "Raju Aradadi". A wallet is one person's cash; only their exact name refills it.
+    return rpWallets.find(w => (w.active ?? true) && norm(w.holderName) === p) || null;
   }, [payeeId, payeeSearch, stakeholders, rpWallets]);
   // If the payee holds a wallet, DEFAULT to a refill (paying them = topping up their site cash); the user
   // can uncheck it. Re-defaults when the payee changes or the wallet match resolves.

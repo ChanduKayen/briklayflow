@@ -564,7 +564,9 @@ export default function ReviewMobile(p: ReviewMobileProps) {
     const norm = (x: string) => (x || '').trim().toLowerCase();
     const nm = norm((d.payeeId ? p.stakeholders.find(x => x.stakeholder_id === d.payeeId)?.name : null) ?? d.payeeName ?? '');
     if (!nm) return null;
-    return wallets.find(w => w.active && (norm(w.holderName) === nm || norm(w.holderName).split(' ')[0] === nm.split(' ')[0])) ?? null;
+    // EXACT full-name match only. A first-name match ("Raju" → "Raju Kojjavarapu") wrongly offered to
+    // refill one Raju's wallet for a payment to a different Raju — a wallet is one person's cash.
+    return wallets.find(w => w.active && norm(w.holderName) === nm) ?? null;
   };
   /** What this entry would do as it stands: a refill, and/or a spend out of the sender's wallet. */
   const walletPlan = (e: RoughEntry, d: Draft) => {

@@ -695,7 +695,9 @@ export default function NewTransaction({ session: _session }: { session: Session
     if (!payeeName) return null;
     const norm = (s: string) => s.trim().toLowerCase();
     const p = norm(payeeName);
-    return allWallets.find((w) => norm(w.holderName) === p || norm(w.holderName).split(' ')[0] === p.split(' ')[0]) || null;
+    // EXACT full-name match only — a first-name match wrongly linked "Raju Aradadi" to "Raju
+    // Kojjavarapu"'s wallet. A wallet is one person's cash, so only their exact name refills it.
+    return allWallets.find((w) => w.active && norm(w.holderName) === p) || null;
   }, [payeeName, allWallets]);
   // If the payee holds a wallet, DEFAULT to a refill (paying them = topping up their wallet); user can undo.
   useEffect(() => { setTopUp(!!payeeWallet); }, [stkId, payeeWallet]);
