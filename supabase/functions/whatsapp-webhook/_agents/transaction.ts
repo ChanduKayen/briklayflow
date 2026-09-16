@@ -157,6 +157,53 @@ export async function recentInboundText(
   return null
 }
 
+// ── Pair an image with its caption into ONE entry ────────────────────────────────────────────────────────
+const entryHasAmount = (ai: any): boolean => ai?.amount != null
+const entryHasPayee  = (ai: any): boolean => !!(ai?.payee_id || ai?.payee_name || ai?.payee_raw)
+
+/** Merge a payment IMAGE's extract with its CAPTION's: amount/payee/proof come from the image; the site and
+ *  note come from the caption (a caption that resolved a real site wins over a vision hallucination). */
+export function mergePaymentAi(imageAi: Record<string, any>, captionAi: Record<string, any>): Record<string, any> {
+  const capHasProject = !!(captionAi.project_id || captionAi.project_name || captionAi.suggested_project?.id || captionAi.project_raw)
+  const proj = capHasProject ? captionAi : imageAi
+  return {
+    ...imageAi,
+    project_id: proj.project_id ?? null,
+    project_name: proj.project_name ?? null,
+    project_matched: proj.project_matched ?? false,
+    project_unmatched: proj.project_unmatched ?? false,
+    suggested_project: proj.suggested_project ?? null,
+    project_raw: proj.project_raw ?? null,
+    description_raw: imageAi.description_raw ?? captionAi.description_raw ?? null,
+  }
+}
+
+/** Find the recent (60s) entry this message PAIRS with — scoped to image↔caption pairs so unrelated messages
+ *  never merge. A complete image pairs with a PURE caption (no amount & no payee, just site/note); a pure
+ *  caption pairs with a complete image entry. Returns the mate's id already oriented as image/caption ai. */
+export async function recentPaymentMate(
+  supabase: any, orgId: string, sender: string,
+  self: { thisComplete: boolean; thisIsImage: boolean; thisPureCaption: boolean; thisAi: Record<string, any> },
+  windowMs = 60_000,
+): Promise<{ id: string; imageAi: Record<string, any>; captionAi: Record<string, any> } | null> {
+  try {
+    const since = new Date(Date.now() - windowMs).toISOString()
+    const { data } = await supabase.from('rough_entries')
+      .select('id, ai_extracted, status, source, created_at')
+      .eq('org_id', orgId).eq('sender_number', sender).gte('created_at', since)
+      .in('status', ['PENDING', 'AWAITING_CONTEXT']).order('created_at', { ascending: false }).limit(6)
+    for (const r of (data ?? []) as { id: string; ai_extracted: any; source: string | null }[]) {
+      const ai = (r.ai_extracted ?? {}) as Record<string, any>
+      const pureCaption = !entryHasAmount(ai) && !entryHasPayee(ai)
+      const complete = entryHasAmount(ai) && entryHasPayee(ai)
+      const isImage = String(r.source ?? '').includes('IMAGE')
+      if (self.thisIsImage && self.thisComplete && pureCaption) return { id: r.id, imageAi: self.thisAi, captionAi: ai }
+      if (self.thisPureCaption && complete && isImage) return { id: r.id, imageAi: ai, captionAi: self.thisAi }
+    }
+  } catch (e) { console.error('[txn] recentPaymentMate failed (degraded):', (e as Error)?.message ?? e) }
+  return null
+}
+
 /** A supervisor often names the SITE right beside a payment photo — a separate "<site> site" text. SiteOps
  *  resolves that text to a project but, finding no work update, parks it (leaving the convo lingering with
  *  its project_id). The payment then lands site-less. Read that project off the lingering SiteOps convo so
@@ -368,6 +415,28 @@ function summaryOf(plan: Plan): string {
 async function applyPlan(ctx: TxnCtx, plan: Plan, text: string, opts: { prefix?: string; entryId?: string | null; keyWamid: string; entryIndex: number }): Promise<void> {
   const { supabase, from, orgId, wamid, lang } = ctx
   const incomplete = plan.amountMissing || plan.payeeMissing
+
+  // PAIR an image + its caption into ONE entry (image supplies amount/payee/proof; caption supplies site +
+  // note). Within 60s a sender is assembling one payment — merge the complement instead of minting a second.
+  if (!opts.entryId) {
+    const mate = await recentPaymentMate(supabase, orgId, from, {
+      thisComplete: !incomplete, thisIsImage: !!ctx.image,
+      thisPureCaption: plan.amountMissing && plan.payeeMissing, thisAi: plan.ai,
+    })
+    if (mate) {
+      const merged = mergePaymentAi(mate.imageAi, mate.captionAi)
+      const done = entryHasAmount(merged) && entryHasPayee(merged)
+      const mStatus = done ? (merged.payee_matched ? 'PENDING' : 'AWAITING_CONTEXT') : 'AWAITING_CONTEXT'
+      const mMsg = applyPrefix(done
+        ? M.mComplete(lang, { payee: (merged.payee_name as string) ?? null, payeeMatched: !!merged.payee_matched, suggestedPayee: (merged.suggested_payee as { name?: string } | null)?.name ?? null, amount: (merged.amount as number) ?? null, projectName: (merged.project_name as string) ?? null, projectRaw: (merged.project_raw as string) ?? null, note: (merged.description_raw as string) ?? null })
+        : M.mAbandoned(lang, { payee: (merged.payee_name as string) ?? null, amount: (merged.amount as number) ?? null, missing: !entryHasAmount(merged) && !entryHasPayee(merged) ? 'amount and payee' : !entryHasAmount(merged) ? 'amount' : 'payee' }), opts.prefix)
+      await updateV2(ctx, mate.id, merged, mStatus, mMsg)
+      if (ctx.image) await attachProofImage(ctx, mate.id)           // the cheque photo → proof on the merged entry
+      await closeConversation(supabase, { orgId, sender: from, stagedEntryId: mate.id, lastMessageId: wamid, lastActionSummary: `Merged ${merged.payee_name ?? ''} ${merged.amount ?? ''}`.trim() })
+      console.log(`[txn] paired image+caption → merged into entry ${mate.id} (site=${merged.project_name ?? '-'})`)
+      return
+    }
+  }
 
   // Missing an essential -> "Saved … <gap> not set. Add anytime." + Day Book CTA (never
   // a question). Complete -> the usual confirmation.

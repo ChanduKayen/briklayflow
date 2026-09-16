@@ -2,14 +2,14 @@
 // its own. These pin the two DB reads that make that work: the payment pulls the recent text; a lone SiteOps
 // miss is suppressed when a recent image owns the caption.
 import { suite, test, expect } from './harness'
-import { recentInboundText } from '../_agents/transaction.ts'
+import { recentInboundText, mergePaymentAi, recentPaymentMate } from '../_agents/transaction.ts'
 import { recentInboundImage, enrichRecentPaymentProject } from '../_agents/siteops.ts'
 
-// A tiny chainable fake — select/eq/gte/order all no-op; the awaited chain resolves to { data: rows }.
+// A tiny chainable fake — select/eq/gte/order/in all no-op; the awaited chain resolves to { data: rows }.
 const fakeSb = (rows: unknown[]) => ({
   from() {
     const q: any = {
-      select: () => q, eq: () => q, gte: () => q, order: () => q,
+      select: () => q, eq: () => q, gte: () => q, order: () => q, in: () => q,
       limit: () => Promise.resolve({ data: rows }),
     }
     return q
@@ -92,5 +92,40 @@ suite('caption claim — enrichRecentPaymentProject (site pushed onto the recent
     const captured: any[] = []
     const rows = [{ id: 're1', ai_extracted: {}, source: 'WHATSAPP_TEXT', status: 'PENDING' }]
     expect(await enrichRecentPaymentProject(enrichFake(rows, captured), 'org', '91999', PROJ)).toBe(false)
+  })
+})
+
+suite('caption claim — merge an image + its caption into ONE entry', () => {
+  const imageAi = { amount: 87320, payee_name: 'Nalam Palliah', payee_matched: true, project_id: null, description_raw: null }
+  const captionAi = { amount: null, payee_name: null, project_id: 'PRJ-SOUND', project_name: 'Dr Soundharya Residence', project_matched: true, description_raw: 'Part payment for wood purchase' }
+
+  test('mergePaymentAi: amount/payee from image, site/note from caption', () => {
+    const m = mergePaymentAi(imageAi, captionAi)
+    expect(m.amount).toBe(87320)
+    expect(m.payee_name).toBe('Nalam Palliah')
+    expect(m.project_id).toBe('PRJ-SOUND')
+    expect(m.project_name).toBe('Dr Soundharya Residence')
+    expect(m.description_raw).toBe('Part payment for wood purchase')
+  })
+
+  test('a complete image finds a recent PURE caption to merge', async () => {
+    const rows = [{ id: 're-cap', ai_extracted: captionAi, status: 'AWAITING_CONTEXT', source: 'WHATSAPP_TEXT' }]
+    const mate = await recentPaymentMate(fakeSb(rows), 'org', '91999', { thisComplete: true, thisIsImage: true, thisPureCaption: false, thisAi: imageAi })
+    expect(mate?.id).toBe('re-cap')
+    expect(mate?.imageAi.amount).toBe(87320)
+    expect(mate?.captionAi.project_id).toBe('PRJ-SOUND')
+  })
+
+  test('a pure caption finds a recent complete IMAGE entry to merge', async () => {
+    const rows = [{ id: 're-img', ai_extracted: imageAi, status: 'PENDING', source: 'WHATSAPP_IMAGE' }]
+    const mate = await recentPaymentMate(fakeSb(rows), 'org', '91999', { thisComplete: false, thisIsImage: false, thisPureCaption: true, thisAi: captionAi })
+    expect(mate?.id).toBe('re-img')
+    expect(mate?.imageAi.amount).toBe(87320)
+  })
+
+  test('no complement → no merge (two complete payments are not paired)', async () => {
+    const rows = [{ id: 're-other', ai_extracted: { amount: 500, payee_name: 'X' }, status: 'PENDING', source: 'WHATSAPP_IMAGE' }]
+    const mate = await recentPaymentMate(fakeSb(rows), 'org', '91999', { thisComplete: true, thisIsImage: true, thisPureCaption: false, thisAi: imageAi })
+    expect(mate).toBe(null)
   })
 })
