@@ -429,13 +429,17 @@ export async function runTransaction(
   // recent text (sent just before/after the photo) — so "cheque + 'Chakradhar site'" is ONE thing, content
   // no matter. Fed to the extractor as the caption, and used to GROUND the project below.
   const attachedCaption = (ctx.image?.caption ?? '').trim()
-  const separateCaption = ctx.image && !attachedCaption
-    ? await recentInboundText(supabase, from, opts.keyWamid ?? null)
-    : null
-  const captionForImage = attachedCaption || separateCaption || ''
+  // A caption sent BEFORE the photo is already logged — feed it to the vision extractor for content.
+  let claimedCaption = attachedCaption || (ctx.image ? (await recentInboundText(supabase, from, opts.keyWamid ?? null)) ?? '' : '')
   const ext = opts.preExtract ?? (ctx.image
-    ? await extractTransactionFromImage(ctx.image.base64, ctx.image.mime, captionForImage, projectNames, stakeholders.map((s) => s.name))
+    ? await extractTransactionFromImage(ctx.image.base64, ctx.image.mime, claimedCaption, projectNames, stakeholders.map((s) => s.name))
     : await extractTransaction(text, projectNames))
+
+  // A caption typed just AFTER the photo arrives DURING the slow vision call, so it wasn't logged when we
+  // first looked. Re-check now (post-vision) and adopt it as the site if the cheque named none — this is the
+  // usual order (photo, then "<site> site") and is why the site was being lost.
+  if (ctx.image && !claimedCaption) claimedCaption = (await recentInboundText(supabase, from, opts.keyWamid ?? null)) ?? ''
+  if (ctx.image && !ext.project && claimedCaption) ext.project = claimedCaption
 
   // Lingering reference resolution stays -- a silent READ, never a question.
   if (!ext.payee && ext.ref && opts.lingering) {
@@ -458,7 +462,7 @@ export async function runTransaction(
 
   // Ground the project on the message OR the claimed caption, so a site the image pulled from a separate
   // "<site> site" text isn't dropped by the grounding guard for being absent from the (empty) image text.
-  const groundText = (text && text.trim()) ? text : (captionForImage || text)
+  const groundText = (text && text.trim()) ? text : (claimedCaption || text)
   const plan = buildPlan(ext, stakeholders, projects, from, groundText, lingeringProjectHint(opts.lingering ?? null, projects))
 
   // TRACE 4/4 -- the deterministic PLAN: matched payee, gate, what gets committed.
