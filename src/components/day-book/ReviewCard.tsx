@@ -139,7 +139,7 @@ export function ReviewCard({
    */
   // The AI's ids are guesses, not foreign keys — resolveEntry checks them against the org's real
   // rows and is shared with the phone's review deck so the two can never disagree.
-  const { payeeId, payeeName, projectId, projectName, projectRaw, suggestedPayee, suggestedProject, description, amount: amountNum, resolved } =
+  const { payeeId, payeeName, projectId, projectName, projectRaw, suggestedProject, description, amount: amountNum, resolved } =
     resolveEntry(entry, stakeholders, projects);
   const gaps = archived ? [] : gapsOf(resolved);
   const ready = !archived && isResolved(resolved);
@@ -519,8 +519,9 @@ export function ReviewCard({
           {/* to whom */}
           <div className="mt-2.5" style={{ ...font, fontSize: 15, lineHeight: 1.45, overflowWrap: 'break-word', color: V.ink }}>
             <span style={{ color: V.faint, fontSize: 12, marginRight: 5 }}>to</span>
+            {/* Show the party ONLY on a high-confidence auto-match (payeeId, ≥0.95). Below that we show
+                what was actually typed/said — never a fuzzy suggestion presented as the match. */}
             {payeeId ? <b style={{ fontWeight: 600 }}>{payeeName}</b>
-              : suggestedPayee ? <><b style={{ fontWeight: 600 }}>{suggestedPayee.name}</b> {pill('confirm?')}</>
               : payeeName ? <><b style={{ fontWeight: 600 }}>{payeeName}</b> {pill('not in your contacts')}</>
               : blank('who was paid?')}
           </div>

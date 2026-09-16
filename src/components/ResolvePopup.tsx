@@ -533,16 +533,13 @@ export function ResolvePopup({ entry, onClose, onUpdated, only }: Props) {
     ? String((ai as any).category_code).toUpperCase() : '';
   const initGenName = initGenHead ? (getCostCode(initGenHead)?.item.name || '') : '';
 
-  // A confirm-band WhatsApp match: the webhook stashes the matched stakeholder in `suggested_payee` (NOT
-  // payee_id) when the score is 0.6–0.9, yet the confirmation message shows that name. Surface it here as
-  // a LOW-confidence match to confirm — otherwise the review reads "unmatched" though a name was matched.
-  const sugPayee = (!ai.payee_id && (ai as any).suggested_payee?.id)
-    ? (ai as any).suggested_payee as { id: string; name: string } : null;
-
   // ── Field state ────────────────────────────────────────────────────────────
-  const [payeeId, setPayeeId] = useState(ai.payee_id || sugPayee?.id || '');
-  const [payeeName, setPayeeName] = useState(initGenName || ai.payee_name || sugPayee?.name || '');
-  const [payeeSearch, setPayeeSearch] = useState(initGenName || ai.payee_name || sugPayee?.name || ai.payee_raw || '');
+  // NO confirm-band pre-selection. The payee is pre-set ONLY on a high-confidence auto-match (the webhook
+  // writes ai.payee_id). Anything softer shows the payee FIELD seeded with what was actually said
+  // (payee_name / payee_raw) and lets the owner pick — never an "AI matched X → Y, confirm?" step.
+  const [payeeId, setPayeeId] = useState(ai.payee_id || '');
+  const [payeeName, setPayeeName] = useState(initGenName || ai.payee_name || '');
+  const [payeeSearch, setPayeeSearch] = useState(initGenName || ai.payee_name || ai.payee_raw || '');
   const [showPayeeDrop, setShowPayeeDrop] = useState(false);
   // When genHead is set this entry IS a general expense (payeeId stays empty); genName
   // is the head's display name shown in the "who" slot.
@@ -550,14 +547,13 @@ export function ResolvePopup({ entry, onClose, onUpdated, only }: Props) {
   const [genName, setGenName] = useState(initGenName);
   const isGeneral = !!genHead;
   // Payee resolution state machine (lifted here so the smart-CTA gap logic can read it):
-  // A = confirmed match · B = matched LOW-confidence, needs confirm · C = searching/unmatched
-  // · confirmed = user explicitly chose. Payee is "resolved" only in A or confirmed. A general
-  // expense counts as confirmed the moment its head is chosen.
+  // A = confirmed auto-match · C = searching/unmatched (the field, showing what was said) · confirmed =
+  // the owner explicitly chose. Payee is "resolved" only in A or confirmed. A general expense counts as
+  // confirmed the moment its head is chosen. (The old LOW-confidence "confirm match" band is gone — a
+  // soft match is just an un-set field seeded with the typed name.)
   const [payeeState, setPayeeState] = useState<PayeeState>(() => {
     if (initGenHead) return 'confirmed';
-    if (!ai.payee_id) return sugPayee ? 'B' : 'C';   // a near-match → confirm it, not "unmatched"
-    if (ai.payee_matched === true && ai.payee_confidence === 'LOW') return 'B';
-    return 'A';
+    return ai.payee_id ? 'A' : 'C';
   });
   const [amount, setAmount] = useState<number | ''>(ai.amount ?? '');
   const [description, setDescription] = useState(ai.description || ai.description_raw || '');
@@ -739,17 +735,6 @@ export function ResolvePopup({ entry, onClose, onUpdated, only }: Props) {
     }
   }, [stakeholders, ai.payee_id, ai.payee_name, ai.payee_raw]);
 
-  // Validate a seeded suggestion the same way — a suggested_payee id that names no live contact is a
-  // heard name in a key's clothes; clear it to a question rather than let it FK-crash on save.
-  const sugChecked = useRef(false);
-  useEffect(() => {
-    if (sugChecked.current || !stakeholders.length || ai.payee_id || !sugPayee) return;
-    sugChecked.current = true;
-    if (!stakeholders.some((s) => s.stakeholder_id === sugPayee.id)) {
-      setPayeeId(''); setPayeeState('C'); setPayeeSearch(ai.payee_name || ai.payee_raw || sugPayee.name || '');
-    }
-  }, [stakeholders, sugPayee, ai.payee_id, ai.payee_name, ai.payee_raw]);
-
   const projectChecked = useRef(false);
   // The check can only run once the real list has ARRIVED, so it is an effect by nature — there is no
   // render at which we could have known this. Guarded by a ref: it fires once, on the first real list.
@@ -799,10 +784,15 @@ export function ResolvePopup({ entry, onClose, onUpdated, only }: Props) {
   // dropped entirely in that case.
   const topUpNow = topUp && !!payeeWallet;
   const projectOk = topUpNow || !!projectId;
-  const mandatoryFilled = (isGeneral || !!payeeId) && !!amount && Number(amount) > 0 && projectOk;
+  // A payee counts only once it is CONFIRMED / selected. An AI suggestion (confirm-band B) PRE-SETS
+  // payeeId to the guess so it can be shown — but that is a proposal, not a choice. Gating on this
+  // (not merely !!payeeId) stops the unconfirmed AI guess from being filed: the owner must confirm it
+  // or pick the right party first, which is the field's regular tested behaviour.
+  const payeePosted = isGeneral || (!!payeeId && (payeeState === 'A' || payeeState === 'confirmed'));
+  const mandatoryFilled = payeePosted && !!amount && Number(amount) > 0 && projectOk;
   // Filing is allowed either with a single project OR a valid split across sites. A general
   // expense needs no party — its head stands in for the payee.
-  const canFile = (isGeneral || !!payeeId) && splitTotal > 0 && (splitMode ? splitValid : projectOk);
+  const canFile = payeePosted && splitTotal > 0 && (splitMode ? splitValid : projectOk);
   const missingPayee = !payeeId && !isGeneral;
   const missingAmount = !amount || Number(amount) <= 0;
   const missingDescription = !description.trim();
@@ -825,7 +815,7 @@ export function ResolvePopup({ entry, onClose, onUpdated, only }: Props) {
 
   // A field counts as RESOLVED, not merely filled — payee is resolved only once confirmed.
   const amountResolved = amount !== '' && Number(amount) > 0;
-  const payeeResolved = isGeneral || (!!payeeId && (payeeState === 'A' || payeeState === 'confirmed'));
+  const payeeResolved = payeePosted;
   const descriptionResolved = !!description.trim();
   // In split mode "project" is resolved once the split is valid (sites chosen, amounts sum to total).
   const projectResolved = splitMode ? splitValid : projectOk;
@@ -841,7 +831,7 @@ export function ResolvePopup({ entry, onClose, onUpdated, only }: Props) {
   // names it; once none remain it becomes "File it".
   const nextGap: { label: string; key: GapKey } | null = (() => {
     if (!amountResolved) return { label: 'Enter the amount', key: 'amount' };
-    if (!payeeResolved) return { label: payeeState === 'B' ? 'Confirm the payee' : 'Add the payee', key: 'payee' };
+    if (!payeeResolved) return { label: 'Add the payee', key: 'payee' };
     if (!projectResolved) return { label: splitMode ? 'Finish the split' : 'Choose a project', key: 'project' };
     return null;
   })();
@@ -1456,7 +1446,7 @@ function PopupContents({
         {/* 2. Payee */}
         {show('payee') && (
         <div id="resolve-payee-field" style={{ scrollMarginTop: 24 }}>
-          <FieldQuestion text="Who are you paying?" missing={missingPayee && payeeState !== 'B'} />
+          <FieldQuestion text="Who are you paying?" missing={missingPayee} />
 
           {/* STATE A / confirmed — sage ✓ */}
           {(payeeState === 'A' || payeeState === 'confirmed') && (
@@ -1486,49 +1476,6 @@ function PopupContents({
                 className="text-[11px] hover:underline shrink-0 ml-2" style={{ color: VOICE.accentDeep }}>
                 change
               </button>
-            </div>
-          )}
-
-          {/* STATE B — confirm match */}
-          {payeeState === 'B' && (
-            <div className="p-3 rounded-xl" style={{ background: VOICE.askWash, border: `1px solid ${VOICE.outLine}` }}>
-              <p className="text-[11px] font-semibold flex items-center gap-1 mb-2" style={{ color: VOICE.accentDeep }}>
-                <span className="text-[13px]">⚠</span> Confirm match
-              </p>
-              <p className="text-[12px] mb-2.5" style={{ color: VOICE.userSoft }}>
-                AI matched{' '}
-                <span className="font-semibold" style={{ color: VOICE.user }}>"{ai.payee_raw}"</span>
-                {' → '}
-                <span className="font-semibold" style={{ color: VOICE.user }}>{payeeName}</span>
-                {(() => {
-                  const s = stakeholders.find((x: any) => x.stakeholder_id === payeeId);
-                  return s?.category
-                    ? <span style={{ color: VOICE.systemFaint }}> · {s.category}</span>
-                    : null;
-                })()}
-              </p>
-              <div className="flex gap-2">
-                <button type="button"
-                  onClick={() => { setPayeeState('A'); advanceAfter('payee'); }}
-                  className="flex-1 py-1.5 rounded-lg text-[12px] font-semibold transition-colors"
-                  style={{ background: VOICE.confirm, color: '#fff' }}
-                >
-                  ✓ Yes, that's right
-                </button>
-                <button type="button"
-                  onClick={() => {
-                    setPayeeId('');
-                    setPayeeName('');
-                    setPayeeSearch(ai.payee_raw || '');
-                    setPayeeState('C');
-                    setTimeout(() => setShowPayeeDrop(true), 50);
-                  }}
-                  className="flex-1 py-1.5 rounded-lg text-[12px] font-semibold transition-colors"
-                  style={{ border: `1px solid ${VOICE.line}`, color: VOICE.system }}
-                >
-                  ✗ No
-                </button>
-              </div>
             </div>
           )}
 
