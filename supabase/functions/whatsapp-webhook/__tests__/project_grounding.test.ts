@@ -9,7 +9,7 @@
 // it arises — cannot surface, and that the raw mention the user DID say still resolves.
 
 import { suite, test, expect } from './harness'
-import { buildPlan } from '../_agents/transaction.ts'
+import { buildPlan, lingeringProjectHint } from '../_agents/transaction.ts'
 import type { TxnExtract } from '../_extract.ts'
 
 const FROM = '919900000000'
@@ -56,4 +56,31 @@ suite('project grounding — no invented project name reaches the Day Book', () 
     expect(plan.projectRaw).toBe(null)                  // "meghana"/"towers" absent -> dropped
     expect(plan.projectName).toBe(null)
   })
+})
+
+// A site named beside a payment photo ("Chakradhar site" + the cheque) parks in SiteOps and leaves the
+// convo lingering with its project_id. The payment must OFFER that site rather than land site-less.
+suite('project from a lingering SiteOps site-name text (photo + a bare "<site> site")', () => {
+  const PROJECTS = [{ project_id: 'PRJ-CHAKRADHAR-S', name: "Chakradhar's Residence" }];
+  const lingering = { slots_so_far: { project_id: 'PRJ-CHAKRADHAR-S' } } as any;
+
+  test('lingeringProjectHint reads the settled project off the convo', () => {
+    expect(lingeringProjectHint(lingering, PROJECTS)).toEqual({ id: 'PRJ-CHAKRADHAR-S', name: "Chakradhar's Residence" });
+    expect(lingeringProjectHint(null, PROJECTS)).toBe(null);
+    expect(lingeringProjectHint({ slots_so_far: {} } as any, PROJECTS)).toBe(null);
+  });
+
+  test('a site-less payment offers the lingering site as a suggestion', () => {
+    const hint = lingeringProjectHint(lingering, PROJECTS);
+    const plan = buildPlan(extOf({ payee: 'Sri Phanibhushana Steels', project: null }), NO_STAKE, PROJECTS, FROM, 'cheque ₹3,00,000', hint);
+    expect(plan.projectName).toBe(null);                       // not silently auto-linked
+    expect((plan.ai.suggested_project as { name: string } | null)?.name).toBe("Chakradhar's Residence");
+  });
+
+  test('a project named in THIS message still wins over the lingering hint', () => {
+    const hint = lingeringProjectHint(lingering, PROJECTS);
+    const other = [{ project_id: 'P2', name: 'The Pride' }, ...PROJECTS];
+    const plan = buildPlan(extOf({ project: 'Pride' }), NO_STAKE, other, FROM, 'paid at Pride site', hint);
+    expect(plan.projectName).toBe('The Pride');
+  });
 })

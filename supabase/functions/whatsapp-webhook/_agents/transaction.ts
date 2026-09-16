@@ -133,6 +133,23 @@ async function resolveRef(supabase: any, lingering: ConvoRow | null): Promise<{ 
   return { payee: ex.payee_name ?? ex.payee_raw ?? undefined, project: ex.project_name ?? undefined }
 }
 
+/** A supervisor often names the SITE right beside a payment photo — a separate "<site> site" text. SiteOps
+ *  resolves that text to a project but, finding no work update, parks it (leaving the convo lingering with
+ *  its project_id). The payment then lands site-less. Read that project off the lingering SiteOps convo so
+ *  the payment can OFFER it. Works in either order — the caption's convo lingers whether it arrived just
+ *  before or just after the photo (2-min window). Only the settled project_id is trusted; never a guess. */
+export function lingeringProjectHint(
+  lingering: ConvoRow | null,
+  projects: { project_id: string; name: string }[],
+): { id: string; name: string } | null {
+  if (!lingering) return null
+  const slots = (lingering.slots_so_far ?? {}) as Record<string, unknown>
+  const pid = typeof slots.project_id === 'string' ? slots.project_id : null
+  if (!pid) return null
+  const p = projects.find((x) => x.project_id === pid)
+  return p ? { id: p.project_id, name: p.name } : null
+}
+
 // ── atomic staging / update (entry + rendered reply [+ ✓ reaction] in one tx) ─────
 // The confirmation AND the clean-entry reaction are enqueued INSIDE this RPC's
 // transaction, alongside the rough_entries insert: they can only send if the entry
@@ -242,6 +259,7 @@ export function buildPlan(
   projects: { project_id: string; name: string }[],
   from: string,
   text: string,
+  recentProject: { id: string; name: string } | null = null,
 ): Plan {
   const payeeM = matchPayee(ext.payee, stakeholders)
   const payeeAuto = payeeM.band === 'auto'   // confident AND unambiguous (a same-name tie is demoted in match())
@@ -262,6 +280,11 @@ export function buildPlan(
   }
   // Trust a project only if it auto-matched a REAL one, or its words are grounded in the message.
   // An ungrounded, unmatched name is a model fabrication (few-shot leak) -> it never surfaces.
+  // No project in THIS message, but the supervisor named a site right beside the photo (a separate
+  // "<site> site" text SiteOps parked). Offer that site as a suggestion so the payment isn't left site-less.
+  if (!projectId && !projectSug && recentProject) {
+    projectSug = { id: recentProject.id, name: recentProject.name, score: 0.9 }
+  }
   const safeProject = (projectId != null || projGrounded) ? ext.project : null
   const projectRaw = safeProject && !projectId ? safeProject : null
 
@@ -390,7 +413,7 @@ export async function runTransaction(
     payee: ext.payee, project: ext.project, direction: ext.direction, mode: ext.mode, note: ext.note,
   }))
 
-  const plan = buildPlan(ext, stakeholders, projects, from, text)
+  const plan = buildPlan(ext, stakeholders, projects, from, text, lingeringProjectHint(opts.lingering ?? null, projects))
 
   // TRACE 4/4 -- the deterministic PLAN: matched payee, gate, what gets committed.
   console.log('[trace] plan(txn)', JSON.stringify({
