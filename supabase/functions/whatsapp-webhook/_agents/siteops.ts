@@ -1244,6 +1244,25 @@ async function askResolutionQuestion(ctx: SiteopsCtx, t: Extract<Terminal, { kin
   return false
 }
 
+/** Did this sender send an IMAGE within the window? A bare text that lands beside a photo is that photo's
+ *  CAPTION — the image (payment or site) owns it — so a lone SiteOps miss on that text must not be sent as
+ *  its own "couldn't tell which work" reply. Best-effort; a failure just means we don't suppress. */
+export async function recentInboundImage(supabase: any, phone: string, excludeWamid: string | null, windowMs = 60_000): Promise<boolean> {
+  try {
+    const since = new Date(Date.now() - windowMs).toISOString()
+    const { data } = await supabase.from('wa_message_log')
+      .select('direction, message_type, wa_message_id, created_at')
+      .eq('phone_number', phone).gte('created_at', since)
+      .order('created_at', { ascending: false }).limit(8)
+    for (const r of (data ?? []) as { direction: string; message_type: string | null; wa_message_id: string | null }[]) {
+      if (r.direction === 'OUT') continue
+      if (excludeWamid && r.wa_message_id === excludeWamid) continue
+      if (r.message_type === 'image') return true
+    }
+  } catch (e) { console.error('[siteops] recentInboundImage failed (degraded):', (e as Error)?.message ?? e) }
+  return false
+}
+
 export async function applyTerminals(ctx: SiteopsCtx, terminals: Terminal[], ex: ExecCtx): Promise<TerminalOutcome[]> {
   const meta = { org_id: ctx.orgId, wamid: ctx.wamid }
   ex.vmMemo ??= new Map()   // scoped to THIS call (see materializeProjectTasks)
@@ -1496,6 +1515,13 @@ export async function applyTerminals(ctx: SiteopsCtx, terminals: Terminal[], ex:
     // lead with what we held (the saved rest), not the miss. composeReadback would put the lone didn't-catch
     // first and append the saved suffix; reorder that one case so the understood part leads.
     const loneMiss = outcomes.length === 1 && outcomes[0].terminal.kind === 'acked_didnt_catch' && outcomes[0].status === 'ok'
+    // THE IMAGE OWNS ITS CAPTION — if this bare text landed beside a photo (a payment/bill or a site image,
+    // within 60s), that image claims it and IS the reply. Don't send a separate "couldn't tell which work"
+    // miss for the caption. The verdict is already persisted (audit); we simply stay silent here.
+    if (loneMiss && !ex.readbackSuffix && await recentInboundImage(ctx.supabase, ctx.from, ctx.wamid ?? null)) {
+      console.log('[siteops] lone miss suppressed — a recent image claims this text as its caption')
+      return outcomes
+    }
     // A BARE SITE NAME ("Chakradhar site", "Asm elite") is almost always the caption/context for a photo, not
     // a failed work update — ack it quietly instead of nagging "name the work" (the photo's payment adopts it).
     const bareSite = loneMiss && !ex.readbackSuffix && !!ex.projectName && isBareSiteMention(ex.message, ex.projectName)

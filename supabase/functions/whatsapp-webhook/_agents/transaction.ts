@@ -133,6 +133,29 @@ async function resolveRef(supabase: any, lingering: ConvoRow | null): Promise<{ 
   return { payee: ex.payee_name ?? ex.payee_raw ?? undefined, project: ex.project_name ?? undefined }
 }
 
+/** The sender's most-recent inbound TEXT within a short window — used as an image's CAPTION when the image
+ *  carried none of its own. A supervisor sends the cheque, then types the context as a separate message
+ *  ("Chakradhar site", "for electricity"); this reunites them so the image CLAIMS that text, whatever it
+ *  says. Best-effort, read-only: any failure just means no separate caption. */
+export async function recentInboundText(
+  supabase: any, phone: string, excludeWamid: string | null, windowMs = 60_000,
+): Promise<string | null> {
+  try {
+    const since = new Date(Date.now() - windowMs).toISOString()
+    const { data } = await supabase.from('wa_message_log')
+      .select('direction, content, created_at, wa_message_id')
+      .eq('phone_number', phone).gte('created_at', since)
+      .order('created_at', { ascending: false }).limit(8)
+    for (const r of (data ?? []) as { direction: string; content: string | null; wa_message_id: string | null }[]) {
+      if (r.direction === 'OUT') continue                       // our own replies are not a caption
+      if (excludeWamid && r.wa_message_id === excludeWamid) continue
+      const t = (r.content ?? '').trim()
+      if (t) return t                                            // the most recent thing the sender typed
+    }
+  } catch (e) { console.error('[txn] recentInboundText failed (degraded):', (e as Error)?.message ?? e) }
+  return null
+}
+
 /** A supervisor often names the SITE right beside a payment photo — a separate "<site> site" text. SiteOps
  *  resolves that text to a project but, finding no work update, parks it (leaving the convo lingering with
  *  its project_id). The payment then lands site-less. Read that project off the lingering SiteOps convo so
@@ -402,8 +425,16 @@ export async function runTransaction(
   const projectNames = projects.map((p) => p.name)
   // A payment image -> one strong vision call (skip the describe->re-parse hop); plain
   // text/voice -> the text extractor. Both honor the SAME contract + reconcileAmount.
+  // The image CLAIMS a nearby text as its caption: if it carried none of its own, use the sender's most
+  // recent text (sent just before/after the photo) — so "cheque + 'Chakradhar site'" is ONE thing, content
+  // no matter. Fed to the extractor as the caption, and used to GROUND the project below.
+  const attachedCaption = (ctx.image?.caption ?? '').trim()
+  const separateCaption = ctx.image && !attachedCaption
+    ? await recentInboundText(supabase, from, opts.keyWamid ?? null)
+    : null
+  const captionForImage = attachedCaption || separateCaption || ''
   const ext = opts.preExtract ?? (ctx.image
-    ? await extractTransactionFromImage(ctx.image.base64, ctx.image.mime, ctx.image.caption, projectNames, stakeholders.map((s) => s.name))
+    ? await extractTransactionFromImage(ctx.image.base64, ctx.image.mime, captionForImage, projectNames, stakeholders.map((s) => s.name))
     : await extractTransaction(text, projectNames))
 
   // Lingering reference resolution stays -- a silent READ, never a question.
@@ -425,7 +456,10 @@ export async function runTransaction(
     payee: ext.payee, project: ext.project, direction: ext.direction, mode: ext.mode, note: ext.note,
   }))
 
-  const plan = buildPlan(ext, stakeholders, projects, from, text, lingeringProjectHint(opts.lingering ?? null, projects))
+  // Ground the project on the message OR the claimed caption, so a site the image pulled from a separate
+  // "<site> site" text isn't dropped by the grounding guard for being absent from the (empty) image text.
+  const groundText = (text && text.trim()) ? text : (captionForImage || text)
+  const plan = buildPlan(ext, stakeholders, projects, from, groundText, lingeringProjectHint(opts.lingering ?? null, projects))
 
   // TRACE 4/4 -- the deterministic PLAN: matched payee, gate, what gets committed.
   console.log('[trace] plan(txn)', JSON.stringify({
