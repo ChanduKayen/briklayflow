@@ -161,21 +161,15 @@ function roleVerdict(qRoles: string[], cand: { name: string; type?: string | nul
   return candHasKnownRole ? -1 : 0
 }
 /** The payee score: token-bag name similarity + nature, floored by the whole-name scorer so nothing regresses.
- *  A party's ALIASES (other spellings / nicknames, never shown) score exactly like the name; the best wins —
- *  KEEP IN SYNC with src/lib/payeeSearch.ts scorePayeeRich. */
+ *  Name-only (aliases NOT used) — KEEP IN SYNC with src/lib/payeeSearch.ts scorePayeeRich. */
 export function scorePayeeRich(q: string, cand: { name: string; type?: string | null; category?: string | null; aliases?: string[] | null }): number {
   const query = q.trim().toLowerCase()
   const qAll = payeeTokens(query)
   const qRoles = qAll.filter(isOccupation)
   let qName = qAll.filter((t) => !isOccupation(t))
   if (!qName.length) qName = qAll
-  let score = 0
-  for (const nm of [cand.name, ...(cand.aliases ?? [])]) {
-    if (!nm) continue
-    const cl = nm.toLowerCase()
-    score = Math.max(score, nameTokenScore(qName, payeeTokens(cl)), scoreName(query, cl))
-    if (score >= 1) break
-  }
+  const cl = cand.name.toLowerCase()
+  let score = Math.max(nameTokenScore(qName, payeeTokens(cl)), scoreName(query, cl))
   if (qRoles.length) {
     const v = roleVerdict(qRoles, cand)
     if (v > 0) score = Math.min(1, score + ROLE_BONUS)

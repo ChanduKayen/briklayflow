@@ -49518,8 +49518,8 @@
       "source_file": "src\\lib\\importWorkbook.ts",
       "source_location": "L54",
       "weight": 1.0,
-      "_src": "lib_importworkbook_readworkbook",
-      "_tgt": "lib_importparse_detectcolumns",
+      "_src": "lib_importparse_detectcolumns",
+      "_tgt": "lib_importworkbook_readworkbook",
       "source": "lib_importparse_detectcolumns",
       "target": "lib_importworkbook_readworkbook"
     },
@@ -49530,8 +49530,8 @@
       "source_file": "src\\lib\\importWorkbook.ts",
       "source_location": "L48",
       "weight": 1.0,
-      "_src": "lib_importworkbook_readworkbook",
-      "_tgt": "lib_importparse_findheaderrow",
+      "_src": "lib_importparse_findheaderrow",
+      "_tgt": "lib_importworkbook_readworkbook",
       "source": "lib_importparse_findheaderrow",
       "target": "lib_importworkbook_readworkbook"
     },

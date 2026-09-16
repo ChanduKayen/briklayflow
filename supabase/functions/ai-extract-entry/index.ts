@@ -66,12 +66,8 @@ function matchPayee(raw: string, stakeholders: StakeholderRow[]): {
   };
 
   for (const s of stakeholders) {
-    // a party matches by its name OR any alias (the other names it goes by) — best spelling wins
-    let best = { score: Infinity, conf: 'LOW' as Conf };
-    for (const nm of [s.name, ...((s.aliases ?? []) as string[])].filter(Boolean)) {
-      const r = scoreOne(nm);
-      if (r.score < best.score) best = r;
-    }
+    // name-only match (aliases NOT used)
+    const best = scoreOne(s.name);
     if (best.score < Infinity) {
       candidates.push({ id: s.stakeholder_id, name: s.name, type: s.type, category: s.category, confidence: best.conf, score: best.score });
     }

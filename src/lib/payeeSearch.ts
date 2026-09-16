@@ -168,9 +168,8 @@ function roleVerdict(qRoles: string[], cand: { name: string; type?: string | nul
 }
 
 /** The importer's payee score: token-bag name similarity + the stakeholder's nature, floored by the
- *  whole-name mirror so nothing the parity scorer caught is lost. A party's ALIASES (its other spellings /
- *  nicknames, never shown) are scored exactly like the name and the best wins, so an alias resolves as
- *  surely as the canonical name — KEEP IN SYNC with _match.ts scorePayeeRich. */
+ *  whole-name mirror so nothing the parity scorer caught is lost. Name-only (aliases NOT used) —
+ *  KEEP IN SYNC with _match.ts scorePayeeRich. */
 export function scorePayeeRich(q: string, cand: { name: string; type?: string | null; category?: string | null; aliases?: string[] | null }): number {
   const query = q.trim().toLowerCase();
   const qAll = tokenize(query);
@@ -178,14 +177,8 @@ export function scorePayeeRich(q: string, cand: { name: string; type?: string | 
   let qName = qAll.filter((t) => !isOccupation(t));
   if (!qName.length) qName = qAll;                    // the sheet gave ONLY a role word — use it as the name
 
-  // score the query against the canonical name AND every alias; the best spelling wins
-  let score = 0;
-  for (const nm of [cand.name, ...(cand.aliases ?? [])]) {
-    if (!nm) continue;
-    const cl = nm.toLowerCase();
-    score = Math.max(score, nameTokenScore(qName, tokenize(cl)), scorePayeeName(query, cl));
-    if (score >= 1) break;
-  }
+  const cl = cand.name.toLowerCase();
+  let score = Math.max(nameTokenScore(qName, tokenize(cl)), scorePayeeName(query, cl));
 
   if (qRoles.length) {
     const v = roleVerdict(qRoles, cand);
@@ -235,12 +228,7 @@ export function rankPayeeName(query: string, name: string): number {
 export function searchPayees<T extends { name: string; aliases?: string[] | null }>(list: T[], query: string): T[] {
   const q = query.trim().toLowerCase();
   if (!q) return list;
-  // rank against the name AND any aliases (never displayed) — the best spelling floats the row up
-  const rankOf = (s: T) => {
-    let r = rankPayeeName(q, s.name);
-    for (const a of s.aliases ?? []) { if (a) r = Math.max(r, rankPayeeName(q, a)); }
-    return r;
-  };
+  const rankOf = (s: T) => rankPayeeName(q, s.name);
   return list
     .map((s) => ({ s, r: rankOf(s) }))
     .filter((x) => x.r >= PAYEE_SEARCH_FLOOR)
