@@ -9,7 +9,7 @@ import { supabase } from '../lib/supabase';
 import { useOrgId } from '../lib/auth/AuthProvider';
 import { useSnackbar } from '../components/Snackbar';
 import { OTHER_TRADE } from '../lib/trades';
-import { readWorkbook } from '../lib/importWorkbook';
+import { readWorkbook, downloadImportTemplate } from '../lib/importWorkbook';
 import { parseTable, hasAmbiguousDates } from '../lib/importSheet';
 import {
   groupNames, groupSites, validateRow, findDuplicates,
@@ -497,10 +497,18 @@ export default function ImportTransactions({ onClose }: { session: Session; onCl
               </div>
             </div>
           ) : (
-            <div className="imp-drop" onClick={() => loaded && fileInput.current?.click()}>
-              <b>Drop an Excel or CSV file here</b>{loaded ? 'or click to choose' : 'loading your parties…'}
-              <br /><br /><span className="mut">Needs columns for date, name, amount. Site, mode and note are optional.</span>
-            </div>
+            <>
+              <div className="imp-drop" onClick={() => loaded && fileInput.current?.click()}>
+                <b>Drop an Excel or CSV file here</b>{loaded ? 'or click to choose' : 'loading your parties…'}
+                <br /><br /><span className="mut">Needs columns for date, name, amount. Site, mode and note are optional.</span>
+                <br /><span className="mut">Exported from Tally? We read a Debit/Credit pair and use Particulars as the party — Debit = money in, Credit = money out.</span>
+              </div>
+              <div className="imp-tmpl">
+                <span className="mut">New here? Start from a template:</span>
+                <button type="button" onClick={(e) => { e.stopPropagation(); downloadImportTemplate('standard'); }}>Standard</button>
+                <button type="button" onClick={(e) => { e.stopPropagation(); downloadImportTemplate('tally'); }}>Tally (Debit/Credit)</button>
+              </div>
+            </>
           ))}
 
           {step === 1 && (
@@ -792,6 +800,9 @@ tr.skip td{color:var(--mut);opacity:.7}
 .imp-resume .rz-actions button.go{background:var(--terra);color:#fff;border-color:var(--terra);font-weight:600}
 .imp-drop{border:1.5px dashed var(--line);border-radius:10px;padding:56px;text-align:center;color:var(--mut);cursor:pointer}
 .imp-drop b{display:block;color:var(--ink);font-weight:500;margin-bottom:6px}
+.imp-tmpl{display:flex;align-items:center;gap:10px;justify-content:center;margin-top:14px;flex-wrap:wrap}
+.imp-tmpl button{font:inherit;font-size:13px;padding:6px 13px;border-radius:999px;border:1px solid var(--line);background:#fff;color:var(--ink);cursor:pointer;transition:background .15s,border-color .15s}
+.imp-tmpl button:hover{background:var(--terra);border-color:var(--terra);color:#fff}
 .imp-ask{background:#FBF0DA;border:1px solid #EAD9B0;border-radius:8px;padding:12px 14px;margin-bottom:16px;font-size:14px}
 .imp-ask button{margin-left:8px;font:inherit;padding:5px 12px;border-radius:6px;border:1px solid var(--line);background:#fff;cursor:pointer}
 .imp-foot{padding:16px 24px;border-top:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}

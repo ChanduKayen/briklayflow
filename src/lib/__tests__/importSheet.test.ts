@@ -49,3 +49,35 @@ suite('importSheet — assemble rows', () => {
     expect(out.amount).toBe(500);
   });
 });
+
+suite('importSheet — Tally cash/bank book (twin Debit/Credit, Particulars as party)', () => {
+  const TALLY = {
+    headers: ['Date', 'Particulars', 'Vch Type', 'Debit', 'Credit', 'Site'],
+    rows: [
+      ['02-04-2026', 'Ramesh Cement Traders', 'Payment', '', '25,000', 'Green Meadows'],  // credit → money out
+      ['03-04-2026', 'Advance from client', 'Receipt', '1,00,000', '', 'Green Meadows'],   // debit  → money in
+    ],
+  };
+  const { map, rows } = parseTable(TALLY, { refYear: 2026, dayFirst: true });
+
+  test('debit and credit are detected as their own columns, not amount', () => {
+    expect(map.debit).toBe(3);
+    expect(map.credit).toBe(4);
+    expect(map.amount).toBe(undefined);
+    expect(map.note).toBe(1);   // Particulars
+  });
+
+  test('a Credit is money OUT; Particulars becomes the party', () => {
+    expect(rows[0]).toEqual({
+      rowNo: 2, date: '2026-04-02', dateAmbiguous: false,
+      name: 'Ramesh Cement Traders', amount: 25000, site: 'Green Meadows',
+      mode: null, note: 'Ramesh Cement Traders', directionCell: 'out',
+    });
+  });
+
+  test('a Debit is money IN', () => {
+    expect(rows[1].amount).toBe(100000);
+    expect(rows[1].directionCell).toBe('in');
+    expect(rows[1].name).toBe('Advance from client');
+  });
+});

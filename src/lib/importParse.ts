@@ -11,7 +11,7 @@
 export type TxnMode = 'Cash' | 'UPI' | 'NEFT' | 'Cheque';
 export type Direction = 'in' | 'out';
 
-export type ImportField = 'date' | 'name' | 'amount' | 'site' | 'mode' | 'note' | 'direction';
+export type ImportField = 'date' | 'name' | 'amount' | 'site' | 'mode' | 'note' | 'direction' | 'debit' | 'credit';
 export type ColumnMap = Partial<Record<ImportField, number>>;
 
 // ── Amount ───────────────────────────────────────────────────────────────────────────────────────
@@ -161,7 +161,12 @@ const FIELD_PATTERNS: [ImportField, RegExp][] = [
   ['date',      /\b(date|dt|day|txn date|transaction date)/],
   ['name',      /\b(name|payee|paid to|pay to|vendor|worker|party|supplier|received from|to whom)/],
   ['site',      /\b(site|project|location|work site|place)/],
-  ['amount',    /\b(amount|amt|value|total|sum|paid|debit|credit|rs|₹|money)/],
+  // Tally cash/bank-book columns — a SEPARATE debit + credit pair. Claimed before the broad amount
+  // rule (which also matches "debit"/"credit"), so a twin-column export reads both sides. Convention
+  // (assembleRows): Debit = money IN, Credit = money OUT — matches a Tally Cash/Bank book export.
+  ['debit',     /\b(debit|withdrawal|withdrawn|paid out|dr)\b/],
+  ['credit',    /\b(credit|deposit|paid in|cr)\b/],
+  ['amount',    /\b(amount|amt|value|total|sum|paid|rs|₹|money)/],
 ];
 
 /**

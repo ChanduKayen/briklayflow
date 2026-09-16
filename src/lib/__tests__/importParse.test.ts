@@ -114,4 +114,12 @@ suite('importParse — column detection', () => {
     const m = detectColumns(['Date', 'Name', 'Amount', 'Type']);
     expect(m.direction).toBe(3);
   });
+  test('a Tally header row maps Debit/Credit as their own columns', () => {
+    const m = detectColumns(['Date', 'Particulars', 'Vch Type', 'Debit', 'Credit', 'Site']);
+    expect(m.debit).toBe(3);
+    expect(m.credit).toBe(4);
+    expect(m.amount).toBe(undefined);   // amount no longer swallows Debit/Credit
+    expect(m.note).toBe(1);             // Particulars → note (assembleRows uses it as party)
+    expect(m.direction).toBe(2);        // "Vch Type" → direction
+  });
 });
