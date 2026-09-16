@@ -187,3 +187,19 @@ export function detectColumns(headers: (string | null | undefined)[]): ColumnMap
   }
   return map;
 }
+
+/**
+ * Find the header row in a raw grid. Tally (and many bank) exports put a company/title/period banner
+ * above the real column headers, so row 1 is NOT the header. Scan the first `maxScan` rows for the first
+ * that detects a `date` column AND at least one money column (amount / debit / credit) — that is the
+ * header. Returns 0 (the old assumption) when nothing qualifies, so a plain sheet is unaffected.
+ */
+export function findHeaderRow(rows: (Array<string | number | Date | null | undefined>)[], maxScan = 25): number {
+  const limit = Math.min(rows.length, maxScan);
+  for (let i = 0; i < limit; i++) {
+    const cells = (rows[i] ?? []).map((c) => (c == null ? '' : String(c)));
+    const m = detectColumns(cells);
+    if (m.date != null && (m.amount != null || m.debit != null || m.credit != null)) return i;
+  }
+  return 0;
+}

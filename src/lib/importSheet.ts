@@ -9,7 +9,7 @@ import {
 import type { ParsedRow } from './importResolve';
 
 export type Cell = string | number | Date | null | undefined;
-export interface SheetTable { headers: string[]; rows: Cell[][] }
+export interface SheetTable { headers: string[]; rows: Cell[][]; rowNos?: number[] }
 
 const str = (v: Cell): string | null => {
   if (v == null) return null;
@@ -44,15 +44,20 @@ export function assembleRows(
     if (map.debit != null || map.credit != null) {
       const dv = map.debit != null ? parseIndianAmount(at(row, 'debit') as string | number | null) : null;
       const cv = map.credit != null ? parseIndianAmount(at(row, 'credit') as string | number | null) : null;
-      if (dv != null && dv !== 0) { amount = Math.abs(dv); if (twin) directionCell = 'in'; }
-      else if (cv != null && cv !== 0) { amount = Math.abs(cv); if (twin) directionCell = 'out'; }
-      else if (dv != null || cv != null) { amount = Math.abs((dv ?? cv) as number); }
+      const debitFilled = dv != null && dv !== 0;
+      const creditFilled = cv != null && cv !== 0;
+      if (debitFilled) amount = Math.abs(dv);
+      else if (creditFilled) amount = Math.abs(cv);
+      else if (dv != null || cv != null) amount = Math.abs((dv ?? cv) as number);
+      // Direction: prefer an explicit Vch Type / direction cell (Payment→out, Receipt→in — unambiguous).
+      // Only when there's none do we read the Day-Book side: Debit = payment (out), Credit = receipt (in).
+      if (twin && !directionCell) directionCell = debitFilled ? 'out' : creditFilled ? 'in' : directionCell;
       // A Tally daybook has no "name" column — the party is the Particulars (claimed as note).
       if (!name) name = str(at(row, 'note'));
     }
 
     return {
-      rowNo: idx + 2,
+      rowNo: table.rowNos?.[idx] ?? idx + 2,
       date: d.iso,
       dateAmbiguous: d.ambiguous,
       name,

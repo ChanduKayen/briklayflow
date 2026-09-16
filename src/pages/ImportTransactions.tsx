@@ -501,7 +501,7 @@ export default function ImportTransactions({ onClose }: { session: Session; onCl
               <div className="imp-drop" onClick={() => loaded && fileInput.current?.click()}>
                 <b>Drop an Excel or CSV file here</b>{loaded ? 'or click to choose' : 'loading your parties…'}
                 <br /><br /><span className="mut">Needs columns for date, name, amount. Site, mode and note are optional.</span>
-                <br /><span className="mut">Exported from Tally? We read a Debit/Credit pair and use Particulars as the party — Debit = money in, Credit = money out.</span>
+                <br /><span className="mut">Exported from Tally (Day Book)? We skip the title rows, read the Debit/Credit pair for the amount, use Vch Type for in/out (Payment/Receipt) and Particulars as the party.</span>
               </div>
               <div className="imp-tmpl">
                 <span className="mut">New here? Start from a template:</span>

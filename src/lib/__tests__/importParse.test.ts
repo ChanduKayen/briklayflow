@@ -3,7 +3,7 @@
 // Indian-grouped amounts, "3/8" ambiguity, blank/zero amounts, "Bank" mode, income triggers.
 
 import { suite, test, expect } from './harness';
-import { parseIndianAmount, parseSheetDate, normalizeMode, detectDirection, detectColumns } from '../importParse';
+import { parseIndianAmount, parseSheetDate, normalizeMode, detectDirection, detectColumns, findHeaderRow } from '../importParse';
 
 suite('importParse — Indian amounts', () => {
   test('grouped amounts strip commas correctly', () => {
@@ -121,5 +121,27 @@ suite('importParse — column detection', () => {
     expect(m.amount).toBe(undefined);   // amount no longer swallows Debit/Credit
     expect(m.note).toBe(1);             // Particulars → note (assembleRows uses it as party)
     expect(m.direction).toBe(2);        // "Vch Type" → direction
+  });
+  test('"Debit Amount"/"Credit Amount" still route to debit/credit, not amount', () => {
+    const m = detectColumns(['Date', 'Particulars', 'Vch Type', 'Vch No.', 'Debit Amount', 'Credit Amount']);
+    expect(m.debit).toBe(4);
+    expect(m.credit).toBe(5);
+    expect(m.amount).toBe(undefined);
+  });
+});
+
+suite('importParse — header row detection (Tally banner)', () => {
+  test('finds the real header below a Tally title/period banner', () => {
+    const grid = [
+      ['DREAM HOME BUILDERS LLP - (from 1-Apr-23)', null, null, null, null, null],
+      ['Day Book', null, null, null, null, null],
+      ['1-Apr-26 to 31-Mar-27', null, null, null, null, null],
+      ['Date', 'Particulars', 'Vch Type', 'Vch No.', 'Debit Amount', 'Credit Amount'],
+      ['2026-03-31', 'Salary Payble A/c', 'Payment', '3', 8500, null],
+    ];
+    expect(findHeaderRow(grid)).toBe(3);
+  });
+  test('a plain sheet with the header on row 1 returns 0', () => {
+    expect(findHeaderRow([['Date', 'Name', 'Amount'], ['5 Aug', 'Ramu', 500]])).toBe(0);
   });
 });

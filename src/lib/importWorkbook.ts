@@ -4,23 +4,24 @@
 // handles them); numbers stay numbers (parseIndianAmount handles the rest).
 
 import * as XLSX from 'xlsx';
-import type { SheetTable } from './importSheet';
+import type { SheetTable, Cell } from './importSheet';
+import { findHeaderRow, detectColumns, parseSheetDate, parseIndianAmount } from './importParse';
 
 /**
  * Build and download a starter .xlsx so a user knows the exact shape to bring.
  *  • 'standard' — the flat one-row-per-transaction sheet (Date, Name, Amount, Site, Mode, Note).
- *  • 'tally'    — a Tally Cash/Bank book export shape (Date, Particulars, Vch Type, Debit, Credit,
- *                 Site). The importer reads Debit = money IN, Credit = money OUT, and uses Particulars
- *                 as the party. This runs in the real app (not the artifact sandbox), so writeFile
- *                 triggers a normal browser download.
+ *  • 'tally'    — a Tally Day Book export shape (Date, Particulars, Vch Type, Debit, Credit, Site).
+ *                 Direction comes from Vch Type (Payment→out, Receipt→in); the filled Debit/Credit side
+ *                 gives the amount (Payments sit in Debit, Receipts in Credit); Particulars is the party.
+ *                 This runs in the real app (not the artifact sandbox), so writeFile downloads normally.
  */
 export function downloadImportTemplate(kind: 'standard' | 'tally'): void {
   const rows: (string | number)[][] = kind === 'tally'
     ? [
         ['Date', 'Particulars', 'Vch Type', 'Debit', 'Credit', 'Site'],
-        ['02-04-2026', 'Ramesh Cement Traders', 'Payment', '', 25000, 'Green Meadows'],
-        ['03-04-2026', 'Advance from client', 'Receipt', 100000, '', 'Green Meadows'],
-        ['04-04-2026', 'Suresh (labour)', 'Payment', '', 8000, 'Green Meadows'],
+        ['02-04-2026', 'Ramesh Cement Traders', 'Payment', 25000, '', 'Green Meadows'],
+        ['03-04-2026', 'Advance from client', 'Receipt', '', 100000, 'Green Meadows'],
+        ['04-04-2026', 'Suresh (labour)', 'Payment', 8000, '', 'Green Meadows'],
       ]
     : [
         ['Date', 'Name', 'Amount', 'Site', 'Mode', 'Note'],
@@ -41,7 +42,27 @@ export async function readWorkbook(file: File): Promise<SheetTable> {
   const ws = wb.Sheets[first];
   const aoa = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, blankrows: false, defval: null });
   if (!aoa.length) return { headers: [], rows: [] };
-  const headers = (aoa[0] as unknown[]).map((h) => (h == null ? '' : String(h)));
-  const rows = aoa.slice(1).map((r) => r as (string | number | Date | null)[]);
-  return { headers, rows };
+
+  // The header may not be row 1 — Tally/bank exports carry a title+period banner above it.
+  const grid = aoa as (string | number | Date | null | undefined)[][];
+  const h = findHeaderRow(grid);
+  const headers = (grid[h] ?? []).map((c) => (c == null ? '' : String(c)));
+
+  // Drop non-data rows below the header (a "Inwards Qty/Outwards Qty" sub-header, blank lines, a
+  // trailing total). Keep a row only if it has a real date, or a party name + a money value — using the
+  // detected columns so the test stays honest to what the importer will actually read.
+  const map = detectColumns(headers);
+  const nameIdx = map.name ?? map.note;
+  const moneyIdx = [map.amount, map.debit, map.credit].filter((i): i is number => i != null);
+  const hasDate = (r: Cell[]) => map.date != null && parseSheetDate(r[map.date] ?? null).iso != null;
+  const hasName = (r: Cell[]) => nameIdx != null && String(r[nameIdx] ?? '').trim() !== '';
+  const hasMoney = (r: Cell[]) => moneyIdx.some((i) => { const v = parseIndianAmount(r[i] as string | number | null); return v != null && v !== 0; });
+
+  const rows: Cell[][] = [];
+  const rowNos: number[] = [];
+  for (let i = h + 1; i < grid.length; i++) {
+    const r = grid[i] as Cell[];
+    if (hasDate(r) || (hasName(r) && hasMoney(r))) { rows.push(r); rowNos.push(i + 1); }  // 1-based source row
+  }
+  return { headers, rows, rowNos };
 }

@@ -3,7 +3,7 @@
 
 import { suite, test, expect } from './harness';
 import { parseTable, assembleRows, hasAmbiguousDates } from '../importSheet';
-import { detectColumns } from '../importParse';
+import { detectColumns, detectDirection } from '../importParse';
 
 const TABLE = {
   headers: ['Date', 'Paid To', 'Amount', 'Site', 'Mode', 'Note'],
@@ -50,34 +50,53 @@ suite('importSheet — assemble rows', () => {
   });
 });
 
-suite('importSheet — Tally cash/bank book (twin Debit/Credit, Particulars as party)', () => {
+suite('importSheet — Tally Day Book (twin Debit/Credit, Vch Type, Particulars as party)', () => {
+  // Real Tally shape: a Payment's amount sits in Debit, a Receipt's in Credit; Vch Type gives in/out.
   const TALLY = {
-    headers: ['Date', 'Particulars', 'Vch Type', 'Debit', 'Credit', 'Site'],
+    headers: ['Date', 'Particulars', 'Vch Type', 'Vch No.', 'Debit Amount', 'Credit Amount'],
     rows: [
-      ['02-04-2026', 'Ramesh Cement Traders', 'Payment', '', '25,000', 'Green Meadows'],  // credit → money out
-      ['03-04-2026', 'Advance from client', 'Receipt', '1,00,000', '', 'Green Meadows'],   // debit  → money in
-    ],
+      ['31-03-2026', 'Salary Payble A/c', 'Payment', '3', 8500, null],     // Payment → Debit → out
+      ['28-04-2026', 'Venkata Praveen - Current A/c', 'Receipt', '9', null, 100000],  // Receipt → Credit → in
+    ] as any[],
   };
   const { map, rows } = parseTable(TALLY, { refYear: 2026, dayFirst: true });
 
-  test('debit and credit are detected as their own columns, not amount', () => {
-    expect(map.debit).toBe(3);
-    expect(map.credit).toBe(4);
+  test('"Debit Amount"/"Credit Amount" claim their own columns; Particulars is the note; Vch Type is direction', () => {
+    expect(map.debit).toBe(4);
+    expect(map.credit).toBe(5);
     expect(map.amount).toBe(undefined);
-    expect(map.note).toBe(1);   // Particulars
+    expect(map.note).toBe(1);
+    expect(map.direction).toBe(2);
   });
 
-  test('a Credit is money OUT; Particulars becomes the party', () => {
+  test('a Payment (amount in Debit) reads as money OUT; Particulars becomes the party', () => {
     expect(rows[0]).toEqual({
-      rowNo: 2, date: '2026-04-02', dateAmbiguous: false,
-      name: 'Ramesh Cement Traders', amount: 25000, site: 'Green Meadows',
-      mode: null, note: 'Ramesh Cement Traders', directionCell: 'out',
+      rowNo: 2, date: '2026-03-31', dateAmbiguous: false,
+      name: 'Salary Payble A/c', amount: 8500, site: null,
+      mode: null, note: 'Salary Payble A/c', directionCell: 'Payment',
     });
+    expect(detectDirection({ directionCell: rows[0].directionCell })).toBe('out');
   });
 
-  test('a Debit is money IN', () => {
+  test('a Receipt (amount in Credit) reads as money IN', () => {
     expect(rows[1].amount).toBe(100000);
-    expect(rows[1].directionCell).toBe('in');
-    expect(rows[1].name).toBe('Advance from client');
+    expect(detectDirection({ directionCell: rows[1].directionCell })).toBe('in');
+  });
+
+  test('no Vch Type column → Day-Book side decides: Debit = out, Credit = in', () => {
+    const t = { headers: ['Date', 'Particulars', 'Debit', 'Credit'], rows: [
+      ['5-4-2026', 'Cement', 700, null],
+      ['6-4-2026', 'Client advance', null, 500],
+    ] as any[] };
+    const out = parseTable(t, { refYear: 2026, dayFirst: true }).rows;
+    expect(out[0].directionCell).toBe('out');
+    expect(out[0].amount).toBe(700);
+    expect(out[1].directionCell).toBe('in');
+    expect(out[1].amount).toBe(500);
+  });
+
+  test('rowNos from the workbook drive rowNo (real source rows survive junk-row filtering)', () => {
+    const t = { headers: ['Date', 'Name', 'Amount'], rows: [['5 Aug', 'Ramu', '500']] as any[], rowNos: [9] };
+    expect(assembleRows(t, detectColumns(t.headers), { refYear: 2026 })[0].rowNo).toBe(9);
   });
 });
