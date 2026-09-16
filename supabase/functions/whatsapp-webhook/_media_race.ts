@@ -18,26 +18,32 @@ const TERMINAL = new Set(['WRITTEN', 'FAILED', 'CONFIRMED'])
 
 export type JobRow = { wamid: string; message_type: string | null; status: string; received_at: string }
 
-// A document/media word — the strong signal that a short, amount-less text is CAPTIONING a bill photo
+// A document/media word — the strong signal that a short, amount-less text is CAPTIONING a bill/proof photo
 // ("Asm site bill", "here's the invoice", "receipt"), not a standalone instruction. Deliberately narrow.
 const DOC_WORDS = /\b(bill|bills|invoice|invoices|receipt|receipts|challan|challans|voucher|vouchers|statement|photo|pic|picture|image|screenshot|proof|slip|memo|quotation|quote)\b/i
 
+// A CONTEXT / NARRATION lead — a phrase that says what an incoming photo is FOR (a reason or a site), with the
+// amount carried in the image itself, e.g. "for this ASM site", "for electricity for the villa", "towards
+// cement", "against PO-12". These read as a caption for a payment/bill proof, not a standalone instruction.
+const CONTEXT_LEAD = /^(for\b|towards?\b|against\b|re\b|regarding\b|payment for\b|paid for\b|bill for\b|this is for\b)/i
+
 /**
- * PURE: does this text read as a bare CAPTION for a bill photo — a short phrase that names a document but
- * carries nothing to record on its own? Used to HOLD it (for a photo arriving next) instead of minting a junk
- * empty transaction or parking it in SiteOps. Conservative on purpose — a false positive only holds the text
- * with a "send the photo" ack (safe, reversible), never commits anything:
- *   • short (≤ 6 words) — a caption, not a sentence;
- *   • NO real amount (no multi-digit number, no spoken amount) — an amount means it can stand alone;
- *   • mentions a document/media word — the actual signal that a photo is what it's about.
+ * PURE: does this text read as a bare CAPTION for a bill / payment-proof photo — a short phrase that names a
+ * document OR states what the photo is FOR, but carries nothing to record on its own? Used to HOLD it (for a
+ * photo arriving next) instead of minting a junk empty transaction or parking it in SiteOps. Conservative on
+ * purpose — a false positive only holds the text with a "send the photo" ack (safe, reversible), never commits:
+ *   • short (≤ 8 words) — a caption, not a sentence;
+ *   • NO real amount (no multi-digit number, no spoken amount) — an amount means it can stand alone, so it is
+ *     NOT held (the image-first ordering guard joins those instead);
+ *   • either mentions a document/media word, OR leads as a context/reason phrase ("for … site", "towards …").
  */
 export function looksLikeBillCaption(text: string): boolean {
   const t = (text ?? '').trim()
   if (!t) return false
-  if (t.split(/\s+/).length > 6) return false
+  if (t.split(/\s+/).length > 8) return false
   if (/\d{2,}/.test(t)) return false
   if (parseSpokenAmount(t).amount != null) return false
-  return DOC_WORDS.test(t)
+  return DOC_WORDS.test(t) || CONTEXT_LEAD.test(t)
 }
 
 /**
@@ -46,7 +52,7 @@ export function looksLikeBillCaption(text: string): boolean {
  * `windowMs` of now (a photo sent moments before this text — not an unrelated older one). Most recent wins.
  */
 export function pickPhotoToAwait(
-  rows: JobRow[], selfWamid: string, nowMs: number, windowMs = 20_000,
+  rows: JobRow[], selfWamid: string, nowMs: number, windowMs = 45_000,
 ): string | null {
   const cand = (rows ?? [])
     .filter((r) => r.wamid !== selfWamid && r.message_type === 'image' && !TERMINAL.has(r.status))
@@ -68,8 +74,8 @@ export async function waitForInflightPhoto(
   supabase: any, sender: string, selfWamid: string,
   opts: { windowMs?: number; timeoutMs?: number; pollMs?: number } = {},
 ): Promise<void> {
-  const windowMs = opts.windowMs ?? 20_000
-  const timeoutMs = opts.timeoutMs ?? 10_000
+  const windowMs = opts.windowMs ?? 45_000
+  const timeoutMs = opts.timeoutMs ?? 15_000
   const pollMs = opts.pollMs ?? 500
   const { data: rows } = await supabase
     .from('processing_job')
@@ -97,7 +103,7 @@ export async function waitForInflightPhoto(
  *  Used to stay silent on the caption-hold ack when the photo is already coming. */
 export async function hasInflightPhoto(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  supabase: any, sender: string, selfWamid: string, windowMs = 20_000,
+  supabase: any, sender: string, selfWamid: string, windowMs = 45_000,
 ): Promise<boolean> {
   const { data } = await supabase
     .from('processing_job')

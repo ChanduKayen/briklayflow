@@ -50,4 +50,9 @@ suite('media race — looksLikeBillCaption (hold a bare caption for the photo)',
   test('site talk with no doc word is not a caption', () => { expect(looksLikeBillCaption('cement short on 2nd floor')).toBe(false) })
   test('a long sentence is not a caption', () => { expect(looksLikeBillCaption('please find the bill for the eastern power site attached here')).toBe(false) })
   test('empty', () => { expect(looksLikeBillCaption('')).toBe(false) })
+  // Context/narration captions — the amount is in the photo; the text just says what it is FOR.
+  test('"for this ASM site" is a context caption', () => { expect(looksLikeBillCaption('for this ASM site')).toBe(true) })
+  test('"for electricity for the villa" is a context caption', () => { expect(looksLikeBillCaption('for electricity for the villa')).toBe(true) })
+  test('"towards cement" is a context caption', () => { expect(looksLikeBillCaption('towards cement')).toBe(true) })
+  test('a context phrase WITH an amount still stands alone (not held)', () => { expect(looksLikeBillCaption('for ASM site 5000')).toBe(false) })
 })
