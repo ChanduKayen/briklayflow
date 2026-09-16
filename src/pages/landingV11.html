@@ -1,0 +1,1001 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Briklay · AI site engineer + accountant. Inside WhatsApp.</title>
+<meta name="description" content="Briklay is an AI site engineer and accountant inside WhatsApp. Your supervisors text like they always do. Briklay records, checks, and files it: work, attendance, materials, and every rupee.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,300..800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#F7F6F1;
+  --sheet:#E9EFE8;
+  --ink:#12261F;
+  --mute:#5D6E67;
+  --rule:#C9D6CF;
+  --rule-soft:#DEE6E0;
+  --red:#B23A2A;
+  --wa:#008069;
+  --wa-hover:#006B58;
+  /* WhatsApp light-mode palette (demo only) */
+  --wab-bg:#EFEAE2;
+  --wab-head:#F0F2F5;
+  --wab-in:#FFFFFF;
+  --wab-out:#D9FDD3;
+  --wab-text:#111B21;
+  --wab-meta:#667781;
+  --wab-tick:#53BDEB;
+  --row:34px; /* ledger line pitch */
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  background:var(--paper);color:var(--ink);
+  font-family:'Bricolage Grotesque',system-ui,-apple-system,'Segoe UI',sans-serif;
+  font-size:17px;line-height:1.55;-webkit-font-smoothing:antialiased;
+  overflow-x:hidden;
+}
+::selection{background:var(--ink);color:var(--paper)}
+h1,h2,h3{font-weight:700;line-height:1.05;letter-spacing:-.025em}
+h2{font-size:clamp(1.85rem,5.2vw,2.75rem);text-wrap:balance}
+h3{font-size:1.15rem;letter-spacing:-.01em}
+p{text-wrap:pretty}
+.wrap{max-width:1120px;margin:0 auto;padding:0 22px}
+@media(min-width:900px){.wrap{padding:0 40px}}
+a{color:inherit}
+
+/* ---------- nav ---------- */
+nav{
+  position:fixed;inset:0 0 auto 0;z-index:50;
+  display:flex;justify-content:space-between;align-items:center;
+  padding:14px 22px;transition:background .3s,box-shadow .3s;
+}
+nav.scrolled{background:rgba(247,246,241,.88);backdrop-filter:blur(14px);box-shadow:0 1px 0 var(--rule)}
+.brand{display:inline-flex;align-items:center;text-decoration:none}
+.brand b{font-weight:700;font-size:1.15rem;letter-spacing:-.02em}
+/* the "Briklay." wordmark: the period is a live orange dot that softly pulses — recording */
+.brand .rec{display:inline-block;width:.22em;height:.22em;border-radius:50%;background:var(--red);margin-left:.06em;position:relative;vertical-align:baseline}
+.brand .rec::after{content:"";position:absolute;inset:0;border-radius:50%;background:var(--red);opacity:.32;animation:recpulse 3s cubic-bezier(.4,0,.2,1) infinite}
+@keyframes recpulse{0%{transform:scale(1);opacity:.32}70%{transform:scale(1.7);opacity:0}100%{transform:scale(1.7);opacity:0}}
+.nav-auth{display:flex;align-items:center;gap:18px}
+.login{color:var(--ink);text-decoration:none;font-weight:600;font-size:.92rem;position:relative;padding:4px 0}
+.login::after{content:"";position:absolute;left:0;right:0;bottom:0;height:1.5px;background:var(--ink);transform:scaleX(0);transform-origin:left;transition:transform .22s cubic-bezier(.2,.8,.3,1)}
+.login:hover::after,.login:focus-visible::after{transform:scaleX(1)}
+.btn.nav-cta{
+  --fill:var(--ink);--ink-on:var(--paper);--lift:var(--wa);--hover-fill:var(--wa);--hover-ink:#fff;
+  min-height:38px;padding:8px 16px;border-radius:8px;font-size:.9rem;width:auto;max-width:none;
+  box-shadow:0 3px 0 var(--lift);
+}
+.btn.nav-cta:hover,.btn.nav-cta:focus-visible,.btn.nav-cta:active{transform:translateY(3px);box-shadow:0 0 0 var(--lift)}
+
+/* ---------- buttons: "the stamp" ----------
+   Rests lifted on a hard ink shadow. Hover presses it flat while a
+   contrasting fill sweeps up from the paper. Press = stamped. */
+.btn{
+  --fill:var(--wa);--ink-on:#fff;--lift:var(--ink);--hover-fill:var(--ink);--hover-ink:var(--paper);
+  position:relative;isolation:isolate;overflow:hidden;
+  display:inline-flex;align-items:center;justify-content:center;gap:10px;
+  background:var(--fill);color:var(--ink-on);text-decoration:none;
+  min-height:54px;padding:14px 24px;border-radius:10px;
+  font-weight:600;font-size:1.02rem;
+  width:100%;max-width:360px;
+  box-shadow:0 5px 0 var(--lift);
+  transform:translateY(0);
+  transition:transform .16s cubic-bezier(.2,.8,.3,1),box-shadow .16s cubic-bezier(.2,.8,.3,1),color .22s;
+}
+.btn::before{
+  content:"";position:absolute;inset:0;z-index:-1;background:var(--hover-fill);
+  transform:scaleY(0);transform-origin:bottom;
+  transition:transform .26s cubic-bezier(.2,.8,.3,1);
+}
+.btn:hover,.btn:focus-visible{transform:translateY(5px);box-shadow:0 0 0 var(--lift);color:var(--hover-ink)}
+.btn:hover::before,.btn:focus-visible::before{transform:scaleY(1)}
+.btn:active{transform:translateY(5px) scale(.985);box-shadow:0 0 0 var(--lift)}
+.btn svg{width:21px;height:21px;flex:none}
+.btn .lbl{position:relative}
+.micro{display:block;margin-top:16px;font-size:.88rem;color:var(--mute)}
+@media(hover:none){.btn:active{color:var(--hover-ink)}.btn:active::before{transform:scaleY(1)}}
+
+/* ---------- hero: the register page ---------- */
+.hero{
+  position:relative;padding:118px 0 0;overflow:hidden;
+  background-color:var(--paper);
+  background-image:repeating-linear-gradient(to bottom,transparent 0,transparent calc(var(--row) - 1px),var(--rule-soft) calc(var(--row) - 1px),var(--rule-soft) var(--row));
+  background-position:0 6px;
+}
+.hero::before{ /* the red margin line */
+  content:"";position:absolute;top:0;bottom:0;left:22px;width:1.5px;background:var(--red);opacity:.85;
+}
+@media(min-width:900px){.hero::before{left:calc(50% - 560px + 40px + 2px)}}
+.hero .wrap{position:relative}
+.hero-grid{display:grid;grid-template-columns:1fr;gap:44px;align-items:center}
+.hero-phone{padding-left:22px}
+@media(min-width:900px){.hero-phone{padding-left:0}}
+@media(min-width:900px){.hero-grid{grid-template-columns:minmax(0,1.05fr) minmax(0,.95fr);gap:56px}}
+.hero-copy{padding-left:22px}
+@media(min-width:900px){.hero-copy{padding-left:64px}}
+.hero h1{
+  font-size:clamp(2.45rem,9.4vw,4.15rem);
+  font-variation-settings:'wdth' 88;
+  margin:0;line-height:.98;
+}
+.hero h1 .plus{color:var(--red);font-weight:500}
+@media(min-width:900px){.hero h1 .hang{margin-left:-.62em}}
+.hero h1 .l{display:block}
+.hero .sub{margin:22px 0 0;color:var(--mute);max-width:44ch;font-size:clamp(1.02rem,3.4vw,1.2rem);line-height:1.5}
+.hero .cta-zone{margin-top:30px}
+
+/* WhatsApp phone, light mode */
+.phone{
+  width:min(380px,100%);margin:0 auto;
+  border-radius:26px;overflow:hidden;
+  background:var(--wab-bg);
+  box-shadow:0 1px 0 rgba(18,38,31,.06),0 24px 60px -20px rgba(18,38,31,.35),0 0 0 1px rgba(18,38,31,.08);
+  display:flex;flex-direction:column;text-align:left;
+}
+.wa-head{display:flex;align-items:center;gap:11px;padding:12px 13px;background:var(--wab-head);flex:none;border-bottom:1px solid #E0E4E7}
+.wa-head .back{color:var(--wa);display:flex}
+.wa-head .back svg{width:22px;height:22px}
+.wa-avatar{width:38px;height:38px;border-radius:50%;background:var(--ink);display:grid;place-items:center;flex:none}
+.wa-avatar svg{width:19px;height:19px}
+.wa-avatar path{stroke:var(--paper);stroke-width:3.4;fill:none;stroke-linecap:round}
+.wa-id{flex:1;min-width:0}
+.wa-id b{font-weight:600;font-size:.98rem;color:var(--wab-text);display:block;line-height:1.25}
+.wa-id span{font-size:.76rem;color:var(--wab-meta)}
+.wa-icons{display:flex;gap:18px;color:#54656F}
+.wa-icons svg{width:21px;height:21px}
+.chat{
+  flex:none;padding:14px 11px 8px;height:400px;overflow-y:auto;scrollbar-width:none;
+  display:flex;flex-direction:column;gap:5px;
+  background-color:var(--wab-bg);
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='260' height='260' viewBox='0 0 260 260'%3E%3Cg fill='none' stroke='%23DDD5C9' stroke-width='1.4'%3E%3Ccircle cx='40' cy='36' r='9'/%3E%3Cpath d='M120 20l10 10-10 10-10-10z'/%3E%3Cpath d='M200 40q10-14 20 0'/%3E%3Ccircle cx='226' cy='120' r='7'/%3E%3Cpath d='M30 130h20M40 120v20'/%3E%3Cpath d='M120 110q8 12 16 0'/%3E%3Cpath d='M60 210l8 8 8-8'/%3E%3Ccircle cx='150' cy='200' r='10'/%3E%3Cpath d='M210 200l12 12M222 200l-12 12'/%3E%3Cpath d='M90 60a8 8 0 1 0 8 8'/%3E%3C/g%3E%3C/svg%3E");
+}
+.chat::-webkit-scrollbar{display:none}
+.day-chip{align-self:center;background:#fff;color:#54656F;font-size:.7rem;padding:4px 12px;border-radius:8px;margin-bottom:6px;flex:none;box-shadow:0 1px 1px rgba(0,0,0,.08)}
+.msg{
+  position:relative;max-width:86%;padding:7px 10px 6px;border-radius:9px;
+  font-size:.9rem;line-height:1.42;color:var(--wab-text);
+  box-shadow:0 1px 1px rgba(0,0,0,.08);
+  opacity:0;transform:translateY(10px) scale(.97);
+  transition:opacity .32s ease,transform .32s ease;margin-bottom:4px;
+}
+.msg.show{opacity:1;transform:none}
+.msg.out{align-self:flex-end;background:var(--wab-out);border-top-right-radius:0}
+.msg.out::before{content:"";position:absolute;top:0;right:-7px;border:7px solid transparent;border-top-color:var(--wab-out);border-right:none}
+.msg.in{align-self:flex-start;background:var(--wab-in);border-top-left-radius:0}
+.msg.in::before{content:"";position:absolute;top:0;left:-7px;border:7px solid transparent;border-top-color:var(--wab-in);border-left:none}
+.m-meta{float:right;margin:8px -2px 0 8px;display:flex;align-items:center;gap:3px;font-size:.66rem;color:var(--wab-meta);line-height:1}
+.ticks{display:inline-flex;width:15px;height:10px;position:relative}
+.ticks svg{position:absolute;inset:0;width:15px;height:10px;color:var(--wab-meta);transition:color .3s}
+.ticks .t2{opacity:0;transition:opacity .25s,color .3s}
+.msg[data-tick="1"] .t1{opacity:1}
+.msg[data-tick="2"] .t2{opacity:1}
+.msg[data-tick="3"] .t1,.msg[data-tick="3"] .t2{opacity:1;color:var(--wab-tick)}
+.typing{align-self:flex-start;background:var(--wab-in);border-radius:9px;border-top-left-radius:0;padding:11px 14px;display:none;position:relative;margin-bottom:4px;box-shadow:0 1px 1px rgba(0,0,0,.08)}
+.typing::before{content:"";position:absolute;top:0;left:-7px;border:7px solid transparent;border-top-color:var(--wab-in);border-left:none}
+.typing.show{display:flex;gap:4px}
+.typing i{width:7px;height:7px;border-radius:50%;background:#8696A0;animation:blink 1.2s infinite}
+.typing i:nth-child(2){animation-delay:.2s}
+.typing i:nth-child(3){animation-delay:.4s}
+@keyframes blink{0%,60%,100%{opacity:.3;transform:none}30%{opacity:1;transform:translateY(-2px)}}
+.wa-input{flex:none;display:flex;align-items:center;gap:8px;padding:8px 10px 12px;background:var(--wab-head)}
+.wa-field{flex:1;display:flex;align-items:center;gap:10px;background:#fff;border-radius:100px;padding:10px 14px;color:#8696A0;font-size:.9rem}
+.wa-field svg{width:20px;height:20px;flex:none}
+.wa-mic{width:44px;height:44px;border-radius:50%;background:var(--wa);flex:none;display:grid;place-items:center;color:#fff}
+.wa-mic svg{width:20px;height:20px}
+.phone-cap{margin:10px 0 0;text-align:center;font-size:.86rem;color:var(--mute)}
+.demo-tabs{display:flex;gap:6px;justify-content:center;margin:16px auto 0;padding:4px;background:#fff;border:1px solid var(--rule);border-radius:10px;width:max-content;max-width:100%}
+.demo-tabs button{font-family:inherit;font-size:.84rem;font-weight:600;color:var(--mute);background:none;border:0;padding:7px 12px;border-radius:7px;cursor:pointer;transition:background .2s,color .2s}
+.demo-tabs button:hover{color:var(--ink)}
+.demo-tabs button[aria-selected="true"]{background:var(--ink);color:var(--paper)}
+/* structured entry inside a Briklay bubble */
+.entry{display:block;margin:6px 0 4px;border-left:3px solid var(--wa);border-radius:6px;background:rgba(0,128,105,.07);padding:8px 10px;font-size:.8rem;clear:both}
+.entry b{display:block;font-weight:600;margin-bottom:5px;color:var(--wab-text)}
+.entry dl{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;margin:0}
+.entry dt{color:var(--wab-meta)}
+.entry dd{text-align:right;color:var(--wab-text);font-weight:500;margin:0}
+/* WhatsApp interactive CTA button under a bubble */
+.msg.has-cta{padding-bottom:0}
+.wa-cta{display:flex;align-items:center;justify-content:center;gap:7px;clear:both;margin:8px -10px 0;padding:10px;border-top:1px solid #E9EDEF;color:#027EB5;font-weight:500;font-size:.88rem}
+.wa-cta svg{width:16px;height:16px}
+/* attachments inside bubbles */
+.msg.has-att{padding:4px 4px 6px;max-width:78%}
+.msg.has-att .cap{display:block;padding:5px 6px 0}
+.att{border-radius:7px;overflow:hidden;display:block}
+.receipt{background:#fff;padding:12px 12px 10px;border:1px solid #E5E7EA}
+.receipt .r-top{display:flex;align-items:center;gap:10px}
+.receipt .r-check{width:30px;height:30px;border-radius:50%;background:#1E9E5A;color:#fff;display:grid;place-items:center;font-size:.9rem;font-weight:700;flex:none}
+.receipt .r-top b{display:block;font-size:1.25rem;letter-spacing:-.02em;line-height:1.1;color:#111}
+.receipt .r-top small{display:block;font-size:.74rem;color:#667781}
+.receipt .r-meta{display:flex;justify-content:space-between;gap:10px;margin-top:10px;padding-top:8px;border-top:1px dashed #E0E4E7;font-size:.68rem;color:#8696A0}
+.photo{background:#C9CFD1;aspect-ratio:4/3;width:100%}
+.photo svg{width:100%;height:100%;display:block}
+
+/* hero bottom edge: the page ends, the ledger begins */
+.hero-foot{height:48px}
+
+/* ---------- section scaffolding ---------- */
+section{padding:88px 0}
+section.sheet{background:var(--sheet)}
+.two{display:grid;grid-template-columns:1fr;gap:26px 48px}
+@media(min-width:900px){.two{grid-template-columns:minmax(0,.42fr) minmax(0,.58fr)}}
+.two .lede{color:var(--mute);font-size:1.05rem;max-width:46ch;margin-top:14px}
+
+/* ---------- dashboard: where every message lands ---------- */
+.dash-head{max-width:64ch;margin-bottom:34px}
+.dash-head .lede{color:var(--mute);font-size:1.05rem;margin-top:14px}
+.dash{
+  margin-top:0;background:#fff;border:1px solid var(--rule);border-radius:14px;overflow:hidden;
+  box-shadow:0 1px 0 rgba(18,38,31,.03),0 24px 50px -30px rgba(18,38,31,.25);
+  display:grid;grid-template-columns:1fr;font-size:.9rem;
+}
+@media(min-width:720px){.dash{grid-template-columns:180px 1fr}}
+.dash-side{background:var(--paper);border-right:1px solid var(--rule);padding:14px 10px;display:none}
+@media(min-width:720px){.dash-side{display:block}}
+.dash-side .brand{padding:4px 8px 14px}
+.dash-side .brand svg{width:18px;height:18px}
+.dash-side .brand b{font-size:.98rem}
+.dnav{list-style:none}
+.dnav li{display:flex;justify-content:space-between;align-items:center;padding:8px 10px;border-radius:8px;color:var(--mute);font-weight:500;font-size:.88rem;transition:background .25s,color .25s}
+.dnav li.on{background:#fff;color:var(--ink);box-shadow:0 1px 0 var(--rule)}
+.dnav .badge{min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:var(--rule-soft);color:var(--ink);font-size:.72rem;font-weight:700;display:grid;place-items:center;transition:transform .25s,background .25s,color .25s}
+.dnav .badge.bump{transform:scale(1.25);background:var(--wa);color:#fff}
+.dash-main{min-width:0}
+.dash-top{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--rule)}
+.site-pick{display:inline-flex;align-items:center;gap:6px;font-weight:700;letter-spacing:-.01em;font-size:.98rem}
+.site-pick svg{width:14px;height:14px;color:var(--mute)}
+.live{margin-left:auto;display:inline-flex;align-items:center;gap:7px;font-size:.78rem;color:var(--mute)}
+.live i{width:8px;height:8px;border-radius:50%;background:var(--wa);animation:pulse 1.8s ease-out infinite}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(0,128,105,.45)}70%{box-shadow:0 0 0 7px rgba(0,128,105,0)}100%{box-shadow:0 0 0 0 rgba(0,128,105,0)}}
+.stat{display:flex;gap:14px;align-items:flex-end;padding:18px 18px 12px}
+.dash-top{padding:14px 18px}
+.proc{margin:0 18px 12px}
+.drow{padding:16px 18px}
+.stat .n{font-size:2.1rem;font-weight:700;letter-spacing:-.03em;line-height:1;font-variation-settings:'wdth' 88;font-variant-numeric:tabular-nums}
+.stat .l{color:var(--mute);font-size:.84rem;padding-bottom:4px}
+.proc{
+  display:flex;align-items:center;gap:9px;margin:0 16px 10px;padding:8px 10px;border-radius:8px;
+  background:var(--sheet);color:var(--ink);font-size:.82rem;min-height:36px;
+  opacity:0;transition:opacity .25s,background .3s,color .3s;
+}
+.proc.show{opacity:1}
+.proc.done{background:#E3F4EC;color:#0E6B4E}
+.spin{width:14px;height:14px;border-radius:50%;border:2px solid rgba(18,38,31,.18);border-top-color:var(--ink);animation:spin .8s linear infinite;flex:none}
+.proc.done .spin{animation:none;border:none;background:#0E6B4E;position:relative}
+.proc.done .spin::after{content:"";position:absolute;left:4.5px;top:1.5px;width:3.5px;height:7px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg)}
+@keyframes spin{to{transform:rotate(360deg)}}
+/* attendance register: the week grid */
+.sheet-wrap{margin:0 18px 14px;border:1px solid var(--rule);border-radius:10px;overflow:hidden}
+.sheet-cap{display:flex;justify-content:space-between;gap:12px;padding:9px 12px;font-size:.8rem;color:var(--mute);background:var(--paper);border-bottom:1px solid var(--rule)}
+.reg{width:100%;border-collapse:collapse;font-size:.88rem;font-variant-numeric:tabular-nums}
+.reg th,.reg td{padding:9px 10px;text-align:center;border-bottom:1px solid var(--rule);white-space:nowrap}
+.reg th{font-weight:600;font-size:.76rem;color:var(--mute)}
+.reg .crew{text-align:left}
+.reg td.crew b{display:block;font-weight:600;font-size:.9rem}
+.reg td.crew small{display:block;color:var(--mute);font-size:.74rem;margin-top:1px}
+.reg .today{background:#F0F6F3}
+.reg th.today{color:var(--ink);box-shadow:inset 0 -2px 0 var(--wa)}
+.reg .fut{color:transparent}
+.reg .tot{border-left:1px solid var(--rule)}
+.reg .amt{text-align:right;font-weight:600}
+.reg tfoot td{border-bottom:none;font-weight:700;background:var(--paper)}
+.tcell{display:inline-block;opacity:0;transform:translateY(6px);transition:opacity .28s,transform .28s cubic-bezier(.2,.8,.3,1)}
+.tcell.in{opacity:1;transform:none}
+.tval{opacity:0;transition:opacity .35s}
+.tval.in{opacity:1}
+#lsheet.sk .reg td:not(.crew):not(.today):not(.tot){color:transparent;background-image:linear-gradient(90deg,var(--rule-soft) 25%,#F1F4F2 50%,var(--rule-soft) 75%);background-size:200% 100%;background-clip:content-box;animation:shimmer 1.2s linear infinite}
+@media(max-width:720px){.sheet-wrap{overflow-x:auto}.reg{min-width:560px}}
+.dnav li.go{cursor:pointer}
+.dnav li.go:hover{background:rgba(255,255,255,.7);color:var(--ink)}
+.rows{border-top:1px solid var(--rule)}
+.list-title{padding:10px 18px 6px;font-size:.78rem;color:var(--mute);font-weight:600;border-bottom:1px solid var(--rule)}
+.plan-block{margin-top:6px}
+.trow{display:grid;grid-template-columns:104px 1fr 96px 176px;gap:14px;align-items:center;padding:13px 18px;border-bottom:1px solid var(--rule);position:relative;isolation:isolate}
+.trow:last-child{border-bottom:none}
+.trow .k{font-size:.8rem;color:var(--mute);line-height:1.3}
+.trow .d{min-width:0}
+.trow .d b{display:block;font-weight:600;font-size:.98rem;letter-spacing:-.01em;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.trow .d p{color:var(--mute);font-size:.85rem;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.trow .chip,.trow .approve{justify-self:end}
+.trow .amt{font-weight:700;font-size:1rem;letter-spacing:-.02em;font-variant-numeric:tabular-nums;text-align:right;min-width:5ch}
+.btn.approve{
+  --fill:var(--wa);--ink-on:#fff;--lift:var(--ink);--hover-fill:var(--ink);--hover-ink:var(--paper);
+  min-height:34px;padding:6px 16px;border-radius:7px;font-size:.84rem;width:auto;max-width:none;
+  border:0;font-family:inherit;cursor:pointer;box-shadow:0 3px 0 var(--lift);
+}
+.btn.approve:hover,.btn.approve:focus-visible,.btn.approve:active{transform:translateY(3px);box-shadow:0 0 0 var(--lift)}
+.trow.new{animation:rowin .45s cubic-bezier(.2,.8,.3,1) both}
+.trow.new::before{content:"";position:absolute;inset:0;z-index:-1;background:#DFF1E9;animation:flash 2.6s ease-out .3s both}
+.trow.new .chip{animation:stamp .32s cubic-bezier(.2,.9,.3,1.2) .35s both}
+@keyframes rowin{from{opacity:0;transform:translateY(-14px)}to{opacity:1;transform:none}}
+@keyframes flash{from{opacity:1}to{opacity:0}}
+@keyframes stamp{from{opacity:0;transform:scale(1.3) rotate(-4deg)}to{opacity:1;transform:none}}
+@media(max-width:560px){
+  .trow{grid-template-columns:1fr auto;gap:4px 12px;padding:12px 16px}
+  .trow .k{grid-column:1/-1;order:-1}
+  .trow .d b,.trow .d p{white-space:normal}
+  .trow .chip,.trow .approve{grid-column:1/-1;justify-self:start;margin-top:4px}
+}
+.chip{display:inline-block;font-size:.76rem;font-weight:600;border-radius:6px;padding:5px 10px;white-space:nowrap}
+.chip.warn{background:#FBEFE9;color:var(--red);border:1px solid #EBC7BD}
+.chip.ok{background:#E3F4EC;color:#0E6B4E;border:1px solid #B7DDC9}
+.chip.plan{background:var(--paper);color:var(--mute);border:1px solid var(--rule)}
+.drow:not(.sk) .chip{opacity:0}
+.drow.fill .chip{animation:stamp .32s cubic-bezier(.2,.9,.3,1.2) .4s both}
+@keyframes stamp{from{opacity:0;transform:scale(1.3) rotate(-4deg)}to{opacity:1;transform:none}}
+@media(max-width:560px){
+  .drow{grid-template-columns:1fr;gap:8px;min-height:0}
+  .drow .k{display:flex;gap:8px;align-items:baseline}
+  .drow .k span{display:inline}
+  .drow .chip{justify-self:start}
+  .stat .n{font-size:1.7rem}
+}
+.btn.replay{
+  --fill:#fff;--ink-on:var(--ink);--lift:var(--ink);--hover-fill:var(--ink);--hover-ink:var(--paper);
+  border:1px solid var(--ink);font-family:inherit;font-size:.86rem;cursor:pointer;
+  min-height:38px;padding:7px 14px;border-radius:8px;width:auto;max-width:none;
+  box-shadow:0 3px 0 var(--lift);
+}
+.btn.replay:hover,.btn.replay:focus-visible,.btn.replay:active{transform:translateY(3px);box-shadow:0 0 0 var(--lift)}
+.ledger-note{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px 20px;align-items:center;margin-top:18px;color:var(--mute);font-size:.95rem}
+
+/* ---------- nothing slips ---------- */
+.slips{display:grid;grid-template-columns:1fr;gap:0;border-top:1px solid var(--rule)}
+.slip{padding:22px 0;border-bottom:1px solid var(--rule);display:grid;grid-template-columns:1fr;gap:6px}
+@media(min-width:640px){.slip{grid-template-columns:200px 1fr;gap:24px}}
+.slip b{font-weight:700;font-size:1.08rem;letter-spacing:-.01em}
+.slip p{color:var(--mute);font-size:.98rem}
+
+/* ---------- versus ---------- */
+.vs{display:grid;grid-template-columns:1fr;gap:16px;margin-top:8px}
+@media(min-width:640px){.vs{grid-template-columns:1fr 1fr}}
+.vs-col{border:1px solid var(--rule);border-radius:12px;padding:24px 22px;background:var(--paper)}
+.vs-col.win{background:#fff;border-color:var(--ink)}
+.vs-col h3{margin-bottom:12px;color:var(--mute)}
+.vs-col.win h3{color:var(--ink)}
+.vs-col ul{list-style:none}
+.vs-col li{padding:10px 0;border-top:1px solid var(--rule);font-size:.97rem;color:var(--mute);display:flex;gap:12px;align-items:baseline}
+.vs-col.win li{color:var(--ink)}
+.vs-col li::before{content:"";width:14px;height:14px;flex:none;border-radius:50%;background:var(--rule-soft);transform:translateY(2px)}
+.vs-col.win li::before{background:radial-gradient(circle at center,#fff 0 2.2px,var(--wa) 2.6px)}
+.vs-note{color:var(--mute);font-size:.95rem;margin-top:22px;max-width:52ch}
+
+/* ---------- three steps (a real sequence) ---------- */
+.steps{list-style:none;counter-reset:s;margin-top:6px}
+.steps li{counter-increment:s;display:grid;grid-template-columns:44px 1fr;gap:18px;padding:20px 0;border-top:1px solid var(--rule)}
+.steps li:last-child{border-bottom:1px solid var(--rule)}
+.steps li::before{
+  content:counter(s);width:36px;height:36px;border-radius:50%;
+  border:1.5px solid var(--ink);display:grid;place-items:center;
+  font-weight:600;font-size:.92rem;margin-top:-2px;
+}
+.steps b{display:block;font-weight:700;font-size:1.1rem;letter-spacing:-.01em;margin-bottom:3px}
+.steps p{color:var(--mute);font-size:.96rem}
+
+/* ---------- both halves ---------- */
+.halves{display:grid;grid-template-columns:1fr;gap:16px;margin-top:8px}
+@media(min-width:640px){.halves{grid-template-columns:1fr 1fr}}
+.half{background:#fff;border:1px solid var(--rule);border-radius:12px;padding:26px 24px}
+.half h3{font-size:1.35rem;letter-spacing:-.02em}
+.half .csub{color:var(--mute);font-size:.94rem;margin:4px 0 14px}
+.half ul{list-style:none}
+.half li{padding:9px 0;border-top:1px solid var(--rule);font-size:.96rem}
+
+/* ---------- pricing: the total line ---------- */
+.price{display:grid;grid-template-columns:1fr;gap:28px 48px;align-items:start}
+@media(min-width:900px){.price{grid-template-columns:minmax(0,.42fr) minmax(0,.58fr)}}
+.amount-block{display:inline-block}
+.amount{font-size:clamp(4rem,14vw,6.4rem);font-weight:700;letter-spacing:-.04em;line-height:1;font-variation-settings:'wdth' 85}
+.total-rule{margin-top:10px;height:7px;border-top:1.5px solid var(--ink);border-bottom:1.5px solid var(--ink)} /* accountant's double total line */
+.per{color:var(--mute);margin-top:10px;font-size:1rem}
+.price-card{background:#fff;border:1px solid var(--rule);border-radius:12px;padding:28px 26px}
+.price-card ul{list-style:none;margin-bottom:26px}
+.price-card li{padding:10px 0;border-bottom:1px solid var(--rule);font-size:.98rem;display:flex;gap:12px;align-items:baseline}
+.price-card li:last-child{border-bottom:none}
+.price-card li::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--wa);flex:none;transform:translateY(-1px)}
+
+/* ---------- closing ---------- */
+.closing{padding:100px 0 110px;background:var(--ink);color:var(--paper)}
+.closing .wrap{position:relative;padding-left:44px}
+@media(min-width:900px){.closing .wrap{padding-left:78px}}
+.closing .wrap::before{content:"";position:absolute;top:-100px;bottom:-110px;left:22px;width:1.5px;background:var(--red)}
+@media(min-width:900px){.closing .wrap::before{left:42px}}
+.closing h2{font-size:clamp(2.1rem,7vw,3.6rem);max-width:16ch;font-variation-settings:'wdth' 88}
+.closing p{color:#AFC0B8;max-width:46ch;margin:18px 0 32px;font-size:1.08rem}
+.closing .micro{color:#AFC0B8}
+.closing .btn{--fill:#fff;--ink-on:var(--ink);--lift:var(--wa);--hover-fill:var(--wa);--hover-ink:#fff}
+
+footer{border-top:1px solid var(--rule);background:var(--paper);color:var(--mute)}
+.foot{padding:60px 0 40px}
+@media(max-width:760px){.foot{padding-bottom:110px}} /* clear the sticky mobile CTA */
+.foot-top{display:grid;grid-template-columns:1fr;gap:36px}
+@media(min-width:761px){.foot-top{grid-template-columns:minmax(0,1.4fr) minmax(0,2fr);gap:56px}}
+.foot-brand .brand{margin-bottom:14px}
+.foot-tag{color:var(--mute);font-size:.96rem;line-height:1.55;max-width:38ch}
+.foot-tag .g{font-variant-emoji:text}
+.foot-wa{display:inline-flex;align-items:center;gap:8px;margin-top:16px;color:var(--wa);font-weight:600;font-size:.92rem;text-decoration:none}
+.foot-wa:hover{color:var(--wa-hover)}
+.foot-wa svg{width:18px;height:18px}
+.foot-cols{display:grid;grid-template-columns:repeat(2,1fr);gap:30px 24px}
+@media(min-width:560px){.foot-cols{grid-template-columns:repeat(3,1fr)}}
+.foot-col h4{font-size:.74rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--ink);margin-bottom:12px}
+.foot-col a{display:block;color:var(--mute);text-decoration:none;font-size:.95rem;padding:5px 0;cursor:pointer;transition:color .18s,transform .18s}
+.foot-col a:hover{color:var(--ink)}
+.foot-bar{display:flex;flex-direction:column;gap:12px;align-items:flex-start;margin-top:44px;padding-top:22px;border-top:1px solid var(--rule);font-size:.85rem;color:var(--mute)}
+@media(min-width:640px){.foot-bar{flex-direction:row;justify-content:space-between;align-items:center}}
+.foot-legal{display:flex;gap:22px;flex-wrap:wrap}
+.foot-legal a{color:var(--mute);text-decoration:none}
+.foot-legal a:hover{color:var(--ink)}
+.foot-made .g{font-variant-emoji:text}
+
+/* sticky mobile CTA */
+.sticky-cta{
+  position:fixed;left:0;right:0;bottom:0;z-index:60;
+  padding:10px 14px calc(15px + env(safe-area-inset-bottom));
+  background:rgba(247,246,241,.94);backdrop-filter:blur(12px);
+  border-top:1px solid var(--rule);
+  transform:translateY(110%);transition:transform .3s ease;
+  display:flex;justify-content:center;
+}
+.sticky-cta.show{transform:none}
+@media(min-width:761px){.sticky-cta{display:none}}
+
+a:focus-visible,button:focus-visible{outline:2.5px solid var(--red);outline-offset:3px}
+@media(prefers-reduced-motion:reduce){
+  .msg{opacity:1;transform:none;transition:none}
+  #lsheet.sk *{animation:none}.trow.new,.trow.new::before,.trow.new .chip{animation:none}.live i,.spin{animation:none}
+  .typing i{animation:none}
+  .brand .rec::after{animation:none;display:none}
+  .sticky-cta{transition:none}
+  html{scroll-behavior:auto}
+}
+</style>
+</head>
+<body>
+
+<nav id="nav">
+  <a class="brand" href="#top" aria-label="Briklay home">
+    <b>Briklay<span class="rec" aria-hidden="true"></span></b>
+  </a>
+  <div class="nav-auth">
+    <a class="login" href="#login">Log in</a>
+    <a class="btn nav-cta" href="#signup"><span class="lbl">Sign up</span></a>
+  </div>
+</nav>
+
+<header class="hero" id="top">
+  <div class="wrap">
+    <div class="hero-grid">
+      <div class="hero-copy">
+        <h1>
+          <span class="l">AI site engineer</span>
+          <span class="l hang"><span class="plus">+</span>&nbsp;accountant.</span>
+          <span class="l">Inside WhatsApp.</span>
+        </h1>
+        <p class="sub">Your team texts like always. Briklay records, checks, and files it, for builders running one to ten sites.</p>
+        <div class="cta-zone">
+          <a class="btn" href="https://wa.me/917330872705?text=Hi%20Briklay%2C%20I%E2%80%99d%20like%20to%20see%20it%20work%20on%20my%20site." target="_blank" rel="noopener" id="hero-cta">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5.1-1.3A10 10 0 1 0 12 2zm5.4 14.1c-.2.6-1.2 1.2-1.7 1.2-.4.1-1 .1-1.6-.1-.4-.1-.9-.3-1.5-.6-2.6-1.1-4.3-3.8-4.4-4-.1-.2-1.1-1.4-1.1-2.7s.7-1.9.9-2.2c.2-.2.5-.3.7-.3h.5c.2 0 .4 0 .6.4l.9 2.1c.1.2.1.4 0 .6l-.4.6c-.1.2-.3.4-.1.7.2.3.8 1.3 1.7 2.1 1.2 1 2.1 1.4 2.4 1.5.3.1.5.1.7-.1l1-1.2c.2-.3.4-.2.7-.1l2 1c.3.1.5.2.6.4 0 .1 0 .8-.3 1.7z"/></svg>
+            <span class="lbl">See it on my site</span>
+          </a>
+          <span class="micro">No app to install. No training. Works in Telugu &amp; English.</span>
+        </div>
+      </div>
+
+      <div class="hero-phone">
+        <div class="phone" id="appA" aria-label="Demo: a supervisor's site message on WhatsApp">
+          <div class="wa-head">
+            <span class="back"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 18l-6-6 6-6"/></svg></span>
+            <div class="wa-avatar"><svg viewBox="0 0 40 40" aria-hidden="true"><path d="M6 34 V20 A14 14 0 0 1 34 20 V34"/></svg></div>
+            <div class="wa-id"><b>Briklay</b><span id="presA">online</span></div>
+            <div class="wa-icons">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 2 .7 2.9a2 2 0 0 1-.5 2.1L8 10a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.5c.9.3 1.9.6 2.9.7a2 2 0 0 1 1.7 2z"/></svg>
+            </div>
+          </div>
+          <div class="chat" id="chatA"><div class="day-chip">TODAY</div></div>
+          <div class="wa-input">
+            <div class="wa-field">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
+              Message
+              <svg style="margin-left:auto" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21.4 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.2-9.19a4 4 0 0 1 5.65 5.66l-9.2 9.19a2 2 0 0 1-2.82-2.83l8.49-8.48"/></svg>
+            </div>
+            <div class="wa-mic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/></svg></div>
+          </div>
+        </div>
+        <div class="demo-tabs" id="tabs" role="tablist" aria-label="Pick a demo">
+          <button type="button" role="tab" data-demo="payment">Payment</button>
+          <button type="button" role="tab" data-demo="attendance">Attendance</button>
+          <button type="button" role="tab" data-demo="issue">Issue follow-up</button>
+        </div>
+        <p class="phone-cap">Your supervisor's WhatsApp. Nothing new to learn.</p>
+      </div>
+    </div>
+    <div class="hero-foot"></div>
+  </div>
+</header>
+
+<main>
+
+<section class="sheet" id="demo">
+  <div class="wrap">
+    <div class="dash-head">
+      <h2>Your dashboard. Already filled in.</h2>
+      <p class="lede">Every message your team sends reaches your dashboard and is filed where it belongs: Books, issues, attendance, work plans. You open it to approve, not to type.</p>
+    </div>
+    <div class="dash" id="ledger" aria-label="Your Briklay dashboard, filing what the chat said">
+      <aside class="dash-side" aria-hidden="true">
+        <div class="brand"><b>Briklay<span class="rec" aria-hidden="true"></span></b></div>
+        <ul class="dnav" id="dnav">
+          <li data-nav="books">Books <span class="badge" id="b-books">3</span></li>
+          <li data-nav="site">Site</li>
+          <li data-nav="issues">Issues <span class="badge" id="b-issues">3</span></li>
+          <li data-nav="attendance">Attendance</li>
+          <li data-nav="plan">Work plan</li>
+          <li data-nav="briefs">Briefs</li>
+        </ul>
+      </aside>
+      <div class="dash-main">
+        <div class="dash-top">
+          <span class="site-pick">ASM Elite <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 9l6 6 6-6"/></svg></span>
+          <span class="live"><i></i>Listening on WhatsApp</span>
+        </div>
+        <div class="stat"><span class="n" id="statN">₹0</span><span class="l" id="statL">pending your approval</span></div>
+        <div class="proc" id="proc"><span class="spin"></span><span id="procT">Reading message…</span></div>
+        <div id="lsheet"></div>
+        <div class="rows" id="lrows"></div>
+      </div>
+    </div>
+    <div class="ledger-note">
+      <span id="ledgerLede"></span>
+      <button class="btn replay" id="replay" type="button"><span class="lbl">↻ Replay this one</span></button>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap two">
+    <div>
+      <h2>Nothing slips through a site again.</h2>
+      <p class="lede">Your business runs on your memory. A payment not noted. A bill not checked. An update lost in a chat. That is how sites leak money. Briklay records everything, and questions what does not add up.</p>
+    </div>
+    <div class="slips">
+      <div class="slip"><b>Every transaction</b><p>Payments and expenses written straight into your Books, the day they happen, not at month-end.</p></div>
+      <div class="slip"><b>Every bill</b><p>Bills checked against orders line by line, with an AI rate-check on what vendors charge you.</p></div>
+      <div class="slip"><b>Every update</b><p>Work, attendance, and materials logged from your team's normal messages, and briefed to you daily.</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="sheet">
+  <div class="wrap two">
+    <div>
+      <h2>Other apps died at your site. Here's why this won't.</h2>
+      <p class="lede">Every app asks your team to learn software. They never do. Briklay lives in WhatsApp, where they already are.</p>
+    </div>
+    <div>
+      <div class="vs">
+        <div class="vs-col">
+          <h3>Construction apps</h3>
+          <ul>
+            <li>New app your team must learn</li>
+            <li>Forms to fill for every entry</li>
+            <li>Works only if supervisors comply</li>
+            <li>Dies when the site gets busy</li>
+          </ul>
+        </div>
+        <div class="vs-col win">
+          <h3>Briklay</h3>
+          <ul>
+            <li>WhatsApp is the app</li>
+            <li>Messages are the entries</li>
+            <li>Works even with a messy team</li>
+            <li>Busier the site, more it captures</li>
+          </ul>
+        </div>
+      </div>
+      <p class="vs-note">Built inside a construction company, with decades of construction expertise behind it, not by a software company guessing what a site looks like.</p>
+      <div style="margin-top:28px">
+        <a class="btn" href="https://wa.me/917330872705?text=Hi%20Briklay%2C%20I%E2%80%99d%20like%20to%20see%20it%20work%20on%20my%20site." target="_blank" rel="noopener">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5.1-1.3A10 10 0 1 0 12 2zm5.4 14.1c-.2.6-1.2 1.2-1.7 1.2-.4.1-1 .1-1.6-.1-.4-.1-.9-.3-1.5-.6-2.6-1.1-4.3-3.8-4.4-4-.1-.2-1.1-1.4-1.1-2.7s.7-1.9.9-2.2c.2-.2.5-.3.7-.3h.5c.2 0 .4 0 .6.4l.9 2.1c.1.2.1.4 0 .6l-.4.6c-.1.2-.3.4-.1.7.2.3.8 1.3 1.7 2.1 1.2 1 2.1 1.4 2.4 1.5.3.1.5.1.7-.1l1-1.2c.2-.3.4-.2.7-.1l2 1c.3.1.5.2.6.4 0 .1 0 .8-.3 1.7z"/></svg>
+          <span class="lbl">Show me on my site</span>
+        </a>
+        <span class="micro">A 10-minute demo on your own WhatsApp number.</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap two">
+    <div>
+      <h2>Three steps. The third one is you relaxing.</h2>
+    </div>
+    <ol class="steps">
+      <li><div><b>They send</b><p>Telugu, English, messy. Like always.</p></div></li>
+      <li><div><b>It gets recorded where it needs to be</b><p>Work, attendance, stock, Books. Filed on its own.</p></div></li>
+      <li><div><b>You approve or observe</b><p>Money moves only with your yes. Nothing is lost.</p></div></li>
+    </ol>
+  </div>
+</section>
+
+<section class="sheet">
+  <div class="wrap two">
+    <div>
+      <h2>Both halves of your business. One register.</h2>
+      <p class="lede">Site tools ignore money. Accounting tools ignore the site. Briklay runs both, from the same messages.</p>
+    </div>
+    <div class="halves">
+      <div class="half">
+        <h3>The site</h3>
+        <p class="csub">What's happening, where, and what's stuck.</p>
+        <ul>
+          <li>Work plans by block, floor, and flat</li>
+          <li>Attendance from daily messages</li>
+          <li>Problems raised, chased, and closed</li>
+          <li>Materials and POs tracked to delivery</li>
+        </ul>
+      </div>
+      <div class="half">
+        <h3>The money</h3>
+        <p class="csub">Every rupee tied to the work it paid for.</p>
+        <ul>
+          <li>Books written from WhatsApp</li>
+          <li>Weekly payment runs by gang and mesthri</li>
+          <li>Bills checked against orders, line by line</li>
+          <li>Tally sync. Your CA stays happy</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="pricing">
+  <div class="wrap price">
+    <div>
+      <div class="amount-block">
+        <div class="amount">₹399</div>
+        <div class="total-rule" aria-hidden="true"></div>
+      </div>
+      <p class="per">per seat, per month. One caught bill pays for the year.</p>
+    </div>
+    <div class="price-card">
+      <ul>
+        <li>First 3 months free, on your live sites</li>
+        <li>Everything included: site, money, briefs</li>
+        <li>Telugu, English, and the mix in between</li>
+        <li>Cancel any month. Your data stays yours.</li>
+      </ul>
+      <a class="btn" href="https://wa.me/917330872705?text=Hi%20Briklay%2C%20I%E2%80%99d%20like%20to%20see%20it%20work%20on%20my%20site." target="_blank" rel="noopener" style="max-width:none">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5.1-1.3A10 10 0 1 0 12 2zm5.4 14.1c-.2.6-1.2 1.2-1.7 1.2-.4.1-1 .1-1.6-.1-.4-.1-.9-.3-1.5-.6-2.6-1.1-4.3-3.8-4.4-4-.1-.2-1.1-1.4-1.1-2.7s.7-1.9.9-2.2c.2-.2.5-.3.7-.3h.5c.2 0 .4 0 .6.4l.9 2.1c.1.2.1.4 0 .6l-.4.6c-.1.2-.3.4-.1.7.2.3.8 1.3 1.7 2.1 1.2 1 2.1 1.4 2.4 1.5.3.1.5.1.7-.1l1-1.2c.2-.3.4-.2.7-.1l2 1c.3.1.5.2.6.4 0 .1 0 .8-.3 1.7z"/></svg>
+        <span class="lbl">Start my free 3 months</span>
+      </a>
+      <span class="micro">No card. No contract. Starts on WhatsApp.</span>
+    </div>
+  </div>
+</section>
+
+<section class="closing">
+  <div class="wrap">
+    <h2>Run your sites on records, not memory.</h2>
+    <p>Send one message from your supervisor and watch what Briklay does with it, on your own site, today.</p>
+    <a class="btn" href="https://wa.me/917330872705?text=Hi%20Briklay%2C%20I%E2%80%99d%20like%20to%20see%20it%20work%20on%20my%20site." target="_blank" rel="noopener">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5.1-1.3A10 10 0 1 0 12 2zm5.4 14.1c-.2.6-1.2 1.2-1.7 1.2-.4.1-1 .1-1.6-.1-.4-.1-.9-.3-1.5-.6-2.6-1.1-4.3-3.8-4.4-4-.1-.2-1.1-1.4-1.1-2.7s.7-1.9.9-2.2c.2-.2.5-.3.7-.3h.5c.2 0 .4 0 .6.4l.9 2.1c.1.2.1.4 0 .6l-.4.6c-.1.2-.3.4-.1.7.2.3.8 1.3 1.7 2.1 1.2 1 2.1 1.4 2.4 1.5.3.1.5.1.7-.1l1-1.2c.2-.3.4-.2.7-.1l2 1c.3.1.5.2.6.4 0 .1 0 .8-.3 1.7z"/></svg>
+      <span class="lbl">Get my demo on WhatsApp</span>
+    </a>
+    <span class="micro">Replies come from a builder, not a sales team.</span>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap foot">
+    <div class="foot-top">
+      <div class="foot-brand">
+        <a class="brand" href="#top" aria-label="Briklay home"><b>Briklay<span class="rec" aria-hidden="true"></span></b></a>
+        <p class="foot-tag">An AI site engineer and accountant that lives in your team&#8217;s WhatsApp. It records, checks, and files every message, so your books stay true without anyone learning software.</p>
+        <a class="foot-wa" href="https://wa.me/917330872705?text=Hi%20Briklay%2C%20I%E2%80%99d%20like%20to%20see%20it%20work%20on%20my%20site." target="_blank" rel="noopener">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5.1-1.3A10 10 0 1 0 12 2zm5.4 14.1c-.2.6-1.2 1.2-1.7 1.2-.4.1-1 .1-1.6-.1-.4-.1-.9-.3-1.5-.6-2.6-1.1-4.3-3.8-4.4-4-.1-.2-1.1-1.4-1.1-2.7s.7-1.9.9-2.2c.2-.2.5-.3.7-.3h.5c.2 0 .4 0 .6.4l.9 2.1c.1.2.1.4 0 .6l-.4.6c-.1.2-.3.4-.1.7.2.3.8 1.3 1.7 2.1 1.2 1 2.1 1.4 2.4 1.5.3.1.5.1.7-.1l1-1.2c.2-.3.4-.2.7-.1l2 1c.3.1.5.2.6.4 0 .1 0 .8-.3 1.7z"/></svg>
+          Talk to us on WhatsApp
+        </a>
+      </div>
+      <div class="foot-cols" role="navigation" aria-label="Footer">
+        <div class="foot-col">
+          <h4>Product</h4>
+          <a href="#demo">How it works</a>
+          <a href="#pricing">Pricing</a>
+          <a class="login" href="#login">Log in</a>
+          <a class="nav-cta" href="#signup">Sign up</a>
+        </div>
+        <div class="foot-col">
+          <h4>Company</h4>
+          <a href="#top">Our story</a>
+          <a href="#demo">See a demo</a>
+          <a href="https://wa.me/917330872705?text=Hi%20Briklay%2C%20I%E2%80%99d%20like%20to%20talk%20to%20the%20team." target="_blank" rel="noopener">Contact us</a>
+        </div>
+        <div class="foot-col">
+          <h4>Legal</h4>
+          <a href="/privacy" target="_top">Privacy policy</a>
+          <a href="/terms" target="_top">Terms &amp; conditions</a>
+          <a href="/data-deletion" target="_top">Data deletion</a>
+        </div>
+      </div>
+    </div>
+    <div class="foot-bar">
+      <span>&#169; 2026 Briklay Engineering. All rights reserved.</span>
+      <span class="foot-made">Built on live construction sites <span class="g">&#9874;&#xFE0E;</span></span>
+      <span class="foot-legal">
+        <a href="/privacy" target="_top">Privacy</a>
+        <a href="/terms" target="_top">Terms</a>
+        <a href="/data-deletion" target="_top">Data deletion</a>
+      </span>
+    </div>
+  </div>
+</footer>
+
+<div class="sticky-cta" id="sticky">
+  <a class="btn" href="https://wa.me/917330872705?text=Hi%20Briklay%2C%20I%E2%80%99d%20like%20to%20see%20it%20work%20on%20my%20site." target="_blank" rel="noopener">
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5.1-1.3A10 10 0 1 0 12 2zm5.4 14.1c-.2.6-1.2 1.2-1.7 1.2-.4.1-1 .1-1.6-.1-.4-.1-.9-.3-1.5-.6-2.6-1.1-4.3-3.8-4.4-4-.1-.2-1.1-1.4-1.1-2.7s.7-1.9.9-2.2c.2-.2.5-.3.7-.3h.5c.2 0 .4 0 .6.4l.9 2.1c.1.2.1.4 0 .6l-.4.6c-.1.2-.3.4-.1.7.2.3.8 1.3 1.7 2.1 1.2 1 2.1 1.4 2.4 1.5.3.1.5.1.7-.1l1-1.2c.2-.3.4-.2.7-.1l2 1c.3.1.5.2.6.4 0 .1 0 .8-.3 1.7z"/></svg>
+    <span class="lbl">See it on my site, free</span>
+  </a>
+</div>
+
+<script>
+const nav=document.getElementById('nav');
+addEventListener('scroll',()=>nav.classList.toggle('scrolled',scrollY>40),{passive:true});
+
+// ---------- Demo: three scripts, one per load ----------
+const reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;
+const TICKS='<span class="ticks"><svg class="t1" viewBox="0 0 15 10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M1 5.5l3 3 5-6.5"/></svg><svg class="t2" viewBox="0 0 15 10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M5.5 5.5l3 3 5-6.5"/></svg></span>';
+const RECEIPT='<span class="att receipt"><span class="r-top"><span class="r-check">✓</span><span><b>₹24,000</b><small>Paid to Raju · Steel</small></span></span><span class="r-meta"><span>UPI ref 4271 8830 1192</span><span>16 Sep, 4:11 PM</span></span></span>';
+const PHOTO='<span class="att photo"><svg viewBox="0 0 400 300" aria-label="Site photo: grouted slab"><rect width="400" height="300" fill="#B9C3C8"/><rect y="0" width="400" height="120" fill="#D6DEE2"/><rect x="0" y="120" width="400" height="180" fill="#9AA5AB"/><rect x="40" y="150" width="320" height="110" fill="#8A959B"/><rect x="150" y="175" width="120" height="60" rx="6" fill="#6F7B82"/><g stroke="#5C676D" stroke-width="3" opacity=".6"><line x1="40" y1="180" x2="360" y2="180"/><line x1="40" y1="210" x2="360" y2="210"/><line x1="40" y1="240" x2="360" y2="240"/></g><g stroke="#4A555B" stroke-width="5" stroke-linecap="round"><line x1="60" y1="120" x2="60" y2="40"/><line x1="110" y1="120" x2="110" y2="60"/><line x1="340" y1="120" x2="340" y2="50"/></g></svg></span>';
+
+const E=(title,rows)=>'<span class="entry"><b>'+title+'</b><dl>'+rows.map(r=>'<dt>'+r[0]+'</dt><dd>'+r[1]+'</dd>').join('')+'</dl></span>';
+const CTA=label=>'<span class="wa-cta"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14L21 3"/></svg>'+label+'</span>';
+const SHEET_ATT={
+  week:'Week of 14 Sep · ASM Elite',today:2,
+  cols:['Mon','Tue','Wed','Thu','Fri','Sat'],
+  rows:[
+    {n:'Ravi gang',s:'Masons · skilled · ₹900',d:[14,14,12],days:40,amt:'₹36,000'},
+    {n:'Helpers',s:'Unskilled · ₹550',d:[18,18,18],days:54,amt:'₹29,700'},
+    {n:'Bar benders',s:'Skilled · ₹850',d:[4,4,4],days:12,amt:'₹10,200'}
+  ],
+  tot:{d:[36,36,34],days:106,amt:'₹75,900'}
+};
+const SCENARIOS={
+  payment:{
+    lede:'A UPI screenshot and three words. Read, questioned once, filed on top of today\u2019s Books.',
+    nav:'books',badge:'b-books',stat:{v:24000,pre:'₹',l:'pending your approval'},
+    msgs:[
+      {side:'out',att:RECEIPT,text:'steel advance raju',time:'4:12 PM'},
+      {side:'in',text:'Screenshot chadivanu ✅'+E('Payment found',[['Amount','₹24,000'],['To','Raju'],['For','Steel advance'],['Site','?']])+'Ee site ki? <b>ASM Elite</b> or <b>Sai Enclave</b>?',time:'4:12 PM'},
+      {side:'out',text:'asm elite',time:'4:13 PM'},
+      {side:'in',text:'Recorded ✅'+E('Books · pending your approval',[['Amount','₹24,000'],['To','Raju'],['For','Steel advance'],['Site','ASM Elite'],['Raju advance total','₹64,000']])+'Recorded in your app.',time:'4:13 PM',cta:'View in Books'}
+    ],
+    list:{title:'Books · today',existing:[
+      {k:'11:20 AM',b:'JCB diesel',p:'Site expense · ASM Elite · from Suresh',amt:'₹1,850',chip:'ok',c:'Approved'},
+      {k:'9:40 AM',b:'Suresh gang',p:'Weekly advance · ASM Elite',amt:'₹12,000',chip:'ok',c:'Approved'},
+      {k:'Yesterday',b:'Sri Sai Cements',p:'Bill 4471 · 120 bags · ASM Elite',amt:'₹3,40,000',chip:'ok',c:'Paid'},
+      {k:'Yesterday',b:'Kiran Electricals',p:'Conduit and boxes · Sai Enclave',amt:'₹6,500',chip:'ok',c:'Approved'}
+    ]},
+    steps:[
+      {proc:'Reading screenshot… ₹24,000 · Raju · UPI ref 4271…',action:'insert',row:{k:'4:13 PM',b:'Raju',p:'Steel advance · ASM Elite · from a UPI screenshot',amt:'₹24,000',approve:true}},
+      {proc:'Updating Raju\u2019s ledger… advance outstanding ₹64,000',action:'none'}
+    ]
+  },
+  attendance:{
+    lede:'One headcount message. The week\u2019s register and Friday\u2019s payment run, updated.',
+    nav:'attendance',badge:null,stat:{v:34,pre:'',l:'on site today · 2 absent'},sheet:SHEET_ATT,
+    msgs:[
+      {side:'out',text:'today attendance: mason 12, helper 18, bar bender 4. ravi gang lo 2 absent',time:'9:05 AM'},
+      {side:'in',text:'Attendance recorded ✅'+E('Wed 16 Sep · ASM Elite',[['Masons','12'],['Helpers','18'],['Bar benders','4'],['Absent','Ravi gang · 2'],['Total on site','34']])+'Attendance and weekly run updated.',time:'9:05 AM',cta:'View attendance'}
+    ],
+    list:{title:'Payment runs',existing:[
+      {k:'Fri 11 Sep',b:'Last week',p:'3 crews · 118 days',amt:'₹82,300',chip:'ok',c:'Paid'}
+    ]},
+    steps:[
+      {proc:'Recomputing Friday run… days × rate per crew',action:'insert',row:{k:'Fri 18 Sep',b:'This week, so far',p:'3 crews · 106 days · Ravi gang two days short, balance carries',amt:'₹75,900',chip:'plan',c:'Planned'}}
+    ]
+  },
+  issue:{
+    lede:'Briklay opened this chat, not the supervisor. Yesterday\u2019s issue chased, closed, and tomorrow planned.',
+    nav:'issues',badge:'b-issues',badgeDelta:-1,stat:{v:2,pre:'',l:'open issues · was 3'},
+    msgs:[
+      {side:'in',text:'Morning 🙏 1st slab honeycombs, grouting status enti? Photo pampandi.',time:'8:30 AM'},
+      {side:'out',att:PHOTO,text:'grouting done, ee morning finish chesam',time:'8:41 AM'},
+      {side:'in',text:'Photo chusanu ✅'+E('Issue updated',[['Issue','Honeycombs · 1st slab'],['Status','Grouting done'],['Photo','Filed'],['Verification','Engineer, pending']])+'Logged in the app.',time:'8:41 AM',cta:'View issue'},
+      {side:'in',text:'Tomorrow\u2019s plan'+E('Thu 17 Sep · ASM Elite',[['7 AM','Curing · 1st slab'],['8 AM','Shuttering · 2nd floor slab · Suresh gang'],['11 AM','Steel delivery · 12 mm · 2 T']]),time:'6:00 PM',cta:'View plan'}
+    ],
+    list:{title:'Issues · ASM Elite',existing:[
+      {k:'Open 2 days',b:'Honeycombs, 1st slab',p:'Raised Mon from Suresh\u2019s photo · grouting assigned',chip:'warn',c:'Open'},
+      {k:'Open 3 days',b:'Leak, 2nd floor bathroom',p:'Block A · plumber informed, no update yet',chip:'warn',c:'Open'},
+      {k:'Open 1 day',b:'Plaster crack, stairwell',p:'Block B · engineer to inspect',chip:'warn',c:'Open'}
+    ]},
+    steps:[
+      {proc:'Matching photo to open issue… honeycombs, 1st slab',action:'update',match:0,row:{k:'Closed 8:41 AM',p:'Grouting done, photo on file · engineer verification pending',chip:'ok',c:'Resolved today'}},
+      {proc:'Scheduling curing… 7 AM reminder to the supervisor',action:'insert',into:'plan',row:{k:'Tomorrow',b:'Curing, 1st slab · 7 AM',p:'Shuttering and steel delivery follow · plan sent to supervisor 6 PM',chip:'plan',c:'Scheduled'}}
+    ]
+  }
+};
+const KEYS=Object.keys(SCENARIOS);
+const NAV2KEY={books:'payment',attendance:'attendance',issues:'issue'};
+const chat=document.getElementById('chatA');
+const presA=document.getElementById('presA');
+const ledger=document.getElementById('ledger');
+const lrows=document.getElementById('lrows');
+const lsheet=document.getElementById('lsheet');
+const lede=document.getElementById('ledgerLede');
+const proc=document.getElementById('proc'),procT=document.getElementById('procT');
+const statN=document.getElementById('statN'),statL=document.getElementById('statL');
+const tabs=[...document.querySelectorAll('#tabs button')];
+let timers=[],dtimers=[],current=null,dashPlayed=false,dashVisible=false,chatDone=false;
+const clr=a=>{a.forEach(clearTimeout);a.length=0};
+const t=(fn,ms)=>timers.push(setTimeout(fn,ms));
+const dt=(fn,ms)=>dtimers.push(setTimeout(fn,ms));
+
+function sheetHTML(sh){
+  const th=sh.cols.map((c,i)=>'<th class="'+(i===sh.today?'today':'')+'">'+c+'</th>').join('');
+  const cell=(row,i)=>{
+    if(i<row.d.length-1)return '<td>'+row.d[i]+'</td>';
+    if(i===sh.today)return '<td class="today"><span class="tcell pending">'+row.d[i]+'</span></td>';
+    return '<td class="fut"></td>';
+  };
+  const tr=sh.rows.map(r=>'<tr><td class="crew"><b>'+r.n+'</b><small>'+r.s+'</small></td>'+sh.cols.map((c,i)=>cell(r,i)).join('')+'<td class="tot num"><span class="tval">'+r.days+'</span></td><td class="tot amt"><span class="tval">'+r.amt+'</span></td></tr>').join('');
+  const tf='<tr class="sum"><td class="crew">On site</td>'+sh.cols.map((c,i)=>cell({d:sh.tot.d},i)).join('')+'<td class="tot num"><span class="tval">'+sh.tot.days+'</span></td><td class="tot amt"><span class="tval">'+sh.tot.amt+'</span></td></tr>';
+  return '<div class="sheet-wrap"><div class="sheet-cap"><span>'+sh.week+'</span><span>Days × rate → Friday run</span></div><table class="reg"><thead><tr><th class="crew">Crew</th>'+th+'<th class="tot">Days</th><th class="tot">This week</th></tr></thead><tbody>'+tr+'</tbody><tfoot>'+tf+'</tfoot></table></div>';
+}
+const rowHTML=r=>'<div class="trow"><div class="k">'+r.k+'</div><div class="d"><b>'+r.b+'</b><p>'+r.p+'</p></div>'+(r.amt?'<div class="amt">'+r.amt+'</div>':'<div class="amt"></div>')+(r.approve?'<button type="button" class="btn approve"><span class="lbl">Approve</span></button>':'<span class="chip '+r.chip+'">'+r.c+'</span>')+'</div>';
+function approve(btn){
+  clr(dtimers);
+  const row=btn.closest('.trow');
+  const ch=document.createElement('span');ch.className='chip ok stamp';ch.textContent='Approved';ch.style.animation='stamp .32s cubic-bezier(.2,.9,.3,1.2) both';
+  btn.replaceWith(ch);
+  row.querySelector('.d p').textContent='Steel advance · ASM Elite · approved by you, 4:20 PM';
+  countTo(statN,'₹',0,700);statL.textContent='pending your approval · Raju approved';
+  const b=document.getElementById('b-books');b.textContent='3';b.classList.add('bump');setTimeout(()=>b.classList.remove('bump'),600);
+  proc.classList.add('show','done');procT.textContent='Approved. Posted to Books · Raju\u2019s ledger updated · Tally sync queued.';
+  // the supervisor hears about it on WhatsApp
+  if(!chat.querySelector('.msg.approved')){
+    const el=mk('<div class="msg in approved">Approved ✅'+E('Books · posted',[['Amount','₹24,000'],['To','Raju'],['Approved by','Sir, 4:20 PM']])+'<span class="m-meta">4:20 PM</span></div>');
+    chat.appendChild(el);requestAnimationFrame(()=>{el.classList.add('show');scrollChatTo(el)});
+  }
+}
+lrows.addEventListener('click',e=>{const b=e.target.closest('.btn.approve');if(b)approve(b)});
+const mk=html=>{const d=document.createElement('div');d.innerHTML=html;return d.firstElementChild};
+function doStep(st,animate){
+  if(st.action==='insert'){
+    const el=mk(rowHTML(st.row));
+    if(st.into==='plan'){
+      let pl=lrows.querySelector('.plan-block');
+      if(!pl){pl=mk('<div class="plan-block"><div class="list-title">Work plan · ASM Elite</div></div>');lrows.appendChild(pl)}
+      pl.appendChild(el);
+    }else{lrows.querySelector('.list-title').after(el)}
+    if(animate)el.classList.add('new');
+  }else if(st.action==='update'){
+    const el=lrows.querySelectorAll('.trow')[st.match];
+    el.querySelector('.k').textContent=st.row.k;
+    el.querySelector('.d p').textContent=st.row.p;
+    const ch=el.querySelector('.chip');ch.className='chip '+st.row.chip;ch.textContent=st.row.c;
+    if(animate){el.classList.add('new');ch.classList.add('stamp')}
+  }
+}
+function build(key){
+  const sc=SCENARIOS[key];
+  clr(timers);clr(dtimers);chatDone=false;
+  chat.innerHTML='<div class="day-chip">TODAY</div>';
+  sc.msgs.forEach(m=>{
+    const el=document.createElement('div');
+    el.className='msg '+m.side+(m.att?' has-att':'')+(m.cta?' has-cta':'');
+    if(m.side==='out')el.dataset.tick='0';
+    const body=m.att?m.att+'<span class="cap">'+m.text+'</span>':m.text;
+    el.innerHTML=body+'<span class="m-meta">'+m.time+(m.side==='out'?' '+TICKS:'')+'</span>'+(m.cta?CTA(m.cta):'');
+    chat.appendChild(el);
+    if(m.side==='in'){const ty=document.createElement('div');ty.className='typing';ty.innerHTML='<i></i><i></i><i></i>';el.before(ty)}
+  });
+  chat.scrollTop=0;
+  lsheet.innerHTML=sc.sheet?sheetHTML(sc.sheet):'';
+  lsheet.classList.toggle('sk',!!sc.sheet);
+  lrows.innerHTML='<div class="list-title">'+sc.list.title+'</div>'+sc.list.existing.map(rowHTML).join('');
+  lrows.classList.remove('has-plan');
+  lede.textContent=sc.lede;
+  document.querySelectorAll('#dnav li').forEach(li=>li.classList.toggle('on',li.dataset.nav===sc.nav));
+  document.getElementById('b-books').textContent='3';document.getElementById('b-issues').textContent='3';
+  statN.textContent=sc.stat.pre+'0';statL.textContent=sc.stat.l;
+  proc.classList.remove('show','done');
+  tabs.forEach(b=>b.setAttribute('aria-selected',b.dataset.demo===key));
+  current=key;dashPlayed=false;
+  if(dashVisible)dt(playDash,400);
+}
+const scrollChatTo=el=>{chat.scrollTo({top:el.offsetTop+el.offsetHeight-chat.clientHeight+14,behavior:'smooth'})};
+function playChat(){
+  clr(timers);presA.textContent='online';
+  const msgs=[...chat.querySelectorAll('.msg')];
+  const typ=[...chat.querySelectorAll('.typing')];
+  if(reduced){msgs.forEach(m=>{m.classList.add('show');if(m.dataset.tick)m.dataset.tick='3'});chat.scrollTop=chat.scrollHeight;chatDone=true;return}
+  let at=300,ti=0;
+  msgs.forEach((m,i)=>{
+    if(m.classList.contains('out')){
+      const el=m;t(()=>{el.classList.add('show');el.dataset.tick='1';scrollChatTo(el)},at);t(()=>el.dataset.tick='2',at+400);t(()=>el.dataset.tick='3',at+750);
+      at+=1100;
+    }else{
+      const ty=typ[ti++],el=m,think=(i===0?700:1200);
+      t(()=>{presA.textContent='typing…';ty.classList.add('show');scrollChatTo(ty)},at);
+      t(()=>{ty.classList.remove('show');presA.textContent='online';el.classList.add('show');scrollChatTo(el)},at+think);
+      at+=think+900;
+    }
+  });
+  t(()=>{chatDone=true;if(dashVisible&&!dashPlayed)playDash()},at);
+}
+function countTo(el,pre,v,ms){
+  const t0=performance.now();
+  const from=parseInt(el.textContent.replace(/[^0-9]/g,''))||0;
+  const step=n=>{const k=Math.min(1,(n-t0)/ms),e=1-Math.pow(1-k,3);el.textContent=pre+Math.round(from+(v-from)*e).toLocaleString('en-IN');if(k<1)requestAnimationFrame(step)};
+  requestAnimationFrame(step);
+}
+function playDash(){
+  clr(dtimers);dashPlayed=true;
+  const sc=SCENARIOS[current];
+  const finish=()=>{proc.classList.add('show','done');procT.textContent='Filed from WhatsApp.'};
+  const bump=()=>{countTo(statN,sc.stat.pre,sc.stat.v,800);if(sc.badge){const b=document.getElementById(sc.badge);b.textContent=String(3+(sc.badgeDelta||1));b.classList.add('bump');setTimeout(()=>b.classList.remove('bump'),600)}};
+  if(reduced){
+    lsheet.classList.remove('sk');lsheet.querySelectorAll('.pending,.tval').forEach(c=>c.classList.add('in'));
+    sc.steps.forEach(st=>doStep(st,false));statN.textContent=sc.stat.pre+sc.stat.v.toLocaleString('en-IN');finish();return;
+  }
+  let at=250;
+  if(sc.sheet){
+    const cells=[...lsheet.querySelectorAll('.pending')],tots=[...lsheet.querySelectorAll('.tval')];
+    dt(()=>{proc.classList.remove('done');proc.classList.add('show');procT.textContent='Parsing headcount… masons 12 · helpers 18 · bar benders 4'},at);
+    dt(()=>{lsheet.classList.remove('sk')},at+900);
+    cells.forEach((c,i)=>dt(()=>{c.classList.add('in');if(i===cells.length-1)bump()},at+1100+i*260));
+    at+=1100+cells.length*260+300;
+    dt(()=>{procT.textContent='Totting the week… days × rate per crew'},at);
+    tots.forEach((c,i)=>dt(()=>c.classList.add('in'),at+300+i*90));
+    at+=300+tots.length*90+500;
+  }
+  sc.steps.forEach((st,i)=>{
+    dt(()=>{proc.classList.remove('done');proc.classList.add('show');procT.textContent=st.proc},at);
+    dt(()=>{doStep(st,true);if(i===0&&!sc.sheet)bump()},at+1200);
+    at+=st.action==='none'?1500:1900;
+  });
+  dt(finish,at);
+}
+// one script per load; ?demo=payment|attendance|issue forces one
+const forced=new URLSearchParams(location.search).get('demo');
+build(KEYS.includes(forced)?forced:KEYS[Math.floor(Math.random()*KEYS.length)]);
+const obsA=new IntersectionObserver(es=>{if(es[0].isIntersecting){obsA.disconnect();playChat()}},{threshold:.3});
+obsA.observe(document.getElementById('appA'));
+const obsL=new IntersectionObserver(es=>{
+  dashVisible=es[0].isIntersecting;
+  if(dashVisible&&!dashPlayed){if(chatDone)playDash();else dt(()=>{if(!dashPlayed)playDash()},900)}
+},{threshold:.25});
+obsL.observe(ledger);
+
+function switchTo(key){if(key===current)return;build(key);playChat()}
+tabs.forEach(b=>b.addEventListener('click',()=>switchTo(b.dataset.demo)));
+document.querySelectorAll('#dnav li').forEach(li=>{
+  const k=NAV2KEY[li.dataset.nav];
+  if(k){li.classList.add('go');li.addEventListener('click',()=>{switchTo(k)})}
+});
+document.getElementById('replay').addEventListener('click',()=>{
+  document.getElementById('top').scrollIntoView({behavior:reduced?'auto':'smooth'});
+  build(current);playChat();
+});
+
+// ---------- sticky mobile CTA ----------
+const heroCta=document.getElementById('hero-cta');
+const sticky=document.getElementById('sticky');
+const sio=new IntersectionObserver(es=>{sticky.classList.toggle('show',!es[0].isIntersecting)},{threshold:0});
+sio.observe(heroCta);
+</script>
+<script>
+(function(){
+  function wire(sel,mode){document.querySelectorAll(sel).forEach(function(a){a.addEventListener("click",function(e){e.preventDefault();try{parent.postMessage({type:"brik-auth",mode:mode},"*")}catch(_){}} )})}
+  wire(".login","signin");
+  wire(".nav-cta","signup");
+})();
+</script>
+</body>
+</html>
