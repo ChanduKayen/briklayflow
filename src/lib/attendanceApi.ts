@@ -186,10 +186,11 @@ export async function loadWeek(monday: Date): Promise<WeekData> {
       const crewCats = cats.filter((k: any) => k.crew_id === c.crew_id).map((k: any): CatRow => ({
         id: k.id, n: k.category, rate: Number(k.rate) || 0, own: k.own_rate, cells: cellsFor(byCat[k.id] ?? [], dates),
       }));
-      // Show the phases the crew was set to work (labour_crews.stage_ids); null/empty = all phases.
-      const pickedStages: string[] | null = Array.isArray(c.stage_ids) && c.stage_ids.length ? c.stage_ids : null;
+      // Show EVERY phase of the contract, so the sheet's stage dropdown lists them all and the crew can
+      // be pointed at any one for the week (labour_crews.stage_ids still governs wages settlement, not
+      // what's shown). Ordered by the work order's seq_no.
       const crewStages = milestones
-        .filter((m: any) => m.wo_id === c.wo_id && (!pickedStages || pickedStages.includes(m.milestone_id)))
+        .filter((m: any) => m.wo_id === c.wo_id)
         .map((m: any): StageRow => {
         const isLump = (m.unit_type ?? 'LS') === 'LS';
         return {

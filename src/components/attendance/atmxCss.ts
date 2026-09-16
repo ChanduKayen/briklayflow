@@ -12,9 +12,9 @@
  *    relative to one another is unchanged.
  */
 export const ATMX_CSS = `
-.atmx{--bg:#FBF4F0; --card:#FFFFFF; --ink:#2A241C; --walnut:#6E5F4C; --soft:#9A8C77;
-  --rule:#EFE6DC; --clay:#BE3E22; --clay-soft:#F9E9E4; --sage:#6E8260; --sage-soft:#E7EDE1;
-  --today:#FBF1E4;
+.atmx{--bg:#F4F0E8; --card:#FCFAF6; --ink:#1E1915; --walnut:#6E5F51; --soft:#A0958A;
+  --rule:#EDE7DC; --clay:#C4552D; --clay-soft:#FBEEE7; --sage:#7F927A; --sage-soft:#E8EEE1;
+  --today:#FFF7F1;
   --serif:'Playfair Display', Georgia, serif;
   --sans:'DM Sans', -apple-system, sans-serif;
   --mono:'DM Mono', 'SF Mono', Consolas, monospace;}
@@ -185,5 +185,5 @@ export const ATMX_CSS = `
 /* The app's <main> reserves its own clearance for the bottom tab bar underneath this page. That
    room sits below the .atmx box, so paint the page's ground behind it — otherwise a seam of a
    different colour shows under the last card. */
-.atmx-page{background:#FBF4F0; min-height:100vh}
+.atmx-page{background:#F4F0E8; min-height:100vh}
 `;

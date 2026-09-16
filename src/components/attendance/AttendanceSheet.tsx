@@ -1,436 +1,47 @@
-// Attendance — a live, per-project labour muster. This is the exact visual and
-// interaction model of the attendance.html reference, wired to Supabase via
-// attendanceApi: the reference's in-memory DATA/CARD are loaded from the labour_*
-// tables, and every cell edit / rate change / add persists back. The grid render
-// stays imperative (a faithful port of the reference script) inside a scoped root.
-import { useEffect, useRef, useState, useCallback } from 'react';
+// Attendance — a live, per-project labour muster, rebuilt to the redesign artifact:
+// one cream "sheet" (a table), a segmented site filter, a sticky day-circle header, a group row per
+// site, worker / contract rows, a morphing "Add worker" pill, an editor popover (per-skill steppers),
+// a row menu, and a toast with undo. Wired to Supabase through attendanceApi exactly as before — every
+// cell edit, rate change, add and certify persists — and it keeps the live features the artifact does
+// not depict: the settled-week freeze, the rate card (a right slide-in), WhatsApp-sourced marks, and
+// the contract crew's certify flow (the artifact CertifyDialog / PutOnContractDialog). The grid render
+// stays imperative (a faithful port of the reference) inside a scoped `.atdx` root.
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { useOrgId } from '../../lib/auth/AuthProvider';
 import { useSnackbar } from '../Snackbar';
 import {
   loadWeek, loadParties, mondayOf, weekDates, weekLabel,
-  saveCell, saveRate, setCategoryRate, setDirectRate, setCrewBasis, addCategory, addDirectWorker, addCrew,
-  accruedDayWagesForCrew, accruedDayWagesForDirect, removeCrew, removeDirectWorker, removeCategory,
+  saveCell, saveRate, setCategoryRate, setDirectRate, setCrewBasis, addCrew,
+  accruedDayWagesForCrew, accruedDayWagesForDirect, removeCrew, removeDirectWorker,
   cardIsEmpty, seedRateCard, SUPERVISOR_KEY,
-  type SiteRow, type RateCard, type Cell,
+  type SiteRow, type RateCard, type Cell, type CrewRow, type StageRow,
 } from '../../lib/attendanceApi';
 import { searchPayees } from '../../lib/payeeSearch';
 import { createParty } from '../day-book/fileEntry';
-import { CertificationWizard, type CertifyContext } from './CertificationWizard';
-import { PutOnContractSheet, type ContractContext } from './PutOnContractSheet';
-import { setEngagementBasis, submitWorkCertification } from '../../lib/workCertification';
+import { CertifyDialog, type CertifyCrewCtx } from './CertifyDialog';
+import { PutOnContractDialog, type PocCtx } from './PutOnContractDialog';
 
-const ATDX_CSS = `
-.atdx{
-  --cream:#FAF7F0; --paper:#FFFDF7; --ink:#2A241C; --walnut:#6E5F4C; --soft:#9A8C77;
-  --rule:#E6DECD; --terra:#C0603F; --terra-soft:#F7E9E2; --sage:#6E8260; --sage-soft:#E4EADD;
-  --today:#FBF4E6;
-  --serif:'Playfair Display', Georgia, serif;
-  --sans:'DM Sans', -apple-system, sans-serif;
-  --mono:'DM Mono', 'SF Mono', Consolas, monospace;
-}
-.atdx *{margin:0;padding:0;box-sizing:border-box}
-.atdx{background:var(--cream); color:var(--ink); font-family:var(--sans); min-height:100vh; padding:44px 40px 120px}
-.atdx .page{max-width:1120px; margin:0 auto}
-.atdx .head{display:flex; align-items:flex-end; justify-content:space-between; gap:24px; margin-bottom:18px}
-.atdx h1{font-family:var(--serif); font-size:36px; font-weight:600; line-height:1}
-.atdx .hero{display:flex; gap:32px; text-align:right; align-items:flex-end}
-.atdx .hero .h b{display:block; font-family:var(--mono); font-size:22px; font-weight:500}
-.atdx .hero .h span{font-family:var(--mono); font-size:9.5px; letter-spacing:.18em; text-transform:uppercase; color:var(--soft)}
-.atdx .hero .h.gap b{color:var(--terra)}
-.atdx .toolbar{display:flex; align-items:center; gap:14px; margin-bottom:16px; flex-wrap:wrap}
-.atdx .wkpager{display:flex; align-items:center; gap:10px}
-.atdx .wkbtn{width:30px; height:30px; border-radius:50%; border:1px solid var(--rule); background:var(--paper); color:var(--walnut); cursor:pointer}
-.atdx .wkbtn:hover{border-color:var(--walnut)}
-.atdx .wklabel{font-family:var(--serif); font-size:18px; font-weight:600}
-.atdx .tlink{font-size:13px; color:var(--soft); cursor:pointer; border-bottom:1px solid transparent}
-.atdx .tlink:hover{color:var(--walnut); border-color:var(--rule)}
-.atdx .chips{display:flex; gap:8px; margin-left:auto; flex-wrap:wrap}
-.atdx .chip{display:inline-flex; align-items:center; gap:7px; font-size:13px; font-weight:600; color:var(--walnut);
-  background:var(--paper); border:1px solid var(--rule); border-radius:999px; padding:7px 14px; cursor:pointer}
-.atdx .chip .cdot{width:7px; height:7px; border-radius:50%}
-.atdx .chip.on{background:var(--ink); color:var(--cream); border-color:var(--ink)}
-.atdx .info{width:26px; height:26px; border-radius:50%; border:1px solid var(--rule); background:var(--paper); color:var(--soft);
-  font-size:12px; cursor:pointer; position:relative; flex:none}
-.atdx .info:hover{color:var(--walnut)}
-.atdx .tip{position:absolute; right:0; top:calc(100% + 8px); width:280px; background:var(--paper); border:1px solid var(--rule);
-  border-radius:12px; box-shadow:0 24px 48px -24px rgba(42,36,28,.45); padding:14px 16px; text-align:left;
-  font-size:12.5px; color:var(--walnut); line-height:1.6; display:none; z-index:50; font-weight:400}
-.atdx .info.open .tip{display:block}
-.atdx .tip b{color:var(--ink)}
-.atdx .tip .dot{display:inline-block; width:6px; height:6px; border-radius:50%; background:var(--sage); margin:0 3px 1px 0}
-.atdx /* ---------- layout: day header card + site cards,.atdx cream seams between ---------- */
-.cols{display:grid; grid-template-columns:280px repeat(7, 1fr) 150px; align-items:center}
-.atdx .dayhead{position:sticky; top:0; z-index:10; background:var(--paper); border:1px solid var(--rule); border-radius:14px;
-  box-shadow:0 10px 24px -18px rgba(42,36,28,.35); margin-bottom:18px}
-.atdx .dayhead .dh{text-align:center; padding:10px 0 8px; cursor:pointer; border-radius:10px; margin:6px 2px; transition:background .2s}
-.atdx .dayhead .dh:hover{background:var(--cream)}
-.atdx .dayhead .dh small{display:block; font-family:var(--mono); font-size:10px; letter-spacing:.14em; text-transform:uppercase; color:var(--soft)}
-.atdx .dayhead .dh b{font-family:var(--serif); font-size:16px; font-weight:600; color:var(--walnut)}
-.atdx .dayhead .dh.today{background:var(--today)}
-.atdx .dayhead .dh.today b{color:var(--terra)}
-.atdx .dayhead .dh.future{opacity:.35; cursor:default}
-.atdx .dayhead .corner{padding:12px 20px; font-family:var(--mono); font-size:10.5px; letter-spacing:.2em; text-transform:uppercase; color:var(--soft)}
-.atdx .dayhead .wk{text-align:right; padding-right:20px; font-size:12.5px; color:var(--soft)}
-.atdx /* each site = its own card; the cream between them is the seam */
-.siteblock{background:var(--paper); border:1px solid var(--rule); border-radius:16px; margin-bottom:26px}
-.atdx .sitehead{position:sticky; top:74px; z-index:6; display:flex; align-items:center; gap:11px; padding:15px 20px 12px;
-  background:var(--paper); border-radius:16px 16px 0 0; border-bottom:1px solid var(--rule)}
-.atdx .sitedot{width:9px; height:9px; border-radius:50%; flex:none}
-.atdx .sitehead b{font-family:var(--serif); font-size:19px; font-weight:600}
-.atdx .sitehead .area{font-size:12.5px; color:var(--soft)}
-.atdx .sitehead .stotal{margin-left:auto; font-family:var(--mono); font-size:12.5px; color:var(--walnut)}
-.atdx .sitehead .addw{font-size:12.5px; font-weight:600; color:var(--walnut); cursor:pointer; margin-left:18px}
-.atdx .sitehead .addw:hover{color:var(--ink)}
-.atdx .siteempty{padding:14px 20px 16px; font-size:13px; color:var(--soft)}
-.atdx .siteempty a{color:var(--walnut); font-weight:600; cursor:pointer; border-bottom:1px solid var(--rule)}
-.atdx .siteempty a:hover{color:var(--ink)}
-.atdx .wrow{border-top:1px solid var(--rule)}
-.atdx .wrow:first-of-type{border-top:0}
-.atdx .wname{padding:13px 20px; display:flex; align-items:center; gap:12px; min-width:0}
-.atdx .wav{width:34px; height:34px; border-radius:50%; background:var(--cream); border:1px solid var(--rule); flex:none;
-  display:grid; place-items:center; font-family:var(--serif); font-size:13px; color:var(--walnut)}
-.atdx .wmid{min-width:0}
-.atdx .wmid b{display:block; font-size:14px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
-.atdx .wmid span{font-size:11.5px; color:var(--soft)}
-.atdx .wmid .crewtag{font-family:var(--mono); font-size:10px; color:var(--terra); background:var(--terra-soft); border-radius:99px; padding:1px 7px; margin-left:5px}
-.atdx .cellwrap{padding:6px 4px; position:relative}
-.atdx .cell{height:44px; border-radius:10px; display:grid; place-items:center; cursor:pointer; user-select:none; position:relative;
-  font-family:var(--mono); font-size:14px; color:transparent;
-  transition:background .15s, box-shadow .2s, transform .12s}
-.atdx .cell:hover{background:var(--cream); box-shadow:inset 0 0 0 1.5px var(--rule)}
-.atdx .cell:active{transform:scale(.94)}
-.atdx .cell.today{background:var(--today)}
-.atdx .cell.future{pointer-events:none; opacity:.3}
-.atdx .cell.filled{color:var(--ink); font-weight:500; background:var(--sage-soft)}
-.atdx .cell.filled:hover{box-shadow:inset 0 0 0 1.5px var(--sage)}
-.atdx .cell.filled.pop{animation:cellpop .3s cubic-bezier(.2,.9,.3,1.6)}
-@keyframes cellpop{0%{transform:scale(.75)}100%{transform:scale(1)}}
-.atdx .cell .src{position:absolute; top:5px; right:6px; width:5px; height:5px; border-radius:50%; background:var(--sage)}
-.atdx .wtotal{text-align:right; padding-right:20px; font-family:var(--mono); font-size:13px; color:var(--walnut); white-space:nowrap}
-.atdx .wtotal b{color:var(--ink); font-weight:500}
-/* a contract stage's total can carry the contract value — let it wrap in its column, value on its own line */
-.atdx .wrow.sub .wtotal{white-space:normal; line-height:1.3}
-.atdx .wtotal .ofval{display:block; font-family:var(--mono); font-size:11px; color:var(--walnut-3); margin-top:1px}
-.atdx .sitefoot{border-top:1px solid var(--rule); border-radius:0 0 16px 16px}
-.atdx .sitefoot .lab{padding:8px 20px; font-family:var(--mono); font-size:9.5px; letter-spacing:.16em; text-transform:uppercase; color:var(--soft)}
-.atdx .sitefoot .dc{text-align:center; font-family:var(--mono); font-size:12px; color:var(--walnut)}
-.atdx .sitefoot .dc.today{color:var(--terra); font-weight:500}
-.atdx .sitefoot .sum{text-align:right; padding-right:20px; font-family:var(--mono); font-size:12px; color:var(--walnut)}
-.atdx .bpop{position:absolute; z-index:40; top:calc(100% + 10px); left:50%; transform:translateX(-50%) scale(.94); transform-origin:top center;
-  width:252px; background:var(--paper); border:1px solid var(--rule); border-radius:16px;
-  box-shadow:0 2px 0 rgba(255,255,255,.7) inset, 0 30px 60px -26px rgba(42,36,28,.55); padding:14px 14px 12px; opacity:0; pointer-events:none;
-  transition:opacity .18s ease, transform .28s cubic-bezier(.2,.9,.3,1.25)}
-.atdx .bpop.show{opacity:1; transform:translateX(-50%) scale(1); pointer-events:auto}
-/* a notch, so it is plainly the day you tapped that it belongs to */
-.atdx .bpop::before{content:""; position:absolute; top:-6px; left:50%; margin-left:-6px; width:11px; height:11px;
-  background:var(--paper); border-left:1px solid var(--rule); border-top:1px solid var(--rule); transform:rotate(45deg); border-radius:2px 0 0 0}
-.atdx .bp-title{font-family:var(--mono); font-size:9.5px; letter-spacing:.18em; text-transform:uppercase; color:var(--soft);
-  margin-bottom:10px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
-.atdx .bp-row{position:relative; display:flex; align-items:center; gap:10px; padding:7px 0; font-size:13.5px}
-.atdx .bp-row + .bp-row{border-top:1px solid color-mix(in srgb, var(--rule) 55%, transparent)}
-.atdx .bp-row .t{flex:1; min-width:0; line-height:1.25}
-.atdx .bp-row .rate{font-family:var(--mono); font-size:10.5px; color:var(--soft); margin-top:1px}
-/* one pill, split by a hairline — not two loose buttons */
-.atdx .step{display:inline-flex; align-items:center; border:1px solid var(--rule); border-radius:999px; background:var(--cream); flex:none}
-.atdx .step button{width:26px; height:26px; border-radius:999px; color:var(--walnut); font-size:14px; line-height:1;
-  display:grid; place-items:center; transition:background .14s, color .14s}
-.atdx .step button:hover{background:var(--terra-soft); color:var(--terra)}
-.atdx .step b{font-family:var(--mono); font-size:13.5px; min-width:26px; text-align:center; color:var(--soft);
-  border-left:1px solid var(--rule); border-right:1px solid var(--rule); line-height:26px}
-.atdx .bp-row.on .step b{color:var(--ink)}
-.atdx .bp-foot{border-top:1px solid var(--rule); margin-top:10px; padding-top:10px; display:flex; justify-content:space-between;
-  align-items:baseline; font-family:var(--mono); font-size:11px; letter-spacing:.04em; color:var(--soft)}
-.atdx .bp-foot b{font-size:14px; color:var(--ink); font-weight:500}
-.atdx .bp-done{width:100%; margin-top:11px; background:var(--ink); color:var(--cream); border:0; border-radius:999px;
-  padding:10px 0; font-family:var(--sans); font-weight:600; font-size:13px; cursor:pointer; transition:transform .18s cubic-bezier(.2,.9,.3,1.4), background .2s}
-.atdx .bp-done:hover{background:#1d1913; transform:translateY(-1px)}
-.atdx .bp-done:active{transform:scale(.98)}
-.atdx #toast{position:fixed; left:50%; bottom:28px; transform:translate(-50%,16px); background:var(--ink); color:var(--cream);
-  font-size:13.5px; border-radius:999px; padding:11px 20px; opacity:0; transition:all .35s cubic-bezier(.2,.9,.3,1.2); z-index:60}
-.atdx #toast.show{opacity:1; transform:translate(-50%,0)}
-
-
-/* ── what the reference has no equivalent for ────────────────────────────────
-   The clean mock shows a single-site week of daily wages. The live sheet also
-   carries contracts measured by stage, a rate card, the add-worker flow and the
-   remove affordance. Those keep their behaviour and are dressed in the mock's
-   own tokens — nothing here restyles anything the mock defines. */
-
-/* the old table palette, kept as aliases so the feature rules below still read */
-.atdx{--line:var(--rule);--line-2:#D8CEBB;--walnut-2:#6E5F4C;--walnut-3:#9A8C77;
-  --terracotta:var(--terra);--terracotta-bg:var(--terra-soft);--sage-bg:var(--sage-soft);
-  --slate:#5b6b78;--slate-bg:#e8ecef}
-/* The mock never resets buttons: its own controls declare their font where they need one, and the
-   two round chrome buttons (‹ › and i) are drawn on the UA font because of it. A blanket
-   button{font:inherit;color:inherit} both breaks that AND out-specifies every component rule that
-   sets its own colour — which is how the Done button ended up ink-on-ink. So there is no blanket
-   reset; the app's own controls name their font here, and each keeps its own colour. */
-.atdx input,.atdx select,.atdx textarea{font:inherit;color:inherit}
-.atdx .oncontract,.atdx .measurebasis,.atdx .ppitem,.atdx .ppempty,.atdx .new .x,.atdx .addw,
-.atdx .bp-addskill,.atdx .rc-f button,.atdx .pp-link,.atdx .pp-cancel,.atdx .kindbtn,
-.atdx .wrow button.rmw,.atdx .seg button,.atdx .bp-done,.atdx .step button,
-.atdx .siteempty a,.atdx .kpx{font-family:var(--sans)}
-.atdx button{background:none;border:0;cursor:pointer;padding:0}
-.atdx :focus-visible{outline:2px solid var(--ink);outline-offset:2px;border-radius:6px}
-.atdx .mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
-
-/* a stage row of a contract: the name cell holds a select, the total a progress bar */
-.atdx .wname .stsel{max-width:100%}
-.atdx .wrow.sub .wname{padding-left:66px}
-.atdx .wrow.sub .st{font-size:11.5px;color:var(--soft);margin-left:8px}
-/* the first-phase row carries the crew identity — its stage picker sits in the sub-line */
-.atdx .wmid .stpick{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap}
-.atdx .wmid .stpick .stsel{max-width:170px;font-size:12.5px}
-.atdx .wmid .stpick .sty{font-style:normal;font-size:11.5px;color:var(--soft)}
-
-/* remove-from-sheet: a quiet × that only appears on the row it belongs to */
-.atdx .wrow{position:relative}
-.atdx .wrow button.rmw{position:absolute;left:2px;top:50%;transform:translateY(-50%);width:20px;height:20px;
-  border-radius:50%;color:transparent;font-size:12px;line-height:1;display:grid;place-items:center;
-  transition:color .15s,background .15s}
-.atdx .wrow:hover button.rmw{color:var(--soft)}
-.atdx .wrow button.rmw:hover{background:var(--terra-soft);color:var(--terra)}
-
-/* a cell that is a measured quantity or a percentage rather than a headcount */
-.atdx .cell.qty small{font-size:9px;color:var(--soft);margin-left:1px}
-.atdx .cell.gap{color:var(--soft);font-weight:400}
-.atdx .cell.off{color:#CFC4B0;pointer-events:none}
-/* A settled (past) week is frozen: cells read-only + greyed, so a paid run can't be edited under the money. */
-.atdx .wklock{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;color:var(--terracotta);background:color-mix(in srgb,var(--terracotta) 9%,transparent);border:1px solid color-mix(in srgb,var(--terracotta) 22%,transparent);border-radius:999px;padding:3px 11px}
-.atdx.wk-locked #atdxBody{opacity:.62;filter:saturate(.6)}
-.atdx.wk-locked #atdxBody .cell,.atdx.wk-locked #atdxBody .cellwrap,.atdx.wk-locked #atdxBody [data-rate]{pointer-events:none;cursor:default}
-.atdx.wk-locked .dayhead .dh{cursor:default}
-
-/* the add-worker flow lives inside the site card, below its rows */
-.atdx .siteblock > [id^="add-"]:not(:empty){padding:14px 20px 16px;border-top:1px solid var(--rule)}
-.atdx .new{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
-.atdx .new .x{font-size:12.5px;color:var(--soft)}
-.atdx .new .x:hover{color:var(--walnut)}
-.atdx .pp{position:relative;display:inline-block;min-width:320px;max-width:100%}
-
-/* the crew stepper's own extras — the mock has the popover, not these */
-.atdx .bpop .bp-row .rm{position:absolute;left:-14px;top:50%;margin-top:-7px;opacity:0;color:var(--soft);font-family:var(--sans);font-size:11px;line-height:14px;width:14px;height:14px;border-radius:50%;transition:opacity .15s,background .15s,color .15s}
-.atdx .bpop .bp-row:hover .rm{opacity:1}
-.atdx .bpop .bp-row .rm:hover{background:var(--terra-soft);color:var(--terra)}
-.atdx .bpop .bp-row .rate{cursor:text}
-.atdx .bpop .bp-row .rate:hover{color:var(--walnut)}
-
-/* the WhatsApp-sourced reading behind a cell */
-.atdx .ctip{position:absolute;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%);
-  background:var(--ink);color:var(--cream);font-size:11px;white-space:nowrap;border-radius:7px;
-  padding:4px 8px;opacity:0;pointer-events:none;transition:opacity .15s;z-index:30}
-.atdx .cell:hover .ctip{opacity:1}
-
-.atdx .segwrap{display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:6px}
-.atdx .seg{display:inline-flex;align-items:center;flex-wrap:nowrap;white-space:nowrap;border:1px solid var(--line);border-radius:999px;padding:2px;background:var(--cream)}
-
-.atdx .oncontract{font-size:12px;color:var(--terracotta);font-weight:500;text-decoration:underline;text-decoration-color:color-mix(in srgb,var(--terracotta) 40%,transparent);text-underline-offset:2px}
-.atdx .oncontract:hover{text-decoration-color:var(--terracotta)}
-.atdx .ocsel{max-width:250px;width:auto;font-size:13px;font-weight:500;color:var(--walnut);border:1px solid var(--line-2);border-radius:9px;background-color:var(--paper);padding:6px 30px 6px 12px;background-position:right 10px center}
-.atdx .ocsel:hover{border-color:var(--terracotta)}
-.atdx .ocsel:focus{border-color:var(--terracotta);border-bottom:1px solid var(--terracotta)}
-.atdx .ocx{margin-left:8px;font-size:12.5px;color:var(--walnut-3)}
-/* phase multi-select inside the contract wizard */
-.atdx .phasepick{display:flex;flex-direction:column;gap:8px;padding:10px 12px;background:var(--paper);border:1px solid var(--line-2);border-radius:11px;max-width:340px;animation:atdx-fade .18s ease}
-.atdx .pp-h{font-size:12.5px;color:var(--walnut-2);font-weight:500}
-.atdx .pp-h .pp-s{color:var(--walnut-3);font-weight:400}
-.atdx .pp-list{display:flex;flex-direction:column;gap:2px}
-.atdx .pp-opt{display:flex;align-items:center;gap:8px;padding:4px 6px;border-radius:7px;font-size:13px;color:var(--walnut);cursor:pointer}
-.atdx .pp-opt:hover{background:var(--cream)}
-.atdx .pp-opt input{accent-color:var(--terracotta);width:15px;height:15px;cursor:pointer}
-.atdx .pp-acts{display:flex;align-items:center;gap:10px;margin-top:2px}
-.atdx .pp-link{height:34px;padding:0 16px;border-radius:9px;background:var(--terracotta);color:var(--paper);font-size:13px;font-weight:600;cursor:pointer}
-.atdx .pp-link:disabled{opacity:.6;cursor:default}
-.atdx .pp-cancel{font-size:12.5px;color:var(--walnut-3)}
-.atdx .assumed{font-size:11px;color:#a9781c;font-style:italic;margin-left:6px;cursor:help}
-.atdx .measurebasis{white-space:nowrap;font-size:11px;color:var(--walnut-3);background:none;border:0;cursor:pointer;text-decoration:underline;text-decoration-color:var(--line-2);text-underline-offset:2px}
-.atdx .measurebasis:hover{color:var(--terracotta);text-decoration-color:var(--terracotta)}
-.atdx .measurebasis.on{color:var(--sage);font-weight:500;text-decoration-color:color-mix(in srgb,var(--sage) 45%,transparent)}
-.atdx .seg button{padding:2px 10px;border-radius:999px;font-size:12px;color:var(--walnut-3)}
-.atdx .seg button[aria-pressed=true]{background:var(--paper);color:var(--walnut);font-weight:500;box-shadow:0 1px 2px rgba(59,47,39,.08)}
-.atdx .wname .rt{font-size:12px;color:var(--walnut-3);margin-left:6px}
-.atdx .rt[data-rate]{cursor:text;border-bottom:1px dashed transparent}
-.atdx .rt[data-rate]:hover{border-bottom-color:var(--line-2);color:var(--walnut)}
-.atdx .rt input{width:54px;border:0;border-bottom:1px solid var(--walnut);background:transparent;font:inherit;padding:0}
-.atdx .rt input:focus{outline:none}
-/* worker-category row — a clear label, a tappable rate chip, a quiet "custom" flag */
-.atdx .catn{display:flex;align-items:center;gap:9px;padding:0 12px 0 34px;font-size:13.5px;white-space:nowrap}
-.atdx .catn .clab{color:var(--walnut);font-weight:500;flex:0 0 auto}
-.atdx .catn .ratechip{flex:0 0 auto;display:inline-flex;align-items:baseline;gap:1px;font-size:12px;color:var(--walnut-2);background:var(--cream);border:1px solid var(--line-2);border-radius:8px;padding:2px 8px;cursor:text;white-space:nowrap;transition:border-color .15s,color .15s}
-.atdx .catn .ratechip small{font-size:10px;color:var(--walnut-3)}
-.atdx .catn .ratechip:hover{border-color:var(--terracotta);color:var(--walnut)}
-.atdx .catn .ratechip input{width:46px;border:0;border-bottom:1px solid var(--walnut);background:transparent;font:inherit;padding:0;outline:none}
-.atdx .catn .ownflag{flex:0 0 auto;font-size:11px;color:var(--walnut-3);font-style:italic}
-.atdx .wtotal .brk{margin-left:7px;color:var(--walnut-3);font-size:11.5px}
-/* Phase / stage picker — a designed chip, not a bare native select. */
-.atdx .stsel{appearance:none;-webkit-appearance:none;font:inherit;font-size:12.5px;font-weight:500;color:var(--walnut-2);cursor:pointer;
-  border:1px solid var(--line-2);border-radius:8px;background:var(--paper);padding:5px 26px 5px 11px;
-  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%239c9083' stroke-width='1.4'/%3E%3C/svg%3E");
-  background-repeat:no-repeat;background-position:right 10px center;max-width:230px;text-overflow:ellipsis;transition:border-color .12s,box-shadow .12s,color .12s}
-.atdx .stsel:hover{color:var(--walnut);border-color:var(--walnut-3)}
-.atdx .stsel:focus{outline:none;border-color:var(--terracotta);box-shadow:0 0 0 3px color-mix(in srgb,var(--terracotta) 12%,transparent)}
-.atdx .stsel.ghost{color:var(--terracotta);font-size:13px;font-weight:500;border-color:transparent;background-color:transparent}
-/* the subtle % strip — a lump stage spans the week; two tones: PAST work (muted) + THIS WEEK (terracotta) */
-.atdx .pctstrip{grid-column:2 / 9;display:flex;align-items:center;gap:12px;height:44px;padding:0 12px;cursor:pointer;border-radius:10px;transition:background .12s}
-.atdx .pctstrip:hover{background:color-mix(in srgb,var(--terracotta) 5%,transparent)}
-.atdx .pctstrip.locked{cursor:default}
-.atdx .pctstrip .ps-track{flex:1;height:5px;border-radius:999px;background:var(--rule);position:relative;overflow:hidden}
-.atdx .pctstrip .ps-track i{position:absolute;top:0;height:100%;border-radius:999px}
-.atdx .pctstrip .ps-past{left:0;background:color-mix(in srgb,var(--walnut-3) 50%,transparent)}
-.atdx .pctstrip .ps-now{background:var(--terracotta)}
-.atdx .pctstrip .ps-lbl{font-size:12px;color:var(--walnut-3);white-space:nowrap}
-.atdx .pctstrip .ps-lbl em{font-style:normal;color:var(--terracotta);font-weight:600}
-.atdx .pctstrip .ps-edit{width:14px;height:14px;flex:0 0 auto;color:var(--walnut-3);opacity:0;transition:opacity .12s}
-.atdx .pctstrip:hover .ps-edit{opacity:.85}
-@media(hover:none){.atdx .pctstrip .ps-edit{opacity:.6}}
-/* row total — this week's difference leads; cumulative is muted context. Sizes kept small so ₹ never
-   overflows the fixed 150px column. */
-.atdx .wtotal .twk{display:block;font-family:var(--mono);font-size:13px;color:var(--ink);font-weight:500;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.atdx .wtotal .twk::first-letter{color:var(--terracotta)}
-.atdx .wtotal .twkl{display:block;font-size:10px;color:var(--walnut-3);margin-top:-1px}
-.atdx .wtotal .twkl.none{color:var(--soft)}
-.atdx .wtotal .cuml{display:block;font-family:var(--mono);font-size:10.5px;color:var(--walnut-3);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-/* custom stage dropdown — a designed chip + popover menu (a native <select> option list can't be styled) */
-.atdx .phdrop{position:relative;display:inline-block;vertical-align:middle}
-.atdx .phdrop-btn{display:inline-flex;align-items:center;gap:7px;max-width:230px;font:inherit;font-size:12.5px;font-weight:600;color:var(--walnut);cursor:pointer;border:1px solid var(--line-2);border-radius:8px;background:var(--paper);padding:6px 10px;transition:border-color .12s,box-shadow .12s,background .12s}
-.atdx .phdrop-btn:hover{border-color:var(--walnut-3)}
-.atdx .phdrop-btn .phdrop-lbl{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.atdx .phdrop-btn .phdrop-chev{width:10px;height:6px;flex:0 0 auto;color:var(--walnut-3)}
-.atdx .phdrop-btn.add{color:var(--terracotta);border-style:dashed;border-color:color-mix(in srgb,var(--terracotta) 45%,transparent);background:color-mix(in srgb,var(--terracotta) 6%,transparent)}
-.atdx .phdrop-btn.add .phdrop-chev{color:var(--terracotta)}
-.atdx .phdrop-menu{position:absolute;top:calc(100% + 6px);left:0;z-index:40;min-width:230px;max-width:300px;background:var(--paper);border:1px solid var(--line-2);border-radius:12px;box-shadow:0 16px 40px -12px rgba(59,47,39,.28);padding:6px;animation:phpop .14s ease}
-@keyframes phpop{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
-.atdx .phdrop-menu .ph-cur{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;background:var(--terra-soft);color:var(--walnut);font-size:12.5px;font-weight:600}
-.atdx .phdrop-menu .ph-cur .ph-check{color:var(--terracotta);font-weight:700}
-.atdx .phdrop-menu .ph-cur .ph-meta{margin-left:auto;font-weight:400;font-size:11px;color:var(--walnut-3)}
-.atdx .phdrop-menu .ph-hd{padding:9px 10px 4px;font-size:10.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--walnut-3)}
-.atdx .phdrop-menu .ph-item{display:flex;align-items:baseline;gap:8px;width:100%;text-align:left;padding:8px 10px;border-radius:8px;border:0;background:none;cursor:pointer;color:var(--walnut);font:inherit;font-size:13px}
-.atdx .phdrop-menu .ph-item:hover{background:var(--terra-soft);color:var(--terracotta)}
-.atdx .phdrop-menu .ph-item .ph-name{font-weight:500}
-.atdx .phdrop-menu .ph-item .ph-meta{margin-left:auto;font-size:11px;color:var(--walnut-3)}
-.atdx .phdrop-menu .ph-none{padding:10px;font-size:12px;color:var(--walnut-3);text-align:center}
-/* a clear "add" affordance — a dashed terracotta pill, fully visible (no width cap / truncation) */
-.atdx .stsel.ghost.addskill{max-width:none;width:auto;text-overflow:clip;font-weight:600;line-height:1.4;
-  border:1px dashed color-mix(in srgb,var(--terracotta) 55%,transparent);border-radius:9px;background:color-mix(in srgb,var(--terracotta) 7%,transparent);padding:6px 30px 6px 13px;background-position:right 10px center}
-.atdx .stsel.ghost.addskill:hover{border-color:var(--terracotta);background:color-mix(in srgb,var(--terracotta) 12%,transparent)}
-.atdx .cell .half{color:var(--walnut-2)}
-.atdx .cell .zero{color:var(--line-2)}
-.atdx .cell.qty{font-size:13.5px}
-.atdx .cell.qty small{font-size:11px;color:var(--walnut-3);margin-left:2px}
-.atdx .bpop .bp-addskill{display:block;width:100%;text-align:left;margin-top:9px;font-size:11.5px;letter-spacing:.02em;color:var(--terra);font-weight:600}
-.atdx .bpop .bp-addskill:hover{color:#a44f2f;text-decoration:underline;text-underline-offset:2px}
-.atdx .bar{height:4px;background:var(--line);border-radius:2px;margin-top:5px;position:relative;overflow:hidden;width:120px;margin-left:auto}
-.atdx .bar i{position:absolute;left:0;top:0;bottom:0;background:var(--slate)}
-.atdx .bar b{position:absolute;top:0;bottom:0;background:var(--terracotta)}
-.atdx .psearch{height:38px;border:1px solid var(--line-2);border-radius:9px;background:var(--paper);padding:0 12px;font-size:14px;width:260px}
-.atdx .psearch:focus{outline:none;border-color:var(--walnut)}
-.atdx .ppmenu{position:absolute;left:0;top:calc(100% + 4px);z-index:45;min-width:280px;background:var(--paper);border:1px solid var(--line-2);border-radius:10px;box-shadow:0 10px 28px -12px rgba(59,47,39,.35);padding:4px;max-height:300px;overflow:auto}
-.atdx .ppitem{display:block;width:100%;text-align:left;padding:8px 10px;border-radius:7px;font-size:13.5px;color:var(--walnut)}
-.atdx .ppitem:hover{background:var(--cream)}
-.atdx .ppitem small{color:var(--walnut-3)}
-.atdx .ppitem.ppcreate{color:var(--walnut-2);border-top:1px solid var(--line);margin-top:2px;font-weight:500}
-.atdx .ppitem.ppcreate b{color:var(--walnut)}
-.atdx .ppempty{padding:8px 10px;color:var(--walnut-3);font-size:13px}
-/* single add button — idle / hover / press */
-.atdx .addbtn{display:inline-flex;align-items:center;gap:9px;height:42px;padding:0 20px 0 15px;border-radius:11px;border:1px solid var(--line-2);background:var(--paper);color:var(--walnut);font-family:inherit;font-size:14px;font-weight:500;cursor:pointer;transition:background .16s,border-color .16s,box-shadow .2s,transform .12s}
-.atdx .addbtn svg{width:17px;height:17px;stroke:var(--terracotta);stroke-width:2.2;fill:none;transition:transform .22s cubic-bezier(.34,1.3,.5,1)}
-.atdx .addbtn:hover{border-color:var(--walnut);box-shadow:0 4px 14px -7px rgba(59,47,39,.4);transform:translateY(-1px)}
-.atdx .addbtn:hover svg{transform:rotate(90deg)}
-.atdx .addbtn:active{transform:translateY(0) scale(.98);box-shadow:none}
-/* step 2 — worker or crew */
-.atdx .kindpick{display:flex;flex-direction:column;gap:12px;animation:atdx-fade .2s ease}
-.atdx .kp-h{font-size:13.5px;color:var(--walnut-2)}
-.atdx .kp-h b{color:var(--walnut);font-weight:600}
-.atdx .kp-opts{display:flex;gap:12px;flex-wrap:wrap}
-.atdx .kindbtn{position:relative;display:flex;align-items:center;gap:11px;min-width:264px;padding:12px 16px;border-radius:12px;border:1px solid var(--line-2);background:var(--paper);cursor:pointer;text-align:left;overflow:hidden;transition:border-color .16s,box-shadow .2s,transform .12s,opacity .2s,filter .2s}
-.atdx .kindbtn .ic svg{width:19px;height:19px;stroke:var(--terracotta);stroke-width:1.9;fill:none;stroke-linecap:round;stroke-linejoin:round}
-.atdx .kindbtn .kmeta{display:flex;flex-direction:column;gap:1px;min-width:0}
-.atdx .kindbtn .kt{font-size:14px;font-weight:600;color:var(--walnut)}
-.atdx .kindbtn .ks{font-size:12px;color:var(--walnut-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.atdx .kindbtn:hover{border-color:var(--terracotta);box-shadow:0 5px 16px -9px rgba(59,47,39,.45);transform:translateY(-1px)}
-.atdx .kindbtn:active{transform:translateY(0) scale(.985)}
-.atdx .kindbtn.dim{opacity:.38;filter:grayscale(.35);pointer-events:none;transform:none}
-.atdx .kindbtn .spin,.atdx .kindbtn .ok{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:var(--paper)}
-.atdx .kindbtn.loading{pointer-events:none;border-color:var(--line-2)}
-.atdx .kindbtn.loading .spin{display:flex}
-.atdx .kindbtn .spin::after{content:"";width:19px;height:19px;border:2px solid var(--line-2);border-top-color:var(--terracotta);border-radius:50%;animation:atdx-spin .7s linear infinite}
-.atdx .kindbtn.done{pointer-events:none;border-color:var(--sage);animation:atdx-pop .42s ease}
-.atdx .kindbtn.done .ok{display:flex;background:color-mix(in srgb,var(--sage) 11%,var(--paper))}
-.atdx .kindbtn.done .ok svg{width:23px;height:23px;stroke:var(--sage);stroke-width:2.4;fill:none;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:26;stroke-dashoffset:26;animation:atdx-draw .42s .05s cubic-bezier(.6,0,.2,1) forwards}
-.atdx .pctpop{position:absolute;z-index:7;left:50%;top:-6px;transform:translate(-50%,-100%);background:var(--paper);border:1px solid var(--line-2);border-radius:10px;box-shadow:0 10px 28px -12px rgba(59,47,39,.4);padding:10px 12px;width:158px;display:flex;flex-direction:column;gap:8px;cursor:default}
-.atdx .pctpop input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:4px;border-radius:2px;background:var(--line-2);outline:none;cursor:pointer;margin:2px 0}
-.atdx .pctpop input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:15px;height:15px;border-radius:50%;background:var(--terracotta);border:2px solid var(--paper);box-shadow:0 1px 3px rgba(59,47,39,.3);cursor:pointer}
-.atdx .pctpop input[type=range]::-moz-range-thumb{width:15px;height:15px;border:2px solid var(--paper);border-radius:50%;background:var(--terracotta);cursor:pointer}
-.atdx .pctrow{display:flex;align-items:center;justify-content:space-between}
-.atdx .pctrow .pctval{font-size:15px;font-weight:500;color:var(--walnut)}
-.atdx .pctrow .pctok{font-size:12px;color:var(--terracotta);font-weight:500}
-.atdx .legend{display:flex;gap:22px;padding:12px 18px;font-size:12.5px;color:var(--walnut-3);border-top:1px solid var(--line);flex-wrap:wrap}
-.atdx .legend span{display:inline-flex;align-items:center;gap:7px}
-.atdx .legend .sw{width:22px;text-align:center;font-size:14px}
-.atdx .legend .sw.wa{font-weight:500;color:var(--walnut)}
-.atdx .legend .sw.off{color:var(--walnut-2)}
-.atdx .legend .sw.gap{color:var(--terracotta)}
-.atdx .legend .pl{width:14px;height:2px;background:var(--sage);opacity:.6;display:inline-block}
-.atdx .legend .srcd{width:6px;height:6px;border-radius:50%;background:var(--sage);display:inline-block}
-.atdx .rc{background:var(--paper);border:1px solid var(--line);border-radius:14px;overflow:hidden;margin-bottom:18px}
-.atdx .rc-h{display:flex;align-items:baseline;gap:14px;padding:14px 18px 10px;flex-wrap:wrap}
-.atdx .rc-h .t{font:500 18px "Playfair Display",serif}
-.atdx .rc-h .s{font-size:13px;color:var(--walnut-3)}
-.atdx .rc th{font-size:12px;font-weight:500;color:var(--walnut-3);padding:8px 10px;text-align:right;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
-.atdx .rc th.cat{text-align:left;padding-left:18px;width:200px}
-.atdx .rc th .p{display:block;font:500 14px "Playfair Display",serif;color:var(--walnut-2)}
-.atdx .rc td{padding:0;text-align:right;border-bottom:1px solid var(--line);height:40px}
-.atdx .rc td.cat{text-align:left;padding-left:18px;font-size:14px}
-.atdx .rc tr.grp td{background:var(--cream);height:28px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--walnut-3);text-align:left;padding-left:18px}
-.atdx .rc .cc{display:flex;justify-content:flex-end;align-items:baseline;gap:6px;padding:0 14px;height:100%;cursor:text;width:100%}
-.atdx .rc .cc:hover{background:rgba(59,47,39,.04)}
-.atdx .rc .cc .v{font-weight:500}
-.atdx .rc .cc .since{font-size:11px;color:var(--walnut-3)}
-.atdx .rc .cc input{width:60px;text-align:right;border:0;border-bottom:1.5px solid var(--walnut);background:transparent;font-size:14px;padding:0}
-.atdx .rc .cc input:focus{outline:none}
-.atdx .rc-f{padding:11px 18px;font-size:13px;border-top:1px solid var(--line)}
-.atdx .rc-f button{color:var(--walnut-2);font-weight:500;display:inline-flex;align-items:center;gap:6px}
-.atdx .rc-f button:hover{color:var(--walnut)}
-.atdx .state{padding:60px 18px;text-align:center;color:var(--walnut-3);font-size:14px}
-.atdx .hide{display:none!important}
-/* elegant skeleton — the muster's site cards, in place, gently shimmering until the week loads */
-.atdx .sk-bar,.atdx .sk-av,.atdx .sk-cell{display:inline-block;background:linear-gradient(90deg,#ECE6D9 25%,#F7F2E8 50%,#ECE6D9 75%);background-size:200% 100%;animation:atdx-sk 1.5s ease-in-out infinite}
-.atdx .sk-bar{height:11px;border-radius:6px}
-.atdx .sk-av{width:34px;height:34px;border-radius:50%;flex:none}
-.atdx .sk-cell{width:24px;height:24px;border-radius:7px}
-.atdx .sk-block{animation:atdx-skin .4s ease both}
-.atdx .sk-block:nth-of-type(2){animation-delay:.06s}
-.atdx .sk-block .wrow .wname{padding:14px 20px}
-@keyframes atdx-sk{0%{background-position:200% 0}100%{background-position:-200% 0}}
-@keyframes atdx-skin{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
-
-@keyframes atdx-cellpop{0%{transform:scale(.75)}100%{transform:scale(1)}}
-@keyframes atdx-spin{to{transform:rotate(360deg)}}
-@keyframes atdx-draw{to{stroke-dashoffset:0}}
-@keyframes atdx-pop{0%{transform:scale(.99)}45%{transform:scale(1.03)}100%{transform:scale(1)}}
-@keyframes atdx-fade{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:translateY(0)}}
-`;
-
-const inr = (n: number) => '₹' + Math.round(n).toLocaleString('en-IN');
-/** Each site gets a colour, in the mock's order, so its dot and its chip agree. */
-const SITE_DOT = ['#C0603F', '#6E8260', '#B98A2F', '#5E7A8A'];
-/** The chips carry a short name — the mock takes the first two words. */
-const shortSite = (label: string) => label.split(' ').slice(0, 2).join(' ');
-// LOCAL date, not UTC — matches attendanceApi's `iso` so today's column lines up with the muster
-// week (a UTC slice shifted the whole grid back a day in IST; see attendanceApi.ts).
+const inr = (n: number) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');
+const fmtQ = (n: number) => (+n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 });
+/** Each site gets a colour, in the artifact's order, so its dot and its chip agree. */
+const SITE_DOT = ['#C4552D', '#6F7F5E', '#B9892E', '#4F6B8A'];
+/** The pills carry a short name — drop a trailing "Apartments"/"Residence" like the artifact. */
+const shortSite = (label: string) => label.replace(/ (Apartments|Residence)$/, '');
+const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+// LOCAL date, not UTC — matches attendanceApi's `iso` so today's column lines up with the muster week.
 const isoOf = (d: Date) => `${d.getFullYear()}-${`${d.getMonth() + 1}`.padStart(2, '0')}-${`${d.getDate()}`.padStart(2, '0')}`;
 
-// The inverse of `rateFor`: which org rate-card cell a (crew trade, wage-type) is paid from. Rates are
-// two-way linked to the card — there are no per-worker overrides, so an edit anywhere lands on the one
-// (trade, kind) the card keeps and every worker of that trade+skill moves with it.
+// Which org rate-card cell a rate edit lands on — rates are two-way linked to the card.
 type CardCell = { key: string; kind: 'skilled' | 'hm' | 'hf' };
-function cardCellFor(trade: string | null, cat: string): CardCell {
-  if (cat === 'Supervisor') return { key: 'supervisor', kind: 'skilled' };
-  if (cat === 'Helper · male') return { key: trade ?? 'unskilled', kind: 'hm' };
-  if (cat === 'Helper · female') return { key: trade ?? 'unskilled', kind: 'hf' };
-  return { key: cat, kind: 'skilled' };   // a skilled trade — the category name IS the card trade
-}
+
+// ── in-memory row models the imperative grid resolves against ──────────────────
+type Line = { label: string; rate: number; cells: Cell[]; subject: PersistSubject };
+type PersistSubject =
+  | { type: 'crew_category'; category_id: string }
+  | { type: 'direct'; direct_worker_id: string };
+type WorkerRow = { id: string; siteId: string; name: string; trade: string; lines: Line[]; contractWages: boolean; crew?: CrewRow; direct?: SiteRow['direct'][number] };
+type ContractRow = { id: string; siteId: string; crew: CrewRow; si: number; ci: number };
 
 export default function AttendanceSheet({ session }: { session: Session }) {
   const orgId = useOrgId();
@@ -443,42 +54,38 @@ export default function AttendanceSheet({ session }: { session: Session }) {
   const PARTIES = useRef<{ stakeholder_id: string; name: string; category: string | null }[]>([]);
   const filterRef = useRef<string>('all');
   const seededRef = useRef(false);
+  const WROWS = useRef<Map<string, WorkerRow>>(new Map());
+  const CROWS = useRef<Map<string, ContractRow>>(new Map());
+  const addState = useRef<{ site: string | null; picked: any | null; exp: boolean }>({ site: null, picked: null, exp: false });
 
   const [monday, setMonday] = useState<Date>(() => mondayOf(new Date()));
   const [rcOpen, setRcOpen] = useState(false);
-  const [infoOpen, setInfoOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
-  const [certCtx, setCertCtx] = useState<CertifyContext | null>(null);   // the certify-work wizard's open context
-  const [contractCtx, setContractCtx] = useState<ContractContext | null>(null);   // the "put on contract" sheet's context
+  const [certCtx, setCertCtx] = useState<CertifyCrewCtx | null>(null);
+  const [pocCtx, setPocCtx] = useState<PocCtx | null>(null);
 
   const dates = weekDates(monday);
   const todayISO = isoOf(new Date());
   const TODAY = todayISO > dates[6] ? 6 : todayISO < dates[0] ? -1 : dates.indexOf(todayISO);
-  // A week that has fully passed is SETTLED: its wages are already netted in the ledger and the payment
-  // for that run has been made. It stays visible for reference but its cells are frozen — greyed and not
-  // editable — so a finished, paid week can't be silently changed under the money that already moved.
+  // A fully-passed week is SETTLED — its wages are netted and paid; freeze its cells (read-only).
   const locked = isoOf(monday) < isoOf(mondayOf(new Date()));
+  const isThisWeek = isoOf(monday) === isoOf(mondayOf(new Date()));
 
-  // ── rate helpers (ported from the reference, reading the live CARD) ──────────
+  // ── rate helpers (read the live CARD) ────────────────────────────────────────
   const rateFor = useCallback((trade: string | null, cat: string): number => {
     const C = CARD.current; if (!C) return 0;
     if (cat === 'Supervisor') return C.supervisor ?? 0;
     if (cat === 'Helper · male') return (trade ? C.trades[trade]?.hm : null) ?? C.unskilled.hm ?? 0;
     if (cat === 'Helper · female') return (trade ? C.trades[trade]?.hf : null) ?? C.unskilled.hf ?? 0;
-    return C.trades[cat]?.skilled ?? 700; // a skilled trade not yet on the card gets a sensible default
+    return C.trades[cat]?.skilled ?? 700;
   }, []);
-  // A crew's mix = its own skilled trade row + helpers. An unknown trade (not on the card) still
-  // gets both helpers; a card trade honours whether it defines a female-helper rate.
   const mixFor = useCallback((trade: string | null): string[] => {
     if (!trade) return ['Helper · male', 'Helper · female'];
     const t = CARD.current?.trades[trade];
     const femaleHelper = !t || t.hf != null;
     return [trade, 'Helper · male', ...(femaleHelper ? ['Helper · female'] : [])];
   }, []);
-  // Map a party's stakeholder category (trades.ts naming) to a skilled-trade row. Helpers /
-  // unskilled / non-trade roles → null (a plain gang of helpers); a real trade keeps its name
-  // (mapped to a card key when we recognise it) so the SKILLED row always shows for a skilled party.
   const TRADE_ALIASES: Record<string, string> = {
     'painting worker': 'Painter', 'polish worker': 'Painter', 'wood polish worker': 'Painter', 'painter': 'Painter',
     'tile fitter': 'Tiler', 'marble fixer': 'Tiler', 'granite fixer': 'Tiler', 'tiler': 'Tiler',
@@ -491,23 +98,21 @@ export default function AttendanceSheet({ session }: { session: Session }) {
     const c = (category || '').trim(); if (!c) return null;
     const lc = c.toLowerCase();
     if (/helper|unskilled|labour|labor|supervisor|guard|housekeep|cleaner|driver|operator|material handler|security/.test(lc)) return null;
-    return TRADE_ALIASES[lc] || c; // recognised → card key; else the trade name itself
+    return TRADE_ALIASES[lc] || c;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── load a week + build the in-memory model, then render ─────────────────────
+  // ── load a week + render ──────────────────────────────────────────────────────
   const load = useCallback(async () => {
     setLoading(true); setErr(null);
     try {
       let [{ sites, card }, parties] = await Promise.all([loadWeek(monday), loadParties()]);
-      // First visit for a fresh org: seed the starter rate card, then re-read so the
-      // page opens with sensible defaults instead of an empty card.
       if (cardIsEmpty(card) && !seededRef.current) {
         seededRef.current = true;
-        try { await seedRateCard(orgId); const r2 = await loadWeek(monday); sites = r2.sites; card = r2.card; } catch { /* seeding is best-effort */ }
+        try { await seedRateCard(orgId); const r2 = await loadWeek(monday); sites = r2.sites; card = r2.card; } catch { /* best-effort */ }
       }
       DATA.current = sites; CARD.current = card; PARTIES.current = parties;
-      deriveRates();   // rates come off the card, not the stored per-row snapshot
+      deriveRates();
       setLoading(false);
       requestAnimationFrame(() => { render(); if (rcOpen) renderCard(); });
     } catch (e: any) {
@@ -517,237 +122,238 @@ export default function AttendanceSheet({ session }: { session: Session }) {
   }, [monday]);
 
   useEffect(() => { load(); }, [load]);
-
-  // (The column crosshair and group glow went with the table. In the card layout a row is its own
-  //  block and a cell answers for itself on hover, which is what the design asks for.)
-
-  useEffect(() => { if (!loading && rcOpen) renderCard(); if (!loading && !rcOpen) { const t = rootRef.current?.querySelector('#atdxRc') as HTMLElement | null; if (t) t.hidden = true; } // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { if (!loading && rcOpen) renderCard(); // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rcOpen, loading]);
 
-  // ── grid render (faithful port) ──────────────────────────────────────────────
   const q = (sel: string) => rootRef.current?.querySelector(sel) as HTMLElement | null;
-  const sum = (cells: Cell[]) => cells.reduce((s, c) => s + ((c && c !== 'off') ? c.v : 0), 0);
-
-  const srcDot = (c: any) => c.src === 'wa' ? '<span class="src"></span>' : '';
-  const ctip = (c: any) => c.by ? `<div class="ctip">${c.v} · ${c.by} · ${c.at || ''}${c.photo ? ' · photo' : ''}</div>` : '';
-  /** Every day is one grid cell: blank until it holds something, dimmed once it is out of reach. */
-  const wrap = (inner: string) => `<div class="cellwrap">${inner}</div>`;
-  const cls = (i: number, extra = '') =>
-    `cell${i === TODAY ? ' today' : ''}${i > TODAY || i === 6 ? ' future' : ''}${extra}`;
-
-  function dayCell(c: Cell, i: number, ref: string) {
-    if (c === 'off') return wrap(`<div class="${cls(i)} off"></div>`);
-    if (!c) return wrap(`<div class="${cls(i)}" data-day="${i}" data-cycle="${ref}"></div>`);
-    const t = c.v === 1 ? '1' : c.v === 0.5 ? '<span class="half">½</span>' : '<span class="zero">0</span>';
-    return wrap(`<div class="${cls(i, c.v > 0 ? ' filled' : '')}" data-day="${i}" data-cycle="${ref}">${t}${srcDot(c)}${ctip(c)}</div>`);
-  }
-  function qtyCell(c: Cell, i: number, ref: string, unit?: string) {
-    if (c === 'off') return wrap(`<div class="${cls(i)} off"></div>`);
-    if (!c) return wrap(`<div class="${cls(i)} qty" data-day="${i}" data-edit="${ref}"></div>`);
-    return wrap(`<div class="${cls(i, c.v > 0 ? ' filled' : '')} qty" data-day="${i}" data-edit="${ref}">${c.v}<small>${unit || ''}</small>${srcDot(c)}${ctip(c)}</div>`);
-  }
-  // A labour crew shows ONE row; its day cell is the whole crew's headcount for that day (e.g. "1+2"),
-  // and a click opens the breakdown popover to set each skill. Keeps the grid uncluttered.
-  function crewDayCell(crew: any, i: number, si: number, ci: number) {
-    const ref = `${si}.${ci}.${i}`;
-    if (i === 6 || i > TODAY) return wrap(`<div class="${cls(i)} off"></div>`);
-    const nz = crew.cats.map((cat: any) => { const c = cat.cells[i]; return (c && c !== 'off') ? c.v : 0; });
-    const total = nz.reduce((a: number, b: number) => a + b, 0);
-    const wa = crew.cats.some((cat: any) => { const c = cat.cells[i]; return c && c !== 'off' && c.src === 'wa'; });
-    if (total <= 0) return wrap(`<div class="${cls(i)}" data-day="${i}" data-crewcell="${ref}"></div>`);
-    const disp = nz.filter((v: number) => v > 0).join('+');
-    return wrap(`<div class="${cls(i, ' filled')}" data-day="${i}" data-crewcell="${ref}">${disp}${wa ? '<span class="src"></span>' : ''}</div>`);
-  }
-  // Progress is measured by what's been CERTIFIED (the payable truth), split PAST (certified before this
-  // week) vs THIS WEEK (certified − certifiedBefore). The row figure is ONLY this week's difference; past
-  // work is already accounted and shown muted for context.
-  function stageMath(st: any) {
-    const budget = st.type === 'lump' ? (st.amount || 0) : (st.total || 0) * (st.rate || 0);
-    const earned = st.certified || 0;                         // ₹ certified so far
-    const before = Math.min(earned, st.certifiedBefore || 0); // ₹ certified before this week
-    const twEarned = Math.max(0, earned - before);            // ₹ certified THIS WEEK = the payable
-    const frac = (v: number) => (budget > 0 ? v / budget : 0);
-    return {
-      kind: st.type as 'lump' | 'measured', earned, budget, twEarned,
-      prog: frac(earned), pastProg: frac(before), twProg: frac(twEarned),
-      pct: Math.round(frac(earned) * 100), twPct: Math.round(frac(twEarned) * 100),
-      done: st.type === 'measured' && st.rate ? Math.round(earned / st.rate) : 0, total: st.total || 0, unit: st.unit || '',
-    };
-  }
-
-  function render() {
-    const body = q('#atdxBody'); if (!body) return;
-    let wd = 0, wv = 0, we = 0, gaps = 0, todayCount = 0;
-    body.innerHTML = DATA.current.map((site, si) => {
-      // Every site is its own card; the cream between them is the seam.
-      const dot = SITE_DOT[si % SITE_DOT.length];
-      let rows = '';
-      let sno = 0;
-      const dayHead = [0, 0, 0, 0, 0, 0, 0]; let siteWage = 0;
-      site.crews.forEach((crew, ci) => {
-        const onContract = crew.basis === 'contract';
-        const catDays = crew.cats.reduce((s2, cat) => s2 + sum(cat.cells), 0);
-        const wage = crew.cats.reduce((s2, cat) => s2 + sum(cat.cells) * cat.rate, 0);
-        const earned = crew.stages.reduce((s2, st) => s2 + stageMath(st).earned - st.paid, 0);
-        if (onContract) { we += earned; }
-        else {
-          wd += catDays; wv += wage; siteWage += wage;
-          for (let i = 0; i < 7; i++) crew.cats.forEach(cat => { const c = cat.cells[i]; if (c && c !== 'off') dayHead[i] += c.v; });
-          if (crew.cats.length) for (let i = 0; i <= TODAY; i++) { if (i === 6) continue; if (!crew.cats.some(cat => { const c = cat.cells[i]; return c && c !== 'off'; })) gaps++; }
-        }
-        const assumed = !crew.basisConfirmed ? ` <span class="assumed" title="Basis assumed — pick Contract or Labour to confirm">· assumed</span>` : '';
-        const measuring = crew.accrualBasis === 'measurement';
-        const measureToggle = (crew.contract && onContract)
-          ? ` <button class="measurebasis${measuring ? ' on' : ''}" data-measurebasis="${si}.${ci}" title="${measuring ? 'Measured by attendance — each measured day auto-certifies. Click to switch back to milestone certification.' : 'Certify by milestones. Click to measure by attendance instead.'}">${measuring ? '✓ measured by attendance' : 'measure by attendance'}</button>`
-          : '';
-        // The SAME Contract/Labour toggle for every crew row — on-contract or not. "Contract" opens the
-        // put-on-contract sheet (data-basis handler), "Labour" switches back to daily wages. measureToggle
-        // only applies to a % (accrual 'work') contract crew, so it's naturally empty for a wages/labour row.
-        const wagesMode = crew.accrualBasis === 'day';
-        const seg = `<div class="segwrap"><div class="seg"><button data-basis="${si}.${ci}.contract" aria-pressed="${onContract}">Contract</button><button data-basis="${si}.${ci}.labour" aria-pressed="${!onContract}">Labour</button></div>${assumed}${wagesMode ? '' : measureToggle}</div>`;
-        sno++;
-        if (!onContract) {
-          // ── LABOUR crew → ONE row. The cell is the crew's headcount; a click opens the stepper. The
-          // Contract/Labour toggle replaces the old "put on contract" link — same control as a contract crew. ──
-          rows += `<div class="cols wrow" data-grp="c${si}-${ci}">
-            <div class="wname"><button class="rmw" data-rmc="${si}.${ci}" title="Remove from sheet" aria-label="Remove ${escapeHtml(crew.n)}">×</button>
-              <div class="wav">${avatarOf(crew.n)}</div>
-              <div class="wmid"><b>${escapeHtml(crew.n)}<span class="crewtag">crew</span></b>
-              <span data-wageslbl="${si}.${ci}">${escapeHtml(crew.trade || crew.d || 'Labour')} · daily wages</span>${seg}</div></div>
-            ${crew.head.map((_c: Cell, i: number) => crewDayCell(crew, i, si, ci)).join('')}
-            <div class="wtotal">${catDays ? `<b>${catDays} wd</b> · ${inr(wage)}` : ''}</div></div>`;
-          return;
-        }
-        // ── CONTRACT crew ─────────────────────────────────────────────────────────────────────────
-        // Wages mode ('day' accrual): ONE row — the crew's daily attendance + wage total, with the
-        // contract phase it feeds as sub-text (no separate stage rows). % mode: no separate heading —
-        // the FIRST phase row carries the crew identity; the rest follow as sub rows.
-        (crew as any).shown = (crew as any).shown || crew.stages.map((_st, ki) => ki).filter((ki) => {
-          const m = stageMath(crew.stages[ki]); const st = crew.stages[ki];
-          return !(m.pct >= 100 && m.earned - st.paid <= 0);
-        });
-        const shownList: number[] = (crew as any).shown;
-        // A custom, designed stage dropdown (a native <select>'s option list can't be styled). The trigger
-        // is a chip; the menu shows the current stage (checked) and, under an "Add a stage" heading, the
-        // stages not yet on the sheet — picking one adds it as a new row. currentKi < 0 → pure "add" mode.
-        const phDrop = (currentKi: number) => {
-          const cur = currentKi >= 0 ? crew.stages[currentKi] : null;
-          const notShown = crew.stages.map((_s, ki) => ki).filter((ki) => !shownList.includes(ki));
-          const metaOf = (st: any) => (st.type === 'lump' ? inr(st.amount || 0) : `per ${st.unit || 'unit'}`);
-          const addItems = notShown.length
-            ? notShown.map((ki) => { const st = crew.stages[ki]; const done = stageMath(st).pct >= 100; return `<button type="button" class="ph-item" data-phadd="${si}.${ci}.${ki}"><span class="ph-name">${escapeHtml(st.n)}</span><span class="ph-meta">${metaOf(st)}${done ? ' · done' : ''}</span></button>`; }).join('')
-            : `<div class="ph-none">All stages are on the sheet</div>`;
-          return `<span class="phdrop">
-            <button type="button" class="phdrop-btn${cur ? '' : ' add'}" data-phtoggle><span class="phdrop-lbl">${cur ? escapeHtml(cur.n) : '＋ Add a stage'}</span><svg class="phdrop-chev" viewBox="0 0 10 6"><path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.4"/></svg></button>
-            <div class="phdrop-menu" hidden>${cur ? `<div class="ph-cur"><span class="ph-check">✓</span><span class="ph-name">${escapeHtml(cur.n)}</span><span class="ph-meta">current</span></div><div class="ph-hd">Add a stage</div>` : ''}${addItems}</div>
-          </span>`;
-        };
-        const stageCells = (st: any, ref: string) => {
-          // A LUMP (%) stage is cumulative progress, not a per-day thing — so it is ONE subtle strip
-          // spanning the week (tap → certify wizard). Two tones: PAST work (muted) and THIS WEEK's added
-          // progress (terracotta). A measured stage stays day-wise (a qty per day makes sense).
-          if (st.type === 'lump') {
-            const m = stageMath(st);
-            const now = Math.min(100, Math.max(0, Math.round(m.pct)));
-            const past = Math.min(100, Math.max(0, Math.round(m.pastProg * 100)));
-            const tw = Math.max(0, now - past);
-            return `<div class="pctstrip${locked ? ' locked' : ''}"${locked ? '' : ` data-cert="${ref}"`} style="grid-column:2 / 9">
-              <div class="ps-track"><i class="ps-past" style="width:${past}%"></i><i class="ps-now" style="left:${past}%;width:${tw}%"></i></div>
-              <span class="ps-lbl">${now}%${tw > 0 ? ` · <em>+${tw}% this week</em>` : ''}</span>
-              <svg class="ps-edit" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
-            </div>`;
-          }
-          return st.cells.map((c: Cell, i: number) => qtyCell(c, i, ref, st.unit)).join('');
-        };
-        // The row total leads with THIS WEEK's difference (the payable this week); cumulative progress
-        // rides underneath as muted context — never the headline, since it's already-done/paid work.
-        const stageTotal = (_st: any, m: ReturnType<typeof stageMath>) => {
-          const tw = Math.round(m.twEarned);
-          return `${tw > 0 ? `<b class="twk">+${inr(tw)}</b><span class="twkl">this week</span>` : `<span class="twkl none">no change</span>`}`
-            + `<span class="cuml">${Math.round(m.pct)}% of ${inr(m.budget)}</span>`;
-        };
-
-        if (wagesMode) {
-          // Wages are the payable (they show in the ledger + payables); the contract phase is what they
-          // count toward. Sub-text names that phase + its budget; the row total is the week's wage.
-          const totalVal = crew.stages.reduce((s2, st) => s2 + (st.type === 'lump' ? (st.amount || 0) : (st.total || 0) * (st.rate || 0)), 0);
-          const target = crew.stages[0];
-          const phaseSub = target ? `wages → ${escapeHtml(target.n)}${totalVal ? ` · contract ${inr(totalVal)}` : ''}` : 'wages → contract';
-          rows += `<div class="cols wrow" data-grp="c${si}-${ci}">
-            <div class="wname"><button class="rmw" data-rmc="${si}.${ci}" title="Remove from sheet" aria-label="Remove ${escapeHtml(crew.n)}">×</button>
-              <div class="wav">${avatarOf(crew.n)}</div>
-              <div class="wmid"><b>${escapeHtml(crew.n)}</b><span>${escapeHtml(crew.d || '')} · ${phaseSub}</span>${seg}</div></div>
-            ${crew.head.map((_c: Cell, i: number) => crewDayCell(crew, i, si, ci)).join('')}
-            <div class="wtotal"><b>${catDays} wd</b> · ${inr(wage)}</div></div>`;
-          return;
-        }
-
-        // % MODE — the first phase row IS the crew's main row (identity + toggle live in it).
-        if (!shownList.length) {
-          rows += `<div class="cols wrow" data-grp="c${si}-${ci}">
-            <div class="wname"><button class="rmw" data-rmc="${si}.${ci}" title="Remove from sheet" aria-label="Remove ${escapeHtml(crew.n)}">×</button>
-              <div class="wav">${avatarOf(crew.n)}</div>
-              <div class="wmid"><b>${escapeHtml(crew.n)}</b><span class="stpick">${phDrop(-1)}</span>${seg}</div></div>
-            ${dates.map((_d, i) => wrap(`<div class="${cls(i)} off"></div>`)).join('')}<div class="wtotal"><b>0%</b> · ₹0</div></div>`;
-        }
-        shownList.forEach((ki: number, n: number) => {
-          const st = crew.stages[ki], ref = `${si}.s${ci}.${ki}`, m = stageMath(st);
-          if (n === 0) {
-            rows += `<div class="cols wrow" data-grp="c${si}-${ci}">
-              <div class="wname"><button class="rmw" data-rmc="${si}.${ci}" title="Remove from sheet" aria-label="Remove ${escapeHtml(crew.n)}">×</button>
-                <div class="wav">${avatarOf(crew.n)}</div>
-                <div class="wmid"><b>${escapeHtml(crew.n)}</b><span class="stpick">${phDrop(ki)}</span>${seg}</div></div>
-              ${stageCells(st, ref)}<div class="wtotal">${stageTotal(st, m)}</div></div>`;
-          } else {
-            rows += `<div class="cols wrow sub" data-grp="c${si}-${ci}">
-              <div class="wname">${phDrop(ki)}</div>${stageCells(st, ref)}
-              <div class="wtotal">${stageTotal(st, m)}</div></div>`;
-          }
-        });
-      });
-      site.direct.forEach((w, wi) => {
-        const d = sum(w.cells), amt = d * w.rate; wd += d; wv += amt; siteWage += amt;
-        w.cells.forEach((c, i) => { if (c && c !== 'off') dayHead[i] += c.v; if (!c && i <= TODAY) gaps++; });
-        sno++;
-        rows += `<div class="cols wrow" data-grp="d${si}-${wi}">
-          <div class="wname"><button class="rmw" data-rmw="${si}.${wi}" title="Remove from sheet" aria-label="Remove ${escapeHtml(w.n)}">×</button>
-            <div class="wav">${avatarOf(w.n)}</div>
-            <div class="wmid"><b>${escapeHtml(w.n)}</b><span data-ocwrap="${si}.${wi}">${escapeHtml(w.d || '')} · <span class="rt mono" data-rate="${si}.d${wi}" title="click to change rate">₹${w.rate}</span>/day · <button class="oncontract" data-ocw="${si}.${wi}">put on contract</button></span></div></div>
-          ${w.cells.map((c, i) => dayCell(c, i, `${si}.d${wi}`)).join('')}
-          <div class="wtotal">${d ? `<b>${d} wd</b> · ${inr(amt)}` : ''}</div></div>`;
-      });
-      todayCount += TODAY >= 0 ? dayHead[TODAY] : 0;
-
-      const head = `<div class="sitehead"><span class="sitedot" style="background:${dot}"></span>
-        <b>${escapeHtml(site.label)}</b>${site.hint ? `<span class="area">${escapeHtml(site.hint)}</span>` : ''}
-        <span class="stotal">${siteWage ? inr(siteWage) + ' this week' : ''}</span><span class="addw" data-add="${si}">＋ Add worker</span></div>`;
-      const empty = `<div class="siteempty">No attendance yet this week — <a data-add="${si}">add a worker</a> or wait for the site to WhatsApp it in.</div>`;
-      const foot = `<div class="cols sitefoot"><div class="lab">On site</div>${dates.map((_d, i) => `<div class="dc${i === TODAY ? ' today' : ''}">${dayHead[i] || ''}</div>`).join('')}<div class="sum">${siteWage ? inr(siteWage) : ''}</div></div>`;
-      return `<div class="siteblock" data-site="${site.site}">${head}${sno ? rows + foot : empty}<div id="add-${si}"></div></div>`;
-    }).join('') || `<div class="state">No active projects yet — create a project to start tracking attendance.</div>`;
-    const setTxt = (id: string, v: string) => { const el = q('#' + id); if (el) el.textContent = v; };
-    setTxt('atdxWd', String(wd)); setTxt('atdxAccrued', inr(wv + we)); setTxt('atdxToday', String(todayCount)); setTxt('atdxGaps', String(gaps));
-    bind(); applyFilter();
-  }
-
-  // ── resolve a cell ref to its in-memory target + persistence subject ─────────
-  function resolve(ref: string) {
-    const [si, part, ki] = ref.split('.'); const site = DATA.current[+si];
-    if (part[0] === 'h') { const crew = site.crews[+part.slice(1)]; return { cells: crew.head, projectId: site.site, subject: { type: 'crew_head' as const, crew_id: crew.crewId } }; }
-    if (part[0] === 'c') { const cat = site.crews[+part.slice(1)].cats[+ki]; return { cells: cat.cells, target: cat, projectId: site.site, subject: { type: 'crew_category' as const, category_id: cat.id } }; }
-    if (part[0] === 's') { const st = site.crews[+part.slice(1)].stages[+ki]; return { cells: st.cells, target: st, projectId: site.site, subject: { type: 'stage' as const, milestone_id: st.milestoneId } }; }
-    const w = site.direct[+part.slice(1)]; return { cells: w.cells, target: w, projectId: site.site, subject: { type: 'direct' as const, direct_worker_id: w.id } };
-  }
-  const colOf = (div: Element) => Number((div as HTMLElement).dataset.day ?? -1);
+  const escapeHtml = (s: string) => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
   const fail = (e: any) => { showSnackbar(e?.message || 'Could not save', { type: 'error' }); load(); };
 
-  async function persistCell(subject: any, projectId: string, i: number, value: number) {
-    try { await saveCell(orgId, projectId, dates[i], subject, value, byName); } catch (e) { fail(e); }
+  // ── build the worker-row / contract-row models for a site ─────────────────────
+  const lineVal = (l: Line, i: number) => { const c = l.cells[i]; return (c && c !== 'off') ? c.v : 0; };
+  const rowDays = (r: WorkerRow) => r.lines.reduce((s, l) => s + l.cells.reduce((s2, _c, i) => s2 + lineVal(l, i), 0), 0);
+  const rowWage = (r: WorkerRow) => r.lines.reduce((s, l) => s + l.cells.reduce((s2, _c, i) => s2 + lineVal(l, i) * l.rate, 0), 0);
+  const dayVal = (r: WorkerRow, i: number) => r.lines.reduce((s, l) => s + lineVal(l, i), 0);
+  const dayWage = (r: WorkerRow, i: number) => r.lines.reduce((s, l) => s + lineVal(l, i) * l.rate, 0);
+  const dayWa = (r: WorkerRow, i: number) => r.lines.some(l => { const c = l.cells[i]; return c && c !== 'off' && c.src === 'wa'; });
+
+  // A phase's completion reflects what's actually accounted against it — the GREATER of the ₹ certified
+  // (work approved) and the ₹ already paid (allocations). A phase paid but not yet formally certified is
+  // still work done and money out, so it must not read 0. twEarned stays this-week's newly-certified ₹.
+  function stageMath(st: StageRow) {
+    const budget = st.type === 'lump' ? (st.amount || 0) : (st.total || 0) * (st.rate || 0);
+    const earned = Math.max(st.certified || 0, st.paid || 0);
+    const certified = st.certified || 0;
+    const before = Math.min(certified, st.certifiedBefore || 0);
+    const twEarned = Math.max(0, certified - before);
+    const pct = budget > 0 ? Math.min(100, Math.round(earned / budget * 100)) : 0;
+    const done = st.type === 'measured' && st.rate ? earned / st.rate : (st.amount ? earned / st.amount * 100 : 0);
+    return { budget, earned, certified, paid: st.paid || 0, twEarned, pct, done, total: st.total || 0, unit: st.unit || '', isLS: st.type === 'lump' };
+  }
+  const woWeek = (crew: CrewRow) => crew.stages.reduce((a, st) => a + stageMath(st).twEarned, 0);
+  const uiStage = (crew: CrewRow): number => {
+    const anyc = crew as any;
+    if (anyc._uiStage == null || anyc._uiStage >= crew.stages.length) {
+      const first = crew.stages.findIndex(st => { const m = stageMath(st); return m.earned < m.budget; });
+      anyc._uiStage = first < 0 ? 0 : first;
+    }
+    return anyc._uiStage;
+  };
+  const crewLabel = (crew: CrewRow) => crew.d || 'Contract';
+
+  // Classify a crew: a %/measured contract → its own contract row; everything else (labour, or a
+  // contract kept on daily wages) → a worker row that still musters days.
+  const isContractRow = (crew: CrewRow) => crew.basis === 'contract' && crew.accrualBasis !== 'day';
+
+  function buildSiteRows(site: SiteRow, si: number) {
+    const workers: WorkerRow[] = [];
+    const contracts: ContractRow[] = [];
+    site.crews.forEach((crew, ci) => {
+      if (isContractRow(crew)) {
+        contracts.push({ id: `${si}.${ci}`, siteId: site.site, crew, si, ci });
+        return;
+      }
+      const wages = crew.basis === 'contract' && crew.accrualBasis === 'day';
+      const target = crew.stages[0];
+      const trade = wages && target ? `${crew.trade || crew.d || 'Labour'} · wages → ${target.n}` : (crew.trade || crew.d || 'Labour');
+      workers.push({
+        id: `c${si}.${ci}`, siteId: site.site, name: crew.n, trade,
+        contractWages: wages, crew,
+        lines: crew.cats.map(cat => ({ label: cat.n, rate: cat.rate, cells: cat.cells, subject: { type: 'crew_category', category_id: cat.id } })),
+      });
+    });
+    site.direct.forEach((w, wi) => {
+      workers.push({
+        id: `d${si}.${wi}`, siteId: site.site, name: w.n, trade: w.d || w.cat || 'Labour', contractWages: false, direct: w,
+        lines: [{ label: w.cat || 'Day', rate: w.rate, cells: w.cells, subject: { type: 'direct', direct_worker_id: w.id } }],
+      });
+    });
+    return { workers, contracts };
   }
 
-  // Every worker's daily rate DERIVES from the org rate card (no per-worker overrides). Recompute after
-  // a load or any rate edit so the grid, the marking popover's cost and the site totals all read the one
-  // number the card keeps for that trade + skill.
+  // ── the grid render (faithful port of the artifact) ──────────────────────────
+  function render() {
+    const thead = q('#thead'); const grid = q('#grid'); if (!thead || !grid) return;
+    WROWS.current.clear(); CROWS.current.clear();
+    const filter = filterRef.current;
+
+    thead.innerHTML = `<tr><th>Worker</th>${DAYS.map((d, i) => {
+      const dt = new Date(dates[i]);
+      const fillable = !locked && i < TODAY && i !== 6;
+      return `<th class="${i === TODAY ? 'today ' : ''}${fillable ? 'fillable' : ''}"${fillable ? ` data-fill="${i}"` : ''}>${d}<span class="d">${dt.getDate()}</span></th>`;
+    }).join('')}<th class="tot">Days</th><th class="tot">This week</th><th></th></tr>`;
+
+    grid.querySelectorAll('tbody').forEach(b => b.remove());
+    let totD = 0, totM = 0, gaps = 0;
+    const A = addState.current;
+
+    for (let si = 0; si < DATA.current.length; si++) {
+      const site = DATA.current[si];
+      if (filter !== 'all' && filter !== site.site) continue;
+      const dot = SITE_DOT[si % SITE_DOT.length];
+      const { workers, contracts } = buildSiteRows(site, si);
+      let sd = 0, sm = 0;
+      workers.forEach(r => { sd += rowDays(r); sm += rowWage(r); });
+      contracts.forEach(c => { sm += woWeek(c.crew); });
+      totD += sd; totM += sm;
+      // gaps: past working days a labour row left unmarked
+      workers.forEach(r => {
+        for (let i = 0; i < TODAY; i++) { if (i === 6) continue; if (dayVal(r, i) <= 0) gaps++; }
+      });
+
+      let html = `<tr class="group"><th colspan="11" style="--c:${dot}"><div class="g"><span class="dot"></span><span class="name">${escapeHtml(site.label)}</span>${site.hint ? `<span class="place">${escapeHtml(site.hint)}</span>` : ''}</div></th></tr>`;
+
+      if (!workers.length && !contracts.length) {
+        html += `<tr class="empty"><td colspan="11">Nobody on this week's sheet yet — the site can WhatsApp attendance in, or <a data-add="${site.site}">add someone</a> below.</td></tr>`;
+      }
+
+      workers.forEach(r => {
+        WROWS.current.set(r.id, r);
+        const days = rowDays(r), wage = rowWage(r);
+        html += `<tr class="worker" data-row="${r.id}"><td class="who"><span class="n">${escapeHtml(r.name)}</span><span class="t">${escapeHtml(r.trade)}</span></td>`;
+        for (let i = 0; i < 7; i++) {
+          const isFuture = i > TODAY || i === 6;
+          const val = dayVal(r, i);
+          let cls = 'cell', inner = '';
+          if (!isFuture) {
+            if (val > 0) {
+              cls += ' filled';
+              inner = val === 0.5 ? '½' : fmtQ(val);
+              const nz = r.lines.map(l => lineVal(l, i)).filter(v => v > 0);
+              if (nz.length > 1) inner += `<span class="sub">${nz.map(v => fmtQ(v)).join(' + ')}</span>`;
+              if (dayWa(r, i)) inner += '<span class="src"></span>';
+            } else if (i < TODAY) cls += ' gap';
+          }
+          const title = val > 0 ? `${inr(dayWage(r, i))} · ${DAYS[i]} ${new Date(dates[i]).getDate()}` : '';
+          const editable = !isFuture && !locked;
+          html += `<td class="day ${i === TODAY ? 'today' : ''} ${isFuture ? 'future' : ''}"><div class="${cls}" ${editable ? `tabindex="0" data-w="${r.id}" data-i="${i}"` : ''} title="${title}">${inner}</div></td>`;
+        }
+        html += `<td class="tot days ${days ? '' : 'zero'}">${days ? fmtQ(days) : '—'}</td><td class="tot ${wage ? '' : 'zero'}">${wage ? inr(wage) : '—'}</td><td class="menu"><button data-menu="${r.id}" aria-label="Row menu">⋯</button></td></tr>`;
+      });
+
+      contracts.forEach(c => {
+        CROWS.current.set(c.id, c);
+        const crew = c.crew; const ki = uiStage(crew); const st = crew.stages[ki];
+        if (!st) {
+          html += `<tr class="contract" data-c="${c.id}"><td class="who"><span class="n">${escapeHtml(crew.n)}</span><span class="tag">contract</span></td><td colspan="7" class="cwork" data-cert="${c.id}"><div class="cw"><span class="num">No stages on this contract</span></div></td><td class="tot days zero">—</td><td class="tot zero"><span class="amt">—</span></td><td class="menu"><button data-menu-c="${c.id}" aria-label="Row menu">⋯</button></td></tr>`;
+          return;
+        }
+        const m = stageMath(st);
+        const qty = m.isLS ? `<b>${fmtQ(m.done)}%</b> of lump sum` : `<b>${fmtQ(m.done)}</b> / ${fmtQ(m.total)} ${m.unit}`;
+        const stSel = `<select class="sel mini stage" data-stsel="${c.id}">${crew.stages.map((x, i) => { const mm = stageMath(x); return `<option value="${i}" ${i === ki ? 'selected' : ''}>${escapeHtml(x.n)} — ${mm.pct}% done${mm.pct >= 100 ? ' ✓' : ''}</option>`; }).join('')}</select>`;
+        html += `<tr class="contract" data-c="${c.id}">
+          <td class="who"><span class="n">${escapeHtml(crew.n)}</span><span class="tag">contract</span><br><span class="sel mini wo" title="${escapeHtml(crew.woId || '')}">${escapeHtml(crewLabel(crew))}</span></td>
+          <td colspan="7" class="cwork" data-cert="${c.id}"><div class="cw">${stSel}<span class="bar" title="${inr(m.earned)} of ${inr(m.budget)}"><i style="width:${m.pct}%"></i></span><span class="num">${qty}</span></div></td>
+          <td class="tot days zero">—</td><td class="tot ${m.twEarned ? '' : 'zero'}"><span class="amt">${m.twEarned ? inr(m.twEarned) : '—'}</span><span class="of">${inr(m.earned)} to date</span></td>
+          <td class="menu"><button data-menu-c="${c.id}" aria-label="Row menu">⋯</button></td></tr>`;
+      });
+
+      // add-worker row
+      if (A.site === site.site && A.picked) {
+        const p = A.picked;
+        html += `<tr class="addrow"><td colspan="8"><div class="ask"><div class="askhd">Add <b>${escapeHtml(p.name)}</b> <span>· ${escapeHtml(p.category || 'Worker')}</span></div><div class="cards">
+          <button class="card" data-mode="wages"><span class="ci">₹</span><span class="ct">On daily wages</span><span class="cs">Days × rate from the rate card. Helpers counted alongside.</span></button>
+          <button class="card" data-mode="contract"><span class="ci">§</span><span class="ct">On contract</span><span class="cs">Certify stages as work completes — pick the contract next.</span></button>
+        </div><button class="cancel" data-addcancel>cancel</button></div></td><td class="tot days sum ${sd ? '' : 'zero'}">${sd ? fmtQ(sd) : '—'}</td><td class="tot sum ${sm ? '' : 'zero'}">${sm ? inr(sm) : '—'}</td><td class="menu"></td></tr>`;
+      } else {
+        const exp = A.site === site.site;
+        html += `<tr class="addrow"><td colspan="8"><div class="morph ${exp && A.exp ? 'exp' : ''}" data-site="${site.site}">
+          <button class="plus" data-add="${site.site}" aria-label="Add worker">+</button>
+          <button class="label" data-add="${site.site}">Add worker</button>
+          <input ${exp ? 'id="addinput"' : ''} placeholder="Search a worker or crew by name…" autocomplete="off" ${exp ? '' : 'tabindex="-1"'}>
+          <button class="close" data-addcancel aria-label="Cancel">×</button>
+          ${exp ? '<div class="picker" id="picker"></div>' : ''}
+        </div></td><td class="tot days sum ${sd ? '' : 'zero'}">${sd ? fmtQ(sd) : '—'}</td><td class="tot sum ${sm ? '' : 'zero'}">${sm ? inr(sm) : '—'}</td><td class="menu"></td></tr>`;
+      }
+
+      const tb = document.createElement('tbody');
+      if (grid.querySelector('tbody')) html = `<tr class="spacer"><td colspan="11"></td></tr>` + html;
+      tb.innerHTML = html; grid.appendChild(tb);
+    }
+
+    if (!DATA.current.some(s => filter === 'all' || filter === s.site) || !DATA.current.length) {
+      // no matching site: leave an empty note
+    }
+
+    // summary
+    const sm = q('#summary');
+    if (sm) {
+      sm.innerHTML = `<b>${fmtQ(totD)}</b> worker-days · <b>${inr(totM)}</b> this week${gaps ? ` · <span class="gaps" id="gapjump">${gaps} past ${gaps === 1 ? 'day' : 'days'} not marked</span>` : (TODAY > 0 ? ' · every past day is marked' : '')}`;
+      const gj = q('#gapjump');
+      if (gj) gj.onclick = () => { const first = rootRef.current?.querySelector('.cell.gap') as HTMLElement | null; if (first) { first.scrollIntoView({ block: 'center', behavior: 'smooth' }); first.focus(); first.classList.add('flash'); setTimeout(() => first.classList.remove('flash'), 600); } };
+    }
+    // site pills
+    const nav = q('#sites');
+    if (nav) {
+      nav.innerHTML = `<button class="pill ${filter === 'all' ? 'on' : ''}" data-f="all">All sites</button>` +
+        DATA.current.map((s, i) => `<button class="pill ${filter === s.site ? 'on' : ''}" data-f="${s.site}" style="--c:${SITE_DOT[i % SITE_DOT.length]}"><span class="dot"></span>${escapeHtml(shortSite(s.label))}</button>`).join('');
+    }
+
+    bind();
+    // Restore focus into the search field while adding.
+    if (A.site && !A.picked) {
+      const inp = q('#addinput') as HTMLInputElement | null;
+      if (inp) {
+        if (!A.exp) { requestAnimationFrame(() => { A.exp = true; (q(`.morph[data-site="${A.site}"]`))?.classList.add('exp'); setTimeout(() => inp.focus(), 120); }); }
+        else inp.focus();
+        inp.oninput = () => renderPicker(inp.value);
+        inp.onkeydown = (e) => {
+          const hi = q('.picker button.hi');
+          if (e.key === 'Enter' && hi) { (hi as HTMLButtonElement).click(); }
+          else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+            e.preventDefault();
+            const bs = [...rootRef.current!.querySelectorAll('.picker button')] as HTMLElement[];
+            let idx = bs.findIndex(b => b.classList.contains('hi'));
+            idx = e.key === 'ArrowDown' ? Math.min(bs.length - 1, idx + 1) : Math.max(0, idx - 1);
+            bs.forEach(b => b.classList.remove('hi')); bs[idx]?.classList.add('hi');
+          } else if (e.key === 'Escape') collapseAdd();
+        };
+        renderPicker(inp.value);
+      }
+    }
+  }
+
+  // ── add-worker picker ──────────────────────────────────────────────────────
+  function renderPicker(query: string) {
+    const A = addState.current; const menu = q('#picker'); if (!menu) return;
+    const site = DATA.current.find(s => s.site === A.site); if (!site) return;
+    const have = new Set([...site.crews.map(c => c.n), ...site.direct.map(w => w.n)]);
+    const avail = PARTIES.current.filter(p => !have.has(p.name));
+    const list = (query.trim() ? searchPayees(avail, query.trim()) : avail).slice(0, 8) as typeof avail;
+    menu.innerHTML = list.map((p, i) => `<button class="${i === 0 ? 'hi' : ''}" data-pick="${escapeHtml(p.stakeholder_id)}">${escapeHtml(p.name)}<span class="tr">${escapeHtml(p.category || 'Worker')}</span></button>`).join('') +
+      `<button class="new ${list.length ? '' : 'hi'}" data-new>+ New party${query.trim() ? ` "${escapeHtml(query.trim())}"` : ''} — added to Parties & this site</button>`;
+  }
+  function collapseAdd() {
+    const A = addState.current;
+    const m = q('.morph.exp');
+    if (m && !A.picked) { m.classList.remove('exp'); m.querySelector('.picker')?.remove(); setTimeout(() => { A.site = null; A.picked = null; A.exp = false; render(); }, 260); }
+    else { A.site = null; A.picked = null; A.exp = false; render(); }
+  }
+
+  // ── persistence ──────────────────────────────────────────────────────────────
+  async function persistCell(subject: PersistSubject, projectId: string, i: number, value: number) {
+    try { await saveCell(orgId, projectId, dates[i], subject, value, byName); } catch (e) { fail(e); }
+  }
   const deriveRates = () => {
     const C = CARD.current; if (!C) return;
     for (const s of DATA.current) {
@@ -755,18 +361,10 @@ export default function AttendanceSheet({ session }: { session: Session }) {
       for (const w of s.direct) w.rate = rateFor(resolveTrade(w.cat), w.cat);
     }
   };
-
-  // Edit a rate — from the card table, the marking popover, or a worker row. It is two-way linked: the
-  // card is the source of truth, so we (1) write the card (org-wide, from today), (2) re-derive every
-  // worker's rate, and (3) mirror the new number onto every stored row it now governs, so Payables /
-  // the ledger read exactly what the sheet shows. One number per trade + skill, everywhere.
   const editRate = (cell: CardCell, v: number) => {
     const C = CARD.current; if (!C) return;
     const before = new Map<string, number>();
-    for (const s of DATA.current) {
-      for (const cr of s.crews) for (const cat of cr.cats) before.set('c' + cat.id, cat.rate);
-      for (const w of s.direct) before.set('d' + w.id, w.rate);
-    }
+    for (const s of DATA.current) { for (const cr of s.crews) for (const cat of cr.cats) before.set('c' + cat.id, cat.rate); for (const w of s.direct) before.set('d' + w.id, w.rate); }
     if (cell.key === 'unskilled') C.unskilled[cell.kind as 'hm' | 'hf'] = v;
     else if (cell.key === 'supervisor') C.supervisor = v;
     else (C.trades[cell.key] ||= { skilled: null, hm: null, hf: null })[cell.kind] = v;
@@ -781,565 +379,608 @@ export default function AttendanceSheet({ session }: { session: Session }) {
     if (jobs.length) Promise.all(jobs).catch(fail);
   };
 
-  // Click a day header → mark everyone with an empty cell present (1) for that day. Only fills gaps
-  // (never overwrites a real mark), skips contract crews (measured, not mustered) and days off.
+  // Click a past day header → mark every empty labour cell present (1). Only fills gaps.
   function fillDay(i: number) {
     if (locked || i < 0 || i > 6) return;
-    let marked = 0;
-    const saves: Promise<void>[] = [];
-    const mark = (cells: Cell[], subject: any, projectId: string) => {
-      const c = cells[i]; if (c === 'off' || c) return;
-      cells[i] = { v: 1, src: 'office', by: byName, at: 'just now' }; marked++;
-      saves.push(saveCell(orgId, projectId, dates[i], subject, 1, byName));
-    };
+    let marked = 0; const saves: Promise<void>[] = [];
     DATA.current.forEach(site => {
-      site.crews.forEach(crew => {
-        if (crew.basis === 'contract') return;
-        crew.cats.forEach(cat => mark(cat.cells, { type: 'crew_category', category_id: cat.id }, site.site));
-      });
-      site.direct.forEach(w => mark(w.cells, { type: 'direct', direct_worker_id: w.id }, site.site));
+      if (filterRef.current !== 'all' && filterRef.current !== site.site) return;
+      const mark = (cells: Cell[], subject: PersistSubject) => { const c = cells[i]; if (c === 'off' || c) return; cells[i] = { v: 1, src: 'office', by: byName, at: 'just now' }; marked++; saves.push(saveCell(orgId, site.site, dates[i], subject, 1, byName)); };
+      site.crews.forEach(crew => { if (isContractRow(crew)) return; crew.cats.forEach(cat => mark(cat.cells, { type: 'crew_category', category_id: cat.id })); });
+      site.direct.forEach(w => mark(w.cells, { type: 'direct', direct_worker_id: w.id }));
     });
     render();
     Promise.all(saves).catch(fail);
     const dayName = new Date(dates[i]).toLocaleString('en-US', { weekday: 'long' });
-    showSnackbar(marked ? `Marked ${marked} present on ${dayName} — tap any cell to adjust` : `Everyone already marked on ${dayName}`);
+    toast(marked ? `Marked ${marked} present on ${dayName} — tap any cell to adjust` : `Everyone already marked on ${dayName}`);
   }
 
-  // Open the certification wizard for a stage cell — the contract-stage reading is now an accountable,
-  // evidenced, role-gated event (submit → auto-approve within rights, else the Works Approver).
-  function openCertWizard(ref: string) {
-    const [si, part, ki] = ref.split('.');
-    const site = DATA.current[+si]; const crew = site.crews[+part.slice(1)]; const st = crew.stages[+ki] as any;
-    setCertCtx({
-      orgId, projectId: site.site, projectName: site.label,
-      woId: crew.woId ?? null, milestoneId: st.milestoneId, crewId: crew.crewId, stakeholderId: crew.stakeholderId ?? null,
-      partyName: crew.n, milestoneName: st.n,
-      kind: st.type === 'lump' ? 'lump' : 'measured',
-      planned: st.amount || 0, rate: st.rate || 0, unit: st.unit,
-      // Floor at what's already CERTIFIED (not the raw prior reading) so the wizard certifies only the
-      // increment and never re-certifies past work.
-      priorReading: st.type === 'lump' ? (st.amount ? Math.round((st.certified || 0) / st.amount * 100) : 0) : 0,
-    });
+  // ── the editor popover (one popup for a lone worker or a whole gang) ──────────
+  const editor = () => q('#editor')!;
+  const rowmenu = () => q('#rowmenu')!;
+  function closeAll() { editor().classList.remove('open'); rowmenu().classList.remove('open'); rootRef.current?.querySelectorAll('.menu-open').forEach(x => x.classList.remove('menu-open')); }
+  function place(el: HTMLElement, anchor: HTMLElement) {
+    const r = anchor.getBoundingClientRect();
+    el.style.left = Math.min(r.left + window.scrollX, window.scrollX + window.innerWidth - el.offsetWidth - 12) + 'px';
+    el.style.top = (r.bottom + window.scrollY + 6) + 'px';
   }
+  const focusCell = (rowId: string, i: number) => (q(`.cell[data-w="${rowId}"][data-i="${i}"]`))?.focus();
 
-  // MEASUREMENT basis, measured stage — the muster day IS the reading. Enter the qty inline and it
-  // auto-certifies (qty × rate) through the governed path, no wizard ceremony: the certification is
-  // auto-approved within the marker's authority, else it routes Pending to the Works Approver.
-  function openMeasuredEntry(div: HTMLElement, ref: string, i: number) {
-    const [si, part, ki] = ref.split('.');
-    const site = DATA.current[+si]; const crew = site.crews[+part.slice(1)]; const st = crew.stages[+ki] as any;
-    const t = resolve(ref);
-    const cur = t.cells[i] && t.cells[i] !== 'off' ? (t.cells[i] as any).v : '';
-    const wasEmpty = cur === '';   // certify ONLY the first entry of a day — never double-accrue on a correction
-    div.innerHTML = `<input class="mono" value="${cur}" inputmode="decimal" placeholder="qty">`;
-    const inp = div.querySelector('input') as HTMLInputElement; inp.focus(); inp.select();
-    let doneOnce = false;
-    const commit = async () => {
-      if (doneOnce) return; doneOnce = true;
-      const v = parseFloat(inp.value);
-      if (isNaN(v) || v <= 0) { render(); return; }
-      t.cells[i] = { v, src: 'office', by: byName, at: 'just now' };
-      persistCell(t.subject, t.projectId, i, v);          // the reading (display + progress)
-      if (!wasEmpty) { showSnackbar('Reading updated (already certified for that day)'); render(); return; }
-      const amount = Math.round((st.rate || 0) * v);       // the certified value
-      try {
-        const r = await submitWorkCertification({
-          orgId, projectId: site.site, woId: crew.woId ?? null, milestoneId: st.milestoneId, crewId: crew.crewId,
-          stakeholderId: crew.stakeholderId ?? null, readingKind: 'measured', readingValue: v, computedAmount: amount,
-          readingDate: dates[i], note: `${st.n} · measured`,
-        });
-        showSnackbar(r.status === 'approved' ? `Certified ${inr(amount)}` : `${inr(amount)} sent for approval`);
-      } catch (e) { showSnackbar((e as any)?.message || 'Could not certify', { type: 'error' }); }
-      render();
-    };
-    inp.addEventListener('blur', commit);
-    inp.addEventListener('keydown', e => { if (e.key === 'Enter') inp.blur(); if (e.key === 'Escape') { doneOnce = true; inp.removeEventListener('blur', commit); render(); } });
-  }
-
-  // The crew breakdown popover (the mockup): steppers per skill for ONE day, live count + cost, a
-  // clickable rate, and add/remove skill. Persists each change; the cell repaints live, totals on close.
-  function openCrewPopover(cellDiv: HTMLElement, si: number, ci: number, i: number) {
-    if (locked) return;   // a settled week is frozen — no marking, no rate edits from its cells
-    const host = cellDiv.closest('.cellwrap') as HTMLElement | null; if (!host) return;
-    host.querySelector('.bpop')?.remove();
-    const crew = DATA.current[si].crews[ci];
+  function openEditor(r: WorkerRow, i: number, cellEl: HTMLElement, keep = false) {
+    const el = editor();
     const dt = new Date(dates[i]);
-    const dayLbl = dt.toLocaleString('en-US', { weekday: 'short' }) + ' ' + dt.getDate();
-    const valOf = (ki: number) => { const c = crew.cats[ki].cells[i]; return (c && c !== 'off') ? c.v : 0; };
-    const pop = document.createElement('div');
-    pop.className = 'bpop';
-    pop.innerHTML =
-      `<div class="bp-title">${escapeHtml(crew.n)} · ${dayLbl}</div>` +
-      crew.cats.map((cat, ki) => `<div class="bp-row" data-ki="${ki}">
-          <button class="rm" data-rmk="${ki}" title="Remove this skill">×</button>
-          <div class="t">${escapeHtml(cat.n)}<div class="rate" data-poprate="${ki}" title="Tap to change the daily rate">${inr(cat.rate)}/day</div></div>
-          <div class="step"><button data-d="-1" data-ki="${ki}">−</button><b data-q="${ki}">${valOf(ki)}</b><button data-d="1" data-ki="${ki}">＋</button></div>
-        </div>`).join('') +
-      `<button class="bp-addskill" data-addcat="${si}.${ci}">＋ add a skill</button>` +
-      `<div class="bp-foot"><span data-foot-c></span><b data-foot-amt></b></div>` +
-      `<button class="bp-done">Done</button>`;
-    host.appendChild(pop);
-    requestAnimationFrame(() => pop.classList.add('show'));
-
-    const repaintCell = () => {
-      const nz = crew.cats.map(cat => { const c = cat.cells[i]; return (c && c !== 'off') ? c.v : 0; });
-      const total = nz.reduce((a, b) => a + b, 0);
-      const wa = crew.cats.some(cat => { const c = cat.cells[i]; return c && c !== 'off' && c.src === 'wa'; });
-      const day = Number(cellDiv.dataset.day ?? -1);
-      cellDiv.className = cls(day, total > 0 ? ' filled' : '');
-      cellDiv.innerHTML = total > 0 ? nz.filter(v => v > 0).join('+') + (wa ? '<span class="src"></span>' : '') : '';
+    const pos = { t: el.style.top, l: el.style.left };
+    el.innerHTML = `<div class="hd"><b>${escapeHtml(r.name)}</b><span>${DAYS[i]} ${dt.getDate()}</span></div>` +
+      r.lines.map((l, j) => `<div class="cat"><span><span class="k">${escapeHtml(l.label)}</span><span class="r">${inr(l.rate)}</span></span><span class="step"><button data-j="${j}" data-d="-1">−</button><input data-j="${j}" value="${lineVal(l, i)}" inputmode="decimal"><button data-j="${j}" data-d="1">+</button></span></div>`).join('') +
+      `<div class="ft"><span>${dayVal(r, i) ? `<span class="amt">${inr(dayWage(r, i))}</span> for the day` : 'nobody yet'}</span><button data-clear>clear</button></div><div class="hint">Saves as you go · Esc to close</div>`;
+    el.classList.add('open');
+    if (keep) { el.style.top = pos.t; el.style.left = pos.l; } else place(el, cellEl);
+    const setLine = (j: number, v: number) => {
+      const l = r.lines[j]; v = Math.max(0, v);
+      l.cells[i] = v > 0 ? { v, src: 'office', by: byName, at: 'just now' } : null;
+      persistCell(l.subject, r.siteId, i, v);
     };
-    const foot = () => {
-      const count = crew.cats.reduce((s, cat) => s + valOf(crew.cats.indexOf(cat)), 0);
-      const cost = crew.cats.reduce((s, cat, ki) => s + valOf(ki) * cat.rate, 0);
-      (pop.querySelector('[data-foot-c]') as HTMLElement).textContent = count ? `${count} on site` : 'nobody yet';
-      (pop.querySelector('[data-foot-amt]') as HTMLElement).textContent = inr(cost);
-      // a skill with somebody on it reads in ink; the rest stay quiet
-      pop.querySelectorAll('.bp-row').forEach(r => {
-        const ki = Number((r as HTMLElement).dataset.ki ?? -1);
-        r.classList.toggle('on', ki >= 0 && valOf(ki) > 0);
-      });
-    };
-    foot();
-
-    let dirty = false;
-    const close = () => { document.removeEventListener('mousedown', onDoc); pop.remove(); if (dirty) render(); };
-    const onDoc = (e: MouseEvent) => { if (!pop.contains(e.target as Node) && e.target !== cellDiv) close(); };
-    setTimeout(() => document.addEventListener('mousedown', onDoc), 0);
-
-    pop.querySelectorAll('.step button').forEach(b => b.addEventListener('click', () => {
-      const ki = +(b as HTMLElement).dataset.ki!, d = +(b as HTMLElement).dataset.d!;
-      const v = Math.max(0, valOf(ki) + d);
-      crew.cats[ki].cells[i] = { v, src: 'office', by: byName, at: 'just now' };
-      (pop.querySelector(`b[data-q="${ki}"]`) as HTMLElement).textContent = String(v);
-      dirty = true; foot(); repaintCell();
-      persistCell({ type: 'crew_category', category_id: crew.cats[ki].id }, DATA.current[si].site, i, v);
-    }));
-    pop.querySelectorAll('[data-poprate]').forEach(r => r.addEventListener('click', () => {
-      if (r.querySelector('input')) return;
-      const ki = +(r as HTMLElement).dataset.poprate!;
-      (r as HTMLElement).innerHTML = `₹<input class="mono" value="${crew.cats[ki].rate}" inputmode="numeric" style="width:56px">`;
-      const inp = r.querySelector('input') as HTMLInputElement; inp.focus(); inp.select();
-      const commit = () => {
-        const v = parseInt(inp.value.replace(/,/g, ''), 10);
-        // Two-way linked: this writes the card for the crew's (trade, skill) and moves every worker on it.
-        if (!isNaN(v)) { editRate(cardCellFor(crew.trade, crew.cats[ki].n), v); (r as HTMLElement).textContent = `${inr(crew.cats[ki].rate)}/day`; dirty = true; foot(); if (rcOpen) renderCard(); }
-        else (r as HTMLElement).textContent = `${inr(crew.cats[ki].rate)}/day`;
-      };
-      inp.addEventListener('blur', commit);
-      inp.addEventListener('keydown', e => { if (e.key === 'Enter') inp.blur(); if (e.key === 'Escape') { inp.removeEventListener('blur', commit); (r as HTMLElement).textContent = `${inr(crew.cats[ki].rate)}/day`; } });
-    }));
-    pop.querySelectorAll('[data-rmk]').forEach(x => x.addEventListener('click', async () => {
-      const ki = +(x as HTMLElement).dataset.rmk!;
-      if (!window.confirm(`Remove the ${crew.cats[ki].n} skill? Its attendance will be deleted.`)) return;
-      close(); try { await removeCategory(crew.cats[ki].id); await load(); } catch (e) { fail(e); }
-    }));
-    (pop.querySelector('[data-addcat]') as HTMLElement).addEventListener('click', async () => {
-      const have = crew.cats.map(c => c.n);
-      const choices = ['Mason', 'Carpenter', 'Bar bender', 'Painter', 'Tiler', 'Electrician', 'Plumber', 'Helper · male', 'Helper · female'].filter(n => !have.includes(n));
-      const n = window.prompt(`Add a skill to ${crew.n} — e.g. ${choices.slice(0, 3).join(', ') || 'Mason'}`)?.trim();
-      if (!n) return;
-      close(); try { await addCategory(orgId, crew.crewId, n, rateFor(crew.trade, n)); await load(); } catch (e) { fail(e); }
-    });
-    (pop.querySelector('.bp-done') as HTMLElement).addEventListener('click', close);
-  }
-
-  function bind() {
-    const body = q('#atdxBody'); if (!body) return;
-    body.querySelectorAll('[data-crewcell]').forEach(div => div.addEventListener('click', (e) => {
-      e.stopPropagation();
-      if (locked) return;
-      const [si, ci, i] = (div as HTMLElement).dataset.crewcell!.split('.').map(Number);
-      openCrewPopover(div as HTMLElement, si, ci, i);
-    }));
-    body.querySelectorAll('[data-edit]').forEach(div => div.addEventListener('click', () => {
-      if (locked || div.querySelector('input')) return;
-      const t = resolve((div as HTMLElement).dataset.edit!), i = colOf(div);
-      // A contract stage's reading MINTS a governed obligation. Measurement-basis + a measured stage
-      // auto-certifies inline (the day is the reading); everything else opens the Certification Wizard.
-      if (t.subject.type === 'stage') {
-        const ref = (div as HTMLElement).dataset.edit!;
-        const [si, part] = ref.split('.'); const crew = DATA.current[+si].crews[+part.slice(1)]; const st = t.target as any;
-        if (crew.accrualBasis === 'measurement' && st?.type !== 'lump') { openMeasuredEntry(div as HTMLElement, ref, i); return; }
-        openCertWizard(ref); return;
-      }
-      const cur = t.cells[i] && t.cells[i] !== 'off' ? (t.cells[i] as any).v : '';
-      div.innerHTML = `<input class="mono" value="${cur}" inputmode="numeric">`;
-      const inp = div.querySelector('input') as HTMLInputElement; inp.focus(); inp.select();
-      const commit = () => { const v = parseFloat(inp.value); if (!isNaN(v)) { t.cells[i] = { v, src: 'office', by: byName, at: 'just now' }; persistCell(t.subject, t.projectId, i, v); } render(); };
-      inp.addEventListener('blur', commit);
-      inp.addEventListener('keydown', e => { if (e.key === 'Enter') inp.blur(); if (e.key === 'Escape') { inp.removeEventListener('blur', commit); render(); } });
-    }));
-    // A lump (%) stage's blocked strip → the certification wizard (the % is set there, not per-day).
-    body.querySelectorAll('[data-cert]').forEach(div => div.addEventListener('click', () => {
-      if (locked) return; openCertWizard((div as HTMLElement).dataset.cert!);
-    }));
-    body.querySelectorAll('[data-cycle]').forEach(div => div.addEventListener('click', () => {
-      if (locked) return;
-      const t = resolve((div as HTMLElement).dataset.cycle!), i = colOf(div), c = t.cells[i];
-      let v: number;
-      if (!c || c === 'off') { v = 1; t.cells[i] = { v, src: 'office', by: byName, at: 'just now' }; }
-      else { v = c.v === 1 ? 0.5 : c.v === 0.5 ? 0 : 1; t.cells[i] = { v, src: 'office', by: byName, at: 'just now' }; }
-      persistCell(t.subject, t.projectId, i, v); render();
-    }));
-    // Custom stage dropdown: toggle opens the designed menu (closing any other); a doc-level pointerdown
-    // closes it when you click away. Adding a stage pushes it onto the shown rows and re-renders.
-    const closeStageMenus = () => body.querySelectorAll('.phdrop-menu:not([hidden])').forEach(m => m.setAttribute('hidden', ''));
-    body.querySelectorAll('[data-phtoggle]').forEach(btn => btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const menu = (btn as HTMLElement).parentElement!.querySelector('.phdrop-menu') as HTMLElement;
-      const wasOpen = !menu.hasAttribute('hidden');
-      closeStageMenus();
-      if (wasOpen) return;
-      menu.removeAttribute('hidden');
-      document.addEventListener('pointerdown', function onDoc(ev) {
-        if ((ev.target as HTMLElement).closest('.phdrop')) return;
-        closeStageMenus(); document.removeEventListener('pointerdown', onDoc, true);
-      }, true);
-    }));
-    body.querySelectorAll('[data-phadd]').forEach(btn => btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const [si, ci, ki] = (btn as HTMLElement).dataset.phadd!.split('.'); const crew = DATA.current[+si].crews[+ci] as any;
-      if (!crew.shown.includes(+ki)) crew.shown.push(+ki);
+    const commitAll = () => {
+      [...el.querySelectorAll('input')].forEach((inp, j) => setLine(j, parseFloat((inp as HTMLInputElement).value) || 0));
       render();
-    }));
-    body.querySelectorAll('[data-rate]').forEach(sp => sp.addEventListener('click', () => {
-      if (sp.querySelector('input')) return;
-      const t = resolve((sp as HTMLElement).dataset.rate!); const target = t.target as any; if (!target) return;
-      sp.innerHTML = `₹<input class="mono" value="${target.rate}" inputmode="numeric">`;
-      const inp = sp.querySelector('input') as HTMLInputElement; inp.focus(); inp.select();
-      const commit = () => {
-        const v = parseInt(inp.value.replace(/,/g, ''), 10);
-        if (!isNaN(v)) {
-          // Two-way linked: a worker's rate writes the card cell for their (trade, skill). This row is a
-          // direct worker (helpers/unskilled map to the unskilled card row; a trade maps to its own).
-          const cat = target.cat ?? target.n;
-          const trade = t.subject.type === 'crew_category' ? null : resolveTrade(cat);
-          editRate(cardCellFor(trade, cat), v);
-          if (rcOpen) renderCard();
-        }
-        render();
-      };
-      inp.addEventListener('blur', commit);
-      inp.addEventListener('keydown', e => { if (e.key === 'Enter') inp.blur(); if (e.key === 'Escape') { inp.removeEventListener('blur', commit); render(); } });
-    }));
-    body.querySelectorAll('[data-addcat]').forEach(sel => sel.addEventListener('change', async () => {
-      const [si, ci] = (sel as HTMLElement).dataset.addcat!.split('.'), crew = DATA.current[+si].crews[+ci];
-      let n = (sel as HTMLSelectElement).value; if (!n) return;
-      if (n === 'custom') { n = prompt('Category name') || ''; if (!n) { render(); return; } }
-      try { await addCategory(orgId, crew.crewId, n, rateFor(crew.trade, n)); await load(); } catch (e) { fail(e); }
-    }));
-    body.querySelectorAll('[data-basis]').forEach(b => b.addEventListener('click', () => {
-      const [si, ci, basis] = (b as HTMLElement).dataset.basis!.split('.');
-      // Labour → Contract opens the put-on-contract wizard (which WO, how it's measured, which phases) —
-      // never a silent flip. Contract → Labour is a plain switch back to daily wages.
-      if (basis === 'contract') { onContractForm(+si, +ci); return; }
-      const crew = DATA.current[+si].crews[+ci];
-      // Contract → Labour fully unlinks: clear the work-order link in memory so the row reads as a clean
-      // wage crew right away (the DB is cleared by setCrewBasis).
-      crew.basis = 'labour'; crew.accrualBasis = 'day'; crew.basisConfirmed = true;
-      crew.woId = null; crew.contract = false; crew.stages = [];
-      setCrewBasis(crew.crewId, crew.basis).catch(fail); render();
-    }));
-    // Toggle a contract crew between milestone certification ('work') and attendance measurement ('measurement').
-    body.querySelectorAll('[data-measurebasis]').forEach(b => b.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const [si, ci] = (b as HTMLElement).dataset.measurebasis!.split('.'); const crew = DATA.current[+si].crews[+ci];
-      const next = crew.accrualBasis === 'measurement' ? 'work' : 'measurement';
-      crew.accrualBasis = next; crew.basisConfirmed = true;
-      setEngagementBasis('crew', crew.crewId, next).catch(fail); render();
-      showSnackbar(next === 'measurement' ? 'Measured by attendance — each measured day auto-certifies' : 'Certify by milestones');
-    }));
-    body.querySelectorAll('[data-add]').forEach(b => b.addEventListener('click', () => addEntity(+(b as HTMLElement).dataset.add!)));
-    body.querySelectorAll('[data-ocw]').forEach(b => b.addEventListener('click', () => { const [si, wi] = (b as HTMLElement).dataset.ocw!.split('.'); onContractDirect(+si, +wi); }));
-    // The serial-number cell IS the remove control. On a device with hover (desktop) the
-    // number morphs to × on row-hover and a click removes; on touch (no hover) the first tap
-    // "arms" the cell (reveals ×), the second tap removes. window.confirm is the final guard.
-    const canHover = typeof window !== 'undefined' && window.matchMedia?.('(hover: hover)').matches;
-    const armFirst = (cell: HTMLElement): boolean => {
-      if (canHover || cell.classList.contains('armed')) return false; // ready to remove
-      body.querySelectorAll('.sno.armed').forEach(c => c.classList.remove('armed'));
-      cell.classList.add('armed'); return true; // first tap only armed it
+      const c = q(`.cell[data-w="${r.id}"][data-i="${i}"]`);
+      if (c) openEditor(r, i, c as HTMLElement, true);
     };
-    body.querySelectorAll('[data-rmc]').forEach(b => b.addEventListener('click', async () => {
-      if (armFirst(b as HTMLElement)) return;
-      const [si, ci] = (b as HTMLElement).dataset.rmc!.split('.'); const crew = DATA.current[+si].crews[+ci];
-      if (!window.confirm(`Remove ${crew.n} from the sheet? Their attendance here will be deleted.`)) { (b as HTMLElement).classList.remove('armed'); return; }
-      try { await removeCrew(crew.crewId); await load(); } catch (e) { fail(e); }
-    }));
-    body.querySelectorAll('[data-rmw]').forEach(b => b.addEventListener('click', async () => {
-      if (armFirst(b as HTMLElement)) return;
-      const [si, wi] = (b as HTMLElement).dataset.rmw!.split('.'); const w = DATA.current[+si].direct[+wi];
-      if (!window.confirm(`Remove ${w.n} from the sheet? Their attendance here will be deleted.`)) { (b as HTMLElement).classList.remove('armed'); return; }
-      try { await removeDirectWorker(w.id); await load(); } catch (e) { fail(e); }
-    }));
-    body.querySelectorAll('[data-rmcat]').forEach(b => b.addEventListener('click', async () => {
-      if (armFirst(b as HTMLElement)) return;
-      const [si, ci, ki] = (b as HTMLElement).dataset.rmcat!.split('.'); const cat = DATA.current[+si].crews[+ci].cats[+ki];
-      if (!window.confirm(`Remove the ${cat.n} skill row? Its attendance will be deleted.`)) { (b as HTMLElement).classList.remove('armed'); return; }
-      try { await removeCategory(cat.id); await load(); } catch (e) { fail(e); }
-    }));
+    el.querySelectorAll('button[data-d]').forEach(b => (b as HTMLElement).onclick = (e) => {
+      e.stopPropagation();
+      const j = +(b as HTMLElement).dataset.j!; const inp = el.querySelector(`input[data-j="${j}"]`) as HTMLInputElement;
+      inp.value = String(Math.max(0, (parseFloat(inp.value) || 0) + +(b as HTMLElement).dataset.d!));
+      commitAll();
+    });
+    el.querySelectorAll('input').forEach(inp => {
+      (inp as HTMLInputElement).onchange = commitAll;
+      (inp as HTMLInputElement).onkeydown = (e) => { if (e.key === 'Enter') { commitAll(); closeAll(); focusCell(r.id, i); } };
+    });
+    (el.querySelector('[data-clear]') as HTMLElement).onclick = (e) => { e.stopPropagation(); r.lines.forEach(l => { l.cells[i] = null; persistCell(l.subject, r.siteId, i, 0); }); render(); closeAll(); };
+    if (!keep) { const first = el.querySelector('input') as HTMLInputElement; first?.focus(); first?.select(); }
   }
 
-  // Put a wage crew on a contract → open the real sheet (pick/create contract, phases, and the
-  // keep-or-fold decision for wages already logged). Replaces the old injected-DOM picker.
-  async function onContractForm(si: number, ci: number) {
-    const crew = DATA.current[si].crews[ci]; const site = DATA.current[si];
-    const accrued = await accruedDayWagesForCrew(crew.crewId).catch(() => ({ days: 0, amount: 0 }));
-    setContractCtx({ kind: 'crew', orgId, projectId: site.site, stakeholderId: crew.stakeholderId ?? null, crewId: crew.crewId, name: crew.n, accrued });
+  function openWorkerMenu(r: WorkerRow, btn: HTMLElement) {
+    const el = rowmenu();
+    el.innerHTML = `<button data-rates>Rates for ${escapeHtml((r.trade.split(' · ')[0] || r.trade).toLowerCase())}</button><button data-wa>Message on WhatsApp</button><hr><button data-ctr>Put on a contract…</button><hr><button class="danger" data-rm>Remove from this week</button>`;
+    (el.querySelector('[data-rates]') as HTMLElement).onclick = () => { closeAll(); setRcOpen(true); };
+    (el.querySelector('[data-wa]') as HTMLElement).onclick = () => { closeAll(); toast('Message on WhatsApp'); };
+    (el.querySelector('[data-ctr]') as HTMLElement).onclick = () => { closeAll(); openPutOnContract(r); };
+    (el.querySelector('[data-rm]') as HTMLElement).onclick = async () => {
+      closeAll();
+      const days = rowDays(r);
+      try {
+        if (r.crew) await removeCrew(r.crew.crewId); else if (r.direct) await removeDirectWorker(r.direct.id);
+        await load();
+        toast(`${r.name} taken off this week's sheet${days ? ` · ${fmtQ(days)} marked ${days === 1 ? 'day' : 'days'} cleared` : ''} · earlier weeks unchanged`);
+      } catch (e) { fail(e); }
+    };
+    btn.closest('tr')?.classList.add('menu-open'); el.classList.add('open'); place(el, btn);
   }
 
-  // Put a single (direct) worker on a contract — same sheet; the write promotes them into a one-person crew.
-  async function onContractDirect(si: number, wi: number) {
-    const site = DATA.current[si]; const w = site.direct[wi];
-    const accrued = await accruedDayWagesForDirect(w.id, w.rate).catch(() => ({ days: 0, amount: 0 }));
-    setContractCtx({
-      kind: 'direct', orgId, projectId: site.site, stakeholderId: w.stakeholderId ?? null, name: w.n, accrued,
-      worker: { id: w.id, name: w.n, category: w.cat, rate: w.rate, stakeholderId: w.stakeholderId ?? null },
-      trade: resolveTrade(w.cat),
+  function openContractMenu(c: ContractRow, btn: HTMLElement) {
+    const el = rowmenu();
+    el.innerHTML = `<button data-open>Open contract</button><button data-wa>Message on WhatsApp</button><hr><button data-back>Move back to daily wages…</button><hr><button class="danger" data-rmc>Remove from this week</button>`;
+    (el.querySelector('[data-open]') as HTMLElement).onclick = () => { closeAll(); toast('Opens the contract'); };
+    (el.querySelector('[data-wa]') as HTMLElement).onclick = () => { closeAll(); toast('Message on WhatsApp'); };
+    (el.querySelector('[data-back]') as HTMLElement).onclick = async () => {
+      closeAll();
+      try { await setCrewBasis(c.crew.crewId, 'labour'); await load(); toast('Back to daily wages from today'); } catch (e) { fail(e); }
+    };
+    (el.querySelector('[data-rmc]') as HTMLElement).onclick = async () => {
+      closeAll();
+      try { await removeCrew(c.crew.crewId); await load(); toast(`${c.crew.n} taken off this week's sheet · certified work stays on the contract`); } catch (e) { fail(e); }
+    };
+    btn.closest('tr')?.classList.add('menu-open'); el.classList.add('open'); place(el, btn);
+  }
+
+  function openCertify(c: ContractRow) {
+    const crew = c.crew;
+    setCertCtx({
+      orgId, projectId: c.siteId, projectName: DATA.current[c.si]?.label,
+      crewId: crew.crewId, stakeholderId: crew.stakeholderId ?? null, partyName: crew.n,
+      woId: crew.woId ?? null, woLabel: crewLabel(crew), stages: crew.stages, stageIndex: uiStage(crew),
     });
   }
 
+  async function openPutOnContract(r: WorkerRow) {
+    if (r.crew) {
+      const accrued = await accruedDayWagesForCrew(r.crew.crewId).catch(() => ({ days: 0, amount: 0 }));
+      setPocCtx({ kind: 'crew', orgId, projectId: r.siteId, stakeholderId: r.crew.stakeholderId ?? null, crewId: r.crew.crewId, name: r.name, accrued });
+    } else if (r.direct) {
+      const w = r.direct;
+      const accrued = await accruedDayWagesForDirect(w.id, w.rate).catch(() => ({ days: 0, amount: 0 }));
+      setPocCtx({ kind: 'direct', orgId, projectId: r.siteId, stakeholderId: w.stakeholderId ?? null, name: w.n, accrued, worker: { id: w.id, name: w.n, category: w.cat, rate: w.rate, stakeholderId: w.stakeholderId ?? null }, trade: resolveTrade(w.cat) });
+    }
+  }
 
-  // A single search box: type a name → ranked party matches (same searchPayees the
-  // transaction payee field uses) → pick one, or create a new party if not found.
-  const escapeHtml = (s: string) => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
-  const avatarOf = (n: string) => escapeHtml((n.trim()[0] || '?').toUpperCase());
-  type Party = { stakeholder_id: string; name: string; category: string | null };
-  function partyPicker(si: number, placeholder: string, excludeNames: string[], onPick: (p: Party) => Promise<void>) {
-    const td = q('#add-' + si); if (!td) return;
-    td.innerHTML = `<span class="new"><span class="pp">
-        <input class="psearch" placeholder="${placeholder}" autocomplete="off">
-        <div class="ppmenu" style="display:none"></div>
-      </span><button class="x">cancel</button></span>`;
-    const input = td.querySelector('.psearch') as HTMLInputElement;
-    const menu = td.querySelector('.ppmenu') as HTMLElement;
-    (td.querySelector('.x') as HTMLButtonElement).addEventListener('click', () => render());
-    const avail = () => PARTIES.current.filter(p => !excludeNames.includes(p.name));
-    let busy = false;
-    const commit = async (p: Party) => { if (busy) return; busy = true; menu.style.display = 'none'; try { await onPick(p); } catch (e) { busy = false; fail(e); } };
-    const draw = () => {
-      const query = input.value.trim();
-      const matches = (query ? searchPayees(avail(), query) : avail()).slice(0, 8);
-      const rows = matches.map(m => `<button class="ppitem" data-id="${m.stakeholder_id}">${escapeHtml(m.name)}${m.category ? `<small> · ${escapeHtml(m.category)}</small>` : ''}</button>`).join('');
-      const create = query ? `<button class="ppitem ppcreate" data-create="1">${matches.length ? 'Not here? ' : ''}Create <b>${escapeHtml(query)}</b> · new party</button>` : '';
-      menu.innerHTML = (rows + create) || `<div class="ppempty">Type a name to search…</div>`;
-      menu.style.display = 'block';
-      menu.querySelectorAll('[data-id]').forEach(b => b.addEventListener('mousedown', e => { e.preventDefault(); const p = PARTIES.current.find(x => x.stakeholder_id === (b as HTMLElement).dataset.id); if (p) commit(p); }));
-      const cb = menu.querySelector('[data-create]');
-      if (cb) cb.addEventListener('mousedown', async e => {
-        e.preventDefault(); if (busy) return; busy = true;
-        try { const c = await createParty(query, 'Worker', orgId); busy = false; await commit({ stakeholder_id: c.id, name: c.name, category: null }); }
-        catch (err) { busy = false; fail(err); }
-      });
+  function setCell(r: WorkerRow, i: number, n: number) {
+    const l = r.lines[0]; if (!l) return;
+    l.cells[i] = n > 0 ? { v: n, src: 'office', by: byName, at: 'just now' } : null;
+    persistCell(l.subject, r.siteId, i, n); render(); focusCell(r.id, i);
+  }
+
+  // ── delegated interactions ────────────────────────────────────────────────────
+  function bind() {
+    const grid = q('#grid'); if (!grid) return;
+    grid.querySelectorAll('[data-fill]').forEach(th => (th as HTMLElement).onclick = () => fillDay(+(th as HTMLElement).dataset.fill!));
+    grid.querySelectorAll('[data-stsel]').forEach(sel => (sel as HTMLSelectElement).onchange = (e) => {
+      e.stopPropagation();
+      const c = CROWS.current.get((sel as HTMLElement).dataset.stsel!); if (!c) return;
+      (c.crew as any)._uiStage = +(sel as HTMLSelectElement).value; render();
+    });
+    grid.querySelectorAll('[data-stsel]').forEach(sel => (sel as HTMLElement).onclick = (e) => e.stopPropagation());
+  }
+
+  // A single document click handles the rest (delegation), like the artifact.
+  useEffect(() => {
+    const onClick = (e: MouseEvent) => {
+      const root = rootRef.current; if (!root) return;
+      const t = e.target as HTMLElement;
+      if (!root.contains(t) && !t.closest('.editor,.rowmenu')) { return; }
+      const pill = t.closest('[data-f]'); if (pill) { filterRef.current = (pill as HTMLElement).dataset.f!; addState.current = { site: null, picked: null, exp: false }; render(); return; }
+      const add = t.closest('[data-add]'); if (add) { e.preventDefault(); const s = (add as HTMLElement).dataset.add!; const A = addState.current; if (A.site === s) return; A.site = s; A.picked = null; A.exp = false; render(); return; }
+      if (t.closest('[data-addcancel]')) { collapseAdd(); return; }
+      const pick = t.closest('[data-pick]'); if (pick) { const id = (pick as HTMLElement).dataset.pick!; addState.current.picked = PARTIES.current.find(x => x.stakeholder_id === id) || null; render(); (q('.card[data-mode="wages"]'))?.focus(); return; }
+      if (t.closest('[data-new]')) { void createNewParty(); return; }
+      const md = t.closest('[data-mode]'); if (md) { void chooseMode((md as HTMLElement).dataset.mode as 'wages' | 'contract'); return; }
+      const cell = t.closest('.cell[data-w]'); if (cell) { e.stopPropagation(); closeAll(); const r = WROWS.current.get((cell as HTMLElement).dataset.w!); if (r) openEditor(r, +(cell as HTMLElement).dataset.i!, cell as HTMLElement); return; }
+      const mc = t.closest('button[data-menu-c]'); if (mc) { e.stopPropagation(); closeAll(); const c = CROWS.current.get((mc as HTMLElement).dataset.menuC!); if (c) openContractMenu(c, mc as HTMLElement); return; }
+      const mb = t.closest('button[data-menu]'); if (mb) { e.stopPropagation(); closeAll(); const r = WROWS.current.get((mb as HTMLElement).dataset.menu!); if (r) openWorkerMenu(r, mb as HTMLElement); return; }
+      const cb = t.closest('[data-cert]'); if (cb && !t.closest('select')) { const c = CROWS.current.get((cb as HTMLElement).dataset.cert!); if (c) openCertify(c); return; }
+      if (!t.closest('.editor,.rowmenu,.morph')) closeAll();
     };
-    input.addEventListener('input', draw);
-    input.addEventListener('focus', draw);
-    input.addEventListener('blur', () => setTimeout(() => { menu.style.display = 'none'; }, 150));
-    input.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { closeAll(); if (addState.current.site) collapseAdd(); return; }
+      const cell = (document.activeElement as HTMLElement)?.closest?.('.cell[data-w]') as HTMLElement | null;
+      if (!cell || editor().classList.contains('open')) return;
+      const r = WROWS.current.get(cell.dataset.w!); const i = +cell.dataset.i!; if (!r) return;
+      const move = (dr: number, dc: number) => {
+        const rows = [...rootRef.current!.querySelectorAll('tr.worker')] as HTMLElement[];
+        const idx = rows.findIndex(x => x.dataset.row === r.id);
+        const nr = rows[idx + dr]; const ni = Math.max(0, Math.min(Math.min(TODAY, 5), i + dc));
+        (nr || rows[idx])?.querySelector(`.cell[data-i="${ni}"]`)?.classList && ((nr || rows[idx])?.querySelector(`.cell[data-i="${ni}"]`) as HTMLElement)?.focus();
+      };
+      if (e.key === 'ArrowRight') { e.preventDefault(); move(0, 1); }
+      else if (e.key === 'ArrowLeft') { e.preventDefault(); move(0, -1); }
+      else if (e.key === 'ArrowDown') { e.preventDefault(); move(1, 0); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); move(-1, 0); }
+      else if (/^[0-9]$/.test(e.key)) { e.preventDefault(); setCell(r, i, +e.key); }
+      else if (e.key === 'Backspace' || e.key === 'Delete') { e.preventDefault(); setCell(r, i, 0); }
+      else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openEditor(r, i, cell); }
+    };
+    const onScroll = () => { if (editor().classList.contains('open') || rowmenu().classList.contains('open')) closeAll(); };
+    document.addEventListener('click', onClick);
+    document.addEventListener('keydown', onKey);
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => { document.removeEventListener('click', onClick); document.removeEventListener('keydown', onKey); window.removeEventListener('scroll', onScroll); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [monday, TODAY, locked]);
+
+  async function createNewParty() {
+    const A = addState.current; const inp = q('#addinput') as HTMLInputElement | null;
+    const name = (inp?.value || '').trim(); if (!name) return;
+    try { const c = await createParty(name, 'Worker', orgId); A.picked = { stakeholder_id: c.id, name: c.name, category: null }; PARTIES.current.push({ stakeholder_id: c.id, name: c.name, category: null }); render(); }
+    catch (e) { fail(e); }
   }
 
-  // One entry point: search/create a party, THEN ask whether they join as a single
-  // worker or a crew. Everything already on this project (crews + direct) is excluded.
-  function addEntity(si: number) {
-    const onSite = [...DATA.current[si].crews.map(c => c.n), ...DATA.current[si].direct.map(w => w.n)];
-    partyPicker(si, 'Search a worker or crew by name…', onSite, async (p) => { chooseKind(si, p); });
-  }
-
-  // Step 2 — is this one worker, or a crew? Each choice is a real button with its own
-  // hover, loading (spinner) and success (check) states; on success the sheet settles (reloads).
-  function chooseKind(si: number, p: Party) {
-    const td = q('#add-' + si); if (!td) return;
-    const check = `<span class="ok"><svg viewBox="0 0 24 24"><path d="M5 13l4 4L19 7" /></svg></span><span class="spin" />`;
-    td.innerHTML = `<div class="kindpick">
-        <div class="kp-h">Add <b>${escapeHtml(p.name)}</b>${p.category ? ` · ${escapeHtml(p.category)}` : ''} —</div>
-        <div class="kp-opts">
-          <button class="kindbtn" data-kind="worker">
-            <span class="ic"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.1" /><path d="M6 20c0-3.3 2.7-6 6-6s6 2.7 6 6" /></svg></span>
-            <span class="kmeta"><span class="kt">Working alone</span><span class="ks">Only this person is on site · a daily wage</span></span>${check}
-          </button>
-          <button class="kindbtn" data-kind="crew">
-            <span class="ic"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="2.6" /><path d="M4 19c0-2.8 2.2-5 5-5s5 2.2 5 5" /><circle cx="17" cy="8.5" r="2.2" /><path d="M15.2 14.1c2.2.5 3.8 2.4 3.8 4.8" /></svg></span>
-            <span class="kmeta"><span class="kt">Bringing a team</span><span class="ks">Their whole crew is on site · paid as one</span></span>${check}
-          </button>
-        </div>
-        <button class="x kpx">cancel</button>
-      </div>`;
-    const opts = [...td.querySelectorAll('.kindbtn')] as HTMLButtonElement[];
-    (td.querySelector('.kpx') as HTMLButtonElement).addEventListener('click', () => render());
-    let busy = false;
-    opts.forEach(b => b.addEventListener('click', async () => {
-      if (busy) return; busy = true;
-      b.classList.add('loading');
-      opts.forEach(o => { if (o !== b) o.classList.add('dim'); });
-      try {
-        if (b.dataset.kind === 'worker') {
-          const cat = p.category || 'Helper · male';
-          await addDirectWorker(orgId, DATA.current[si].site, p.name, cat, rateFor(null, cat), p.stakeholder_id || undefined);
-        } else {
-          const trade = resolveTrade(p.category);
-          const cats = mixFor(trade).map(c => ({ category: c, rate: rateFor(trade, c) }));
-          await addCrew(orgId, DATA.current[si].site, p.name, trade, cats, p.stakeholder_id || undefined);
+  // Both add a crew (trade row + helpers, so the editor's per-skill steppers make sense). "On contract"
+  // then opens the put-on-contract dialog for the fresh crew — which loads that party's real contracts.
+  async function chooseMode(mode: 'wages' | 'contract') {
+    const A = addState.current; const p = A.picked; const siteId = A.site; if (!p || !siteId) return;
+    const trade = resolveTrade(p.category);
+    const cats = mixFor(trade).map(c => ({ category: c, rate: rateFor(trade, c) }));
+    A.site = null; A.picked = null; A.exp = false;
+    try {
+      await addCrew(orgId, siteId, p.name, trade, cats, p.stakeholder_id || undefined);
+      await load();
+      if (mode === 'contract') {
+        const site = DATA.current.find(s => s.site === siteId);
+        const crew = site && [...site.crews].reverse().find(c => c.n === p.name && (!p.stakeholder_id || c.stakeholderId === p.stakeholder_id));
+        if (crew) {
+          const accrued = await accruedDayWagesForCrew(crew.crewId).catch(() => ({ days: 0, amount: 0 }));
+          setPocCtx({ kind: 'crew', orgId, projectId: siteId, stakeholderId: crew.stakeholderId ?? null, crewId: crew.crewId, name: crew.n, accrued });
         }
-        b.classList.remove('loading'); b.classList.add('done');
-        setTimeout(() => load(), 640); // let the success beat play, then settle
-      } catch (e) {
-        busy = false; b.classList.remove('loading'); opts.forEach(o => o.classList.remove('dim')); fail(e);
       }
-    }));
+    } catch (e) { fail(e); }
   }
 
-  // Add a new department (trade) to the rate card. It appears immediately with empty
-  // rates; typing a rate into any cell persists that (trade, kind) row (saveRate).
-  function addDepartment() {
-    const name = prompt('Department / trade name (e.g. Welder, Fabricator)')?.trim();
-    if (!name || !CARD.current) return;
-    if (CARD.current.trades[name] || name === SUPERVISOR_KEY) { showSnackbar('That department already exists.'); return; }
-    CARD.current.trades[name] = { skilled: null, hm: null, hf: null };
-    if (!rcOpen) setRcOpen(true); else renderCard();
-  }
-
-  // ── rate card ────────────────────────────────────────────────────────────────
+  // ── rate card (a right slide-in) ───────────────────────────────────────────────
   function renderCard() {
-    const rc = q('#atdxRc'); const table = q('#atdxRcTable'); const C = CARD.current; if (!rc || !table || !C) return;
-    rc.hidden = false;
-    const fmt = (n: number | null) => n == null ? '<span style="color:var(--line-2)">—</span>' : n.toLocaleString('en-IN');
+    const table = q('#atdxRcTable'); const C = CARD.current; if (!table || !C) return;
+    const fmt = (n: number | null) => n == null ? '<span class="rc-dash">—</span>' : n.toLocaleString('en-IN');
     const cell = (key: string, field: string, v: number | null) => `<td><div class="cc" data-rc="${key}" data-f="${field}"><span class="v mono">${fmt(v)}</span>${C.since[key + '.' + field] ? `<span class="since">${C.since[key + '.' + field]}</span>` : ''}</div></td>`;
     const trades = Object.keys(C.trades);
     table.innerHTML =
       `<thead><tr><th class="cat">Worker type</th><th>Skilled<span class="p">per day</span></th><th>Helper · male<span class="p">per day</span></th><th>Helper · female<span class="p">per day</span></th></tr></thead><tbody>` +
       `<tr class="grp"><td colspan="4">Skilled trades — and the helpers who work under them</td></tr>` +
-      (trades.length ? trades.map(t => `<tr><td class="cat">${t}</td>${cell(t, 'skilled', C.trades[t].skilled)}${cell(t, 'hm', C.trades[t].hm)}${cell(t, 'hf', C.trades[t].hf)}</tr>`).join('')
-                     : `<tr><td class="cat" colspan="4" style="color:var(--walnut-3);font-size:13px">No trades yet — add one below.</td></tr>`) +
+      (trades.length ? trades.map(t => `<tr><td class="cat">${escapeHtml(t)}</td>${cell(t, 'skilled', C.trades[t].skilled)}${cell(t, 'hm', C.trades[t].hm)}${cell(t, 'hf', C.trades[t].hf)}</tr>`).join('')
+        : `<tr><td class="cat" colspan="4" class="rc-none">No trades yet — add one below.</td></tr>`) +
       `<tr class="grp"><td colspan="4">Unskilled — general labour, no trade</td></tr>` +
-      `<tr><td class="cat">Unskilled labour</td><td><div class="cc" style="cursor:default"><span class="v mono" style="color:var(--line-2)">—</span></div></td>${cell('unskilled', 'hm', C.unskilled.hm)}${cell('unskilled', 'hf', C.unskilled.hf)}</tr>` +
+      `<tr><td class="cat">Unskilled labour</td><td><div class="cc rc-off"><span class="v mono rc-dash">—</span></div></td>${cell('unskilled', 'hm', C.unskilled.hm)}${cell('unskilled', 'hf', C.unskilled.hf)}</tr>` +
       `<tr class="grp"><td colspan="4">Supervision</td></tr>` +
       `<tr><td class="cat">Supervisor</td>${cell('supervisor', 'skilled', C.supervisor)}<td></td><td></td></tr></tbody>`;
-    table.querySelectorAll('[data-rc]').forEach(div => div.addEventListener('click', () => {
+    table.querySelectorAll('[data-rc]').forEach(div => (div as HTMLElement).onclick = () => {
       if (div.querySelector('input')) return;
       const key = (div as HTMLElement).dataset.rc!, f = (div as HTMLElement).dataset.f! as 'skilled' | 'hm' | 'hf';
       const cur = key === 'unskilled' ? C.unskilled[f as 'hm' | 'hf'] : key === 'supervisor' ? C.supervisor : C.trades[key][f];
       div.innerHTML = `<input class="mono" value="${cur ?? ''}" inputmode="numeric">`;
       const inp = div.querySelector('input') as HTMLInputElement; inp.focus(); inp.select();
-      const commit = () => {
-        const v = parseInt(inp.value.replace(/,/g, ''), 10);
-        // Editing the card here is the same act as editing a rate on the floor — it writes the card,
-        // re-derives every worker and mirrors the number onto their rows. Refresh the grid too.
-        if (!isNaN(v)) { editRate({ key, kind: f }, v); render(); }
-        renderCard();
-      };
-      inp.addEventListener('blur', commit);
-      inp.addEventListener('keydown', e => { if (e.key === 'Enter') inp.blur(); if (e.key === 'Escape') { inp.removeEventListener('blur', commit); renderCard(); } });
-    }));
+      const commit = () => { const v = parseInt(inp.value.replace(/,/g, ''), 10); if (!isNaN(v)) { editRate({ key, kind: f }, v); render(); } renderCard(); };
+      inp.onblur = commit;
+      inp.onkeydown = (e) => { if (e.key === 'Enter') inp.blur(); if (e.key === 'Escape') { inp.onblur = null; renderCard(); } };
+    });
+  }
+  function addDepartment() {
+    const name = prompt('Department / trade name (e.g. Welder, Fabricator)')?.trim();
+    if (!name || !CARD.current) return;
+    if (CARD.current.trades[name] || name === SUPERVISOR_KEY) { toast('That department already exists.'); return; }
+    CARD.current.trades[name] = { skilled: null, hm: null, hf: null };
+    renderCard();
   }
 
-  useEffect(() => {
-    if (!infoOpen) return;
-    const h = () => setInfoOpen(false);
-    document.addEventListener('click', h);
-    return () => document.removeEventListener('click', h);
-  }, [infoOpen]);
-
-  // ── site filter ──────────────────────────────────────────────────────────────
-  function applyFilter() {
-    const f = filterRef.current;
-    rootRef.current?.querySelectorAll('#atdxBody .siteblock').forEach(el => (el as HTMLElement).classList.toggle('hide', f !== 'all' && (el as HTMLElement).dataset.site !== f));
-  }
-
-  const sites = DATA.current;
+  // ── the artifact's toast (with undo affordance reserved) ──────────────────────
+  const toast = (m: string) => {
+    const t = q('#toast'); if (!t) { showSnackbar(m); return; }
+    t.textContent = m; t.classList.add('on');
+    const anyT = t as any; clearTimeout(anyT._h); anyT._h = setTimeout(() => t.classList.remove('on'), 2600);
+  };
 
   return (
-    <div className={`atdx${locked ? ' wk-locked' : ''}`} ref={rootRef}>
+    <div className={`atdx${locked ? ' wk-locked' : ''}${rcOpen ? ' rc-open' : ''}`} ref={rootRef}>
       <style>{ATDX_CSS}</style>
-      {certCtx && <CertificationWizard ctx={certCtx}
-        onClose={() => setCertCtx(null)}
-        onDone={() => { setCertCtx(null); load(); }}
-        onReading={(value, date) => {
-          // Keep the muster grid + progress bar populated (display-only; the obligation is the cert).
-          if (certCtx.projectId && certCtx.milestoneId) void saveCell(orgId, certCtx.projectId, date, { type: 'stage', milestone_id: certCtx.milestoneId }, value, byName).catch(() => {});
-        }} />}
-      {contractCtx && <PutOnContractSheet ctx={contractCtx}
-        onClose={() => setContractCtx(null)}
-        onDone={() => { setContractCtx(null); showSnackbar('Put on contract'); void load(); }}
-        onError={(m) => { setContractCtx(null); fail(new Error(m)); }} />}
+      {certCtx && <CertifyDialog ctx={certCtx} onClose={() => setCertCtx(null)} onDone={() => { setCertCtx(null); load(); }} onToast={toast} />}
+      {pocCtx && <PutOnContractDialog ctx={pocCtx} onClose={() => setPocCtx(null)} onDone={() => { setPocCtx(null); load(); }} onError={(m) => { setPocCtx(null); fail(new Error(m)); }} onToast={toast} />}
+
       <div className="page">
-        <div className="head">
-          <h1>Attendance</h1>
-          <div className="hero">
-            <div className="h"><b id="atdxWd">0</b><span>worker-days</span></div>
-            <div className="h"><b id="atdxAccrued">₹0</b><span>accrued</span></div>
-            <div className="h"><b id="atdxToday">0</b><span>on site today</span></div>
-            <div className="h gap"><b id="atdxGaps">0</b><span>gaps to fill</span></div>
+        <header className="top">
+          <div>
+            <h1>Attendance</h1>
+            <p className="summary" id="summary" />
+          </div>
+          <div className="right">
+            <div className="week">
+              <button aria-label="Previous week" onClick={() => setMonday(m => { const d = new Date(m); d.setDate(d.getDate() - 7); return d; })}>‹</button>
+              <span className="range">{weekLabel(monday)}</span>
+              <button aria-label="Next week" onClick={() => setMonday(m => { const d = new Date(m); d.setDate(d.getDate() + 7); return d; })}>›</button>
+              <button className="now" onClick={() => setMonday(mondayOf(new Date()))} disabled={isThisWeek}>{isThisWeek ? 'this week' : 'jump to now'}</button>
+            </div>
+            {locked && <span className="lockchip" title="This week is settled — its wages are already netted in the ledger and paid.">🔒 Settled</span>}
+            <button className="link" onClick={() => setRcOpen(true)}>Rate card</button>
+          </div>
+        </header>
+
+        <nav className="sites" id="sites" />
+
+        <div className="sheet">
+          <div className="scroll">
+            <table id="grid">
+              <colgroup>
+                <col className="c-name" /><col className="c-day" /><col className="c-day" /><col className="c-day" /><col className="c-day" /><col className="c-day" /><col className="c-day" /><col className="c-day" /><col className="c-days" /><col className="c-amt" /><col className="c-menu" />
+              </colgroup>
+              <thead id="thead" />
+            </table>
           </div>
         </div>
-
-        <div className="toolbar">
-          <div className="wkpager">
-            <button className="wkbtn" aria-label="Previous week" onClick={() => setMonday(m => { const d = new Date(m); d.setDate(d.getDate() - 7); return d; })}>‹</button>
-            <span className="wklabel">{weekLabel(monday)}</span>
-            <button className="wkbtn" aria-label="Next week" onClick={() => setMonday(m => { const d = new Date(m); d.setDate(d.getDate() + 7); return d; })}>›</button>
-          </div>
-          <span className="tlink" onClick={() => setMonday(mondayOf(new Date()))}>this week</span>
-          <span className="tlink" onClick={() => setRcOpen(o => !o)}>{rcOpen ? 'hide rate card' : 'rate card'}</span>
-          {locked && <span className="wklock" title="This week is settled — its wages are already netted in the ledger and paid.">🔒 Settled · read-only</span>}
-
-          <div className="chips" role="group">
-            {[{ k: 'all', l: 'All sites', c: '' }, ...sites.map((s2, i) => ({ k: s2.site, l: shortSite(s2.label), c: SITE_DOT[i % SITE_DOT.length] }))].map((c, i) => (
-              <span key={c.k} className={`chip${i === 0 ? ' on' : ''}`} onClick={(e) => {
-                filterRef.current = c.k;
-                rootRef.current?.querySelectorAll('.chips .chip').forEach(x => x.classList.toggle('on', x === e.currentTarget));
-                applyFilter();
-              }}>{c.c ? <span className="cdot" style={{ background: c.c }} /> : null}{c.l}</span>
-            ))}
-          </div>
-
-          <button className={`info${infoOpen ? ' open' : ''}`} onClick={(e) => { e.stopPropagation(); setInfoOpen(o => !o); }}>i
-            <span className="tip"><b>How this page fills.</b> WhatsApp reports from site land here with a <span className="dot" /> mark.
-            Click any cell to mark or correct · click a day header to mark every site present ·
-            direct workers cycle 1 → ½ → 0 → clear.</span>
-          </button>
-        </div>
-
-        <section className="rc" id="atdxRc" hidden>
-          <div className="rc-h"><span className="t">Rate card</span><span className="s">Daily rates by worker type. A trade&apos;s helpers can cost differently from general unskilled labour. Click to change — from today; earlier weeks keep the old rate.</span></div>
-          <table id="atdxRcTable" />
-          <div className="rc-f"><button onClick={addDepartment}>+ Add department</button></div>
-        </section>
-
-        <div className="cols dayhead">
-          <div className="corner">Crew · worker</div>
-          {dates.map((d, i) => {
-            const dt = new Date(d);
-            const fillable = !locked && i <= TODAY && i !== 6;
-            return (
-              <div key={d} className={`dh${i === TODAY ? ' today' : ''}${i > TODAY ? ' future' : ''}`}
-                onClick={fillable ? () => fillDay(i) : undefined}>
-                <small>{dt.toLocaleString('en-US', { weekday: 'short' })}</small><b>{dt.getDate()}</b>
-              </div>
-            );
-          })}
-          <div className="wk">This week</div>
-        </div>
-
-        <div id="atdxBody" />
 
         {loading && (
-          <div aria-hidden>
+          <div className="sheet" aria-hidden style={{ marginTop: 14 }}>
             {[0, 1].map(bi => (
-              <div className="siteblock sk-block" key={bi}>
+              <div key={bi} style={{ padding: '10px 22px' }}>
                 {[0, 1, 2].map(ri => (
-                  <div className="cols wrow" key={ri}>
-                    <div className="wname"><span className="sk-av" /><span className="sk-bar" style={{ width: `${44 + ri * 12}%` }} /></div>
-                    {[0, 1, 2, 3, 4, 5, 6].map(d => <div key={d} style={{ display: 'grid', placeItems: 'center' }}><span className="sk-cell" /></div>)}
-                    <div style={{ textAlign: 'right', paddingRight: 20 }}><span className="sk-bar" style={{ width: 62 }} /></div>
+                  <div key={ri} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '10px 0' }}>
+                    <span className="sk-bar" style={{ width: `${28 + ri * 10}%` }} />
+                    {[0, 1, 2, 3, 4, 5, 6].map(d => <span key={d} className="sk-cell" />)}
                   </div>
                 ))}
               </div>
             ))}
           </div>
         )}
-        {err && <div className="state" style={{ color: 'var(--terracotta)' }}>{err} · <button style={{ textDecoration: 'underline' }} onClick={() => load()}>retry</button></div>}
+        {err && <div className="state">{err} · <button className="retry" onClick={() => load()}>retry</button></div>}
+
+        <section className="notes">
+          <h3>How the sheet behaves</h3>
+          <ul>
+            <li>Tap a day — the counter opens on it, saves as you go, <kbd>Esc</kbd> or tap away closes it. Same popup for one man or a gang of twelve.</li>
+            <li><kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd> <kbd>↓</kbd> move like a spreadsheet. <kbd>Backspace</kbd> clears. <kbd>Esc</kbd> closes anything.</li>
+            <li>Dashed cells are past days nobody marked. The count in the summary jumps to the first one; a past day-header marks everyone present.</li>
+            <li>Add worker sits as the last row of each site. Pick a name, answer one question — wages or contract — and it's on the sheet.</li>
+            <li>Removing someone (⋯) only takes them off <i>this week's</i> sheet — earlier weeks and their payments are untouched.</li>
+            <li>A party on contract sits in the same columns, tagged <i>contract</i>. Tap the stage bar to certify in that stage's own unit; it works out the ₹.</li>
+          </ul>
+        </section>
+      </div>
+
+      <div className="editor" id="editor" role="dialog" />
+      <div className="rowmenu" id="rowmenu" />
+      <div className="toast" id="toast" />
+
+      {/* rate card — slides in from the right */}
+      <div className={`rcdrawer${rcOpen ? ' open' : ''}`} aria-hidden={!rcOpen}>
+        <div className="rcd-scrim" onClick={() => setRcOpen(false)} />
+        <aside className="rcd-panel" role="dialog" aria-label="Rate card">
+          <div className="rcd-head"><div><b>Rate card</b><span>Daily rates by worker type — change from today; earlier weeks keep the old rate.</span></div><button className="rcd-x" onClick={() => setRcOpen(false)} aria-label="Close">×</button></div>
+          <div className="rcd-body"><table id="atdxRcTable" /></div>
+          <div className="rcd-foot"><button onClick={addDepartment}>+ Add department</button></div>
+        </aside>
       </div>
     </div>
   );
 }
+
+const ATDX_CSS = `
+.atdx{
+  --paper:#FCFAF6; --cream:#F4F0E8; --cream-2:#EDE7DC; --ink:#1E1915; --walnut:#6E5F51; --mute:#A0958A;
+  --hair:rgba(70,50,30,.10); --hair-2:rgba(70,50,30,.18);
+  --terra:#C4552D; --terra-ink:#A8431F; --terra-soft:#FBEEE7;
+  --sage:#7F927A; --sage-soft:#E8EEE1; --sage-ink:#4A5F45;
+  --gap:rgba(70,50,30,.22); --today:#FFF7F1;
+  --r-xs:6px; --r-s:8px; --r-m:12px; --r-l:16px;
+  --ease:cubic-bezier(.2,.8,.2,1);
+  --shadow-1:0 1px 2px rgba(50,35,20,.05),0 0 0 1px var(--hair);
+  --shadow-2:0 12px 40px rgba(50,35,20,.12),0 2px 6px rgba(50,35,20,.06),0 0 0 1px var(--hair);
+  --shadow-3:0 28px 80px rgba(50,35,20,.20),0 6px 18px rgba(50,35,20,.08);
+  background:var(--cream); color:var(--ink);
+  font-family:"DM Sans",-apple-system,system-ui,sans-serif;font-size:14px;line-height:1.45;
+  -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;min-height:100vh}
+.atdx *{box-sizing:border-box}
+.atdx button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.atdx .mono{font-family:"DM Mono",ui-monospace,SFMono-Regular,Menlo,monospace;font-feature-settings:"tnum"}
+.atdx :focus-visible{outline:2px solid var(--terra);outline-offset:2px;border-radius:var(--r-xs)}
+
+.atdx .page{max-width:1160px;margin:0 auto;padding:44px 32px 120px}
+
+/* top */
+.atdx .top{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;flex-wrap:wrap}
+.atdx .top h1{font-family:"Playfair Display",Georgia,serif;font-weight:500;font-size:38px;line-height:1;margin:0 0 12px;letter-spacing:-.015em}
+.atdx .summary{margin:0;color:var(--walnut);font-size:15px;letter-spacing:-.005em}
+.atdx .summary b{color:var(--ink);font-weight:500;font-family:"DM Mono",monospace;font-size:14px}
+.atdx .summary .gaps{color:var(--terra-ink);cursor:pointer;border-bottom:1px solid transparent;transition:border-color .15s var(--ease)}
+.atdx .summary .gaps:hover{border-bottom-color:var(--terra)}
+.atdx .right{display:flex;align-items:center;gap:10px}
+.atdx .week{display:flex;align-items:center;height:36px;border-radius:999px;background:var(--paper);box-shadow:var(--shadow-1);padding:0 4px}
+.atdx .week>button{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;color:var(--walnut);font-size:16px;line-height:1;transition:background .15s var(--ease)}
+.atdx .week>button:hover{background:var(--cream);color:var(--ink)}
+.atdx .week .range{font-family:"Playfair Display",Georgia,serif;font-size:16px;padding:0 4px;min-width:104px;text-align:center;letter-spacing:-.01em}
+.atdx .week .now{font-size:12.5px;color:var(--mute);padding:0 10px 0 6px;width:auto}
+.atdx .week .now:not(:disabled):hover{color:var(--ink)}
+.atdx .week .now:disabled{cursor:default}
+.atdx .lockchip{font-size:12px;font-weight:500;color:var(--terra-ink);background:var(--terra-soft);border-radius:999px;padding:6px 12px}
+.atdx .link{color:var(--walnut);padding:0 10px;height:36px;display:inline-flex;align-items:center;border-radius:999px;transition:background .15s var(--ease),color .15s}
+.atdx .link:hover{color:var(--ink);background:var(--paper)}
+
+/* site filter: segmented */
+.atdx .sites{display:inline-flex;gap:2px;margin:28px 0 16px;padding:3px;border-radius:999px;background:var(--cream-2);flex-wrap:wrap}
+.atdx .pill{display:inline-flex;align-items:center;gap:8px;height:30px;padding:0 13px;border-radius:999px;color:var(--walnut);font-weight:500;font-size:13.5px;transition:color .15s var(--ease),background .15s var(--ease),box-shadow .15s var(--ease)}
+.atdx .pill .dot{width:6px;height:6px;border-radius:50%;background:var(--c,var(--mute))}
+.atdx .pill:hover{color:var(--ink)}
+.atdx .pill.on{background:var(--paper);color:var(--ink);box-shadow:0 1px 3px rgba(50,35,20,.10),0 0 0 .5px var(--hair)}
+
+/* sheet */
+/* No clip on the sheet: the app reserves a 220px rail, so on a narrower window the table can be
+   wider than the content area — clipping would hide the Days / This-week columns with no way to
+   reach them. Left visible, the page scrolls to them and the sticky header + add-worker dropdown
+   both keep working. Corners stay rounded via the first/last cells' own radii. */
+.atdx .sheet{background:var(--cream);border-radius:var(--r-l)}
+.atdx tbody td,.atdx tbody th{background:var(--paper)}
+.atdx tbody tr.spacer td{background:var(--cream)}
+.atdx .scroll{overflow:visible}
+.atdx table{width:100%;border-collapse:separate;border-spacing:0;min-width:900px}
+.atdx th,.atdx td{text-align:left;font-weight:400;vertical-align:middle}
+.atdx thead th{position:sticky;top:0;z-index:3;background:rgba(244,240,232,.92);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);box-shadow:inset 0 -1px var(--hair-2);
+  padding:12px 0 10px;font-size:12px;color:var(--walnut);text-align:center;font-weight:500;letter-spacing:.01em}
+.atdx thead th:first-child{text-align:left;padding-left:22px;color:var(--mute);font-weight:500}
+.atdx thead th .d{display:block;font-family:"DM Mono",monospace;font-size:17px;color:var(--ink);margin:3px auto 0;font-weight:500;width:28px;height:28px;line-height:28px;border-radius:50%}
+.atdx thead th.today{color:var(--terra-ink)}
+.atdx thead th.today .d{background:var(--terra);color:#fff}
+.atdx thead th.fillable{cursor:pointer}
+.atdx thead th.fillable:hover .d{background:var(--cream-2)}
+.atdx thead th.tot{text-align:right;padding-right:18px;color:var(--mute)}
+.atdx thead th.tot:last-of-type{padding-right:52px}
+
+.atdx td.day{box-shadow:inset 1px 0 rgba(70,50,30,.045)}
+.atdx td.who + td.day{box-shadow:none}
+.atdx tr.worker td.day,.atdx tr.contract td.day{box-shadow:inset 1px 0 rgba(70,50,30,.045),inset 0 -1px var(--hair)}
+.atdx tr.worker td.who + td.day{box-shadow:inset 0 -1px var(--hair)}
+
+.atdx col.c-name{width:270px} .atdx col.c-day{width:66px} .atdx col.c-days{width:58px} .atdx col.c-amt{width:110px} .atdx col.c-menu{width:40px}
+
+.atdx tr.spacer td{height:18px;background:var(--cream);box-shadow:none;padding:0}
+.atdx tr.group th{position:sticky;top:69px;z-index:2;background:var(--paper);box-shadow:inset 0 -1px var(--hair);padding:16px 22px 10px;text-align:left}
+.atdx tr.group .g{display:flex;align-items:baseline;gap:10px}
+.atdx tr.group .g .dot{width:7px;height:7px;border-radius:50%;background:var(--c);align-self:center}
+.atdx tr.group .g .name{font-family:"Playfair Display",Georgia,serif;font-size:18px;font-weight:500;letter-spacing:-.01em}
+.atdx tr.group .g .place{color:var(--mute);font-size:13px}
+
+/* add worker morph */
+.atdx tr.addrow td{padding:10px 22px 14px;box-shadow:inset 0 1px rgba(70,50,30,.06)}
+.atdx tr.addrow td.tot{padding-left:0;padding-right:18px}
+.atdx tr.addrow td.tot.sum{color:var(--walnut);font-weight:400;font-size:13px}
+.atdx tr.addrow td.tot.sum.zero{color:var(--mute)}
+.atdx tbody tr:last-child td{box-shadow:inset 0 1px rgba(70,50,30,.06)}
+.atdx .morph{position:relative;display:inline-flex;align-items:center;height:36px;width:128px;border-radius:999px;background:var(--paper);box-shadow:0 1px 2px rgba(50,35,20,.08),0 0 0 1px var(--hair);padding:0 6px 0 5px;overflow:visible;transition:width .32s var(--ease),box-shadow .2s var(--ease),transform .2s var(--ease)}
+.atdx .morph:not(.exp):hover{box-shadow:0 3px 10px rgba(50,35,20,.12),0 0 0 1px var(--hair-2);transform:translateY(-1px)}
+.atdx .morph:not(.exp):hover .plus{transform:rotate(90deg)}
+.atdx .morph .plus{flex:none;width:24px;height:24px;border-radius:50%;background:var(--terra);color:#fff;display:grid;place-items:center;font-size:17px;line-height:1;transition:transform .3s var(--ease),background .2s}
+.atdx .morph .label{white-space:nowrap;font-size:13px;font-weight:500;color:var(--ink);padding:0 10px 0 9px;letter-spacing:-.005em;transition:opacity .15s var(--ease)}
+.atdx .morph input{width:0;opacity:0;border:0;background:transparent;outline:0;font:inherit;color:var(--ink);padding:0;transition:width .32s var(--ease),opacity .2s var(--ease) .08s}
+.atdx .morph input::placeholder{color:var(--mute)}
+.atdx .morph .close{width:0;opacity:0;overflow:hidden;color:var(--mute);font-size:18px;line-height:1;border-radius:50%;transition:opacity .2s var(--ease),width .32s var(--ease),background .15s}
+.atdx .morph.exp{width:420px;box-shadow:0 3px 12px rgba(50,35,20,.10),0 0 0 1.5px var(--terra)}
+.atdx .morph.exp .plus{transform:rotate(45deg);background:var(--terra-ink)}
+.atdx .morph.exp .label{opacity:0;width:0;padding:0 0 0 10px;pointer-events:none}
+.atdx .morph.exp input{width:100%;flex:1;opacity:1;padding:0 6px}
+.atdx .morph.exp .close{width:26px;height:26px;opacity:1;display:grid;place-items:center}
+.atdx .morph.exp .close:hover{background:var(--cream-2);color:var(--ink)}
+.atdx .picker{position:absolute;top:calc(100% + 8px);left:0;z-index:15;width:400px;background:var(--paper);border-radius:var(--r-m);box-shadow:var(--shadow-2);padding:6px;max-height:300px;overflow:auto;animation:atdx-pop .18s var(--ease)}
+.atdx .picker button{display:flex;width:100%;text-align:left;padding:9px 12px;border-radius:var(--r-s);gap:8px;align-items:baseline;transition:background .12s var(--ease)}
+.atdx .picker button:hover,.atdx .picker button.hi{background:var(--cream)}
+.atdx .picker button .tr{color:var(--mute);font-size:12.5px;margin-left:auto}
+.atdx .picker button.new{color:var(--terra-ink);box-shadow:inset 0 1px var(--hair);border-radius:0 0 var(--r-s) var(--r-s);margin-top:4px;padding-top:11px}
+.atdx .ask{display:flex;align-items:center;gap:18px;flex-wrap:wrap;animation:atdx-pop .18s var(--ease)}
+.atdx .askhd{font-size:14px;color:var(--walnut);white-space:nowrap}
+.atdx .askhd b{color:var(--ink);font-weight:500}
+.atdx .askhd span{color:var(--mute)}
+.atdx .cards{display:flex;gap:10px;flex-wrap:wrap}
+.atdx .card{display:grid;grid-template-columns:auto 1fr;grid-template-rows:auto auto;column-gap:12px;text-align:left;width:300px;padding:12px 16px 13px 14px;border-radius:14px;background:var(--cream);box-shadow:inset 0 0 0 1px transparent;transition:background .15s var(--ease),box-shadow .15s var(--ease),transform .15s var(--ease)}
+.atdx .card .ci{grid-row:1/3;align-self:start;width:28px;height:28px;border-radius:8px;background:var(--paper);display:grid;place-items:center;font-family:"DM Mono",monospace;font-size:13px;color:var(--walnut);margin-top:1px;box-shadow:var(--shadow-1)}
+.atdx .card .ct{font-weight:500}
+.atdx .card .cs{font-size:12.5px;color:var(--walnut);line-height:1.4;margin-top:2px}
+.atdx .card:hover,.atdx .card:focus-visible{background:var(--paper);box-shadow:inset 0 0 0 1.5px var(--terra);outline:0}
+.atdx .card:active{transform:scale(.99)}
+.atdx .card.dim{opacity:.55}
+.atdx .card.dim:hover{background:var(--cream);box-shadow:none}
+.atdx .cancel{color:var(--mute);font-size:13.5px;transition:color .15s}
+.atdx .cancel:hover{color:var(--ink)}
+
+/* rows */
+.atdx tr.worker td,.atdx tr.contract td{height:50px;box-shadow:inset 0 -1px var(--hair);transition:background .15s var(--ease)}
+.atdx tbody tr.group:first-child th,.atdx tbody tr.spacer + tr.group th{border-radius:var(--r-l) var(--r-l) 0 0}
+.atdx tbody tr:last-child td:first-child{border-bottom-left-radius:var(--r-l)}
+.atdx tbody tr:last-child td:last-child{border-bottom-right-radius:var(--r-l)}
+.atdx tr.worker:hover td,.atdx tr.contract:hover td{background:#F8F5EE}
+.atdx td.who{padding-left:22px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.atdx td.who .n{font-weight:500;letter-spacing:-.005em}
+.atdx td.who .t,.atdx td.who .tag{color:var(--mute);margin-left:9px;font-size:13px}
+.atdx td.day{text-align:center;padding:6px 4px}
+.atdx td.day .cell{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;height:38px;border-radius:var(--r-s);
+  font-family:"DM Mono",monospace;font-size:15px;color:var(--ink);cursor:pointer;user-select:none;outline:0;
+  transition:background .15s var(--ease),transform .15s var(--ease),box-shadow .15s var(--ease)}
+.atdx td.day .cell:focus-visible{outline:0;box-shadow:0 0 0 2px var(--paper),0 0 0 4px var(--terra)}
+.atdx td.day .cell:active{transform:scale(.96)}
+.atdx td.day .cell .sub{font-size:10px;color:var(--sage-ink);opacity:.7;line-height:1;margin-top:2px;letter-spacing:.02em}
+.atdx td.day .cell .src{position:absolute;top:5px;right:7px;width:5px;height:5px;border-radius:50%;background:var(--sage)}
+.atdx td.day .cell.filled{background:var(--sage-soft);color:var(--sage-ink);font-weight:500}
+.atdx td.day .cell.filled:hover{background:#DFE7D6}
+.atdx td.day .cell.gap{border:1px dashed var(--gap)}
+.atdx td.day .cell.gap::before,.atdx td.day.today .cell:not(.filled)::before{content:"+";font-family:"DM Sans";font-size:14px;color:var(--mute);opacity:0;transition:opacity .15s var(--ease)}
+.atdx td.day .cell.gap:hover{border-color:var(--hair-2);background:var(--cream)}
+.atdx td.day .cell.gap:hover::before{opacity:1}
+.atdx td.day.today .cell:not(.filled){background:var(--today);box-shadow:inset 0 0 0 1px rgba(196,85,45,.28)}
+.atdx td.day.today .cell:not(.filled):hover{box-shadow:inset 0 0 0 1px var(--terra)}
+.atdx td.day.today .cell:not(.filled):hover::before{opacity:1;color:var(--terra-ink)}
+.atdx td.day.future .cell{cursor:default;border:1px dashed var(--hair)}
+.atdx td.day .cell.flash{animation:atdx-flash .6s var(--ease)}
+@keyframes atdx-flash{0%{box-shadow:0 0 0 0 rgba(196,85,45,.5)}100%{box-shadow:0 0 0 12px rgba(196,85,45,0)}}
+.atdx td.tot{text-align:right;padding-right:18px;font-family:"DM Mono",monospace;color:var(--walnut);white-space:nowrap;font-size:13.5px}
+.atdx td.tot.days{color:var(--ink)}
+.atdx td.tot.zero{color:var(--mute)}
+.atdx td.menu{text-align:right;padding-right:12px}
+.atdx td.menu button{width:28px;height:28px;border-radius:var(--r-xs);color:var(--walnut);display:inline-grid;place-items:center;opacity:0;transition:opacity .15s var(--ease),background .15s}
+.atdx tr:hover td.menu button,.atdx td.menu button:focus-visible,.atdx .menu-open td.menu button{opacity:1}
+.atdx td.menu button:hover{background:var(--cream-2);color:var(--ink)}
+
+.atdx tr.empty td{padding:14px 22px 18px;color:var(--mute);box-shadow:none}
+.atdx tr.empty td a{color:var(--terra-ink);cursor:pointer;border-bottom:1px solid var(--terra-soft)}
+
+/* contract row */
+.atdx tr.contract td{height:60px}
+.atdx tr.contract td.who{white-space:normal;line-height:1.35}
+.atdx .sel.mini{appearance:none;-webkit-appearance:none;width:auto;max-width:100%;padding:2px 20px 2px 6px;font:inherit;font-size:12.5px;color:var(--mute);border:0;border-radius:var(--r-xs);background:transparent url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M1 1l3 3 3-3' stroke='%23A0958A' fill='none' stroke-width='1.3'/%3E%3C/svg%3E") no-repeat right 6px center;margin-left:-6px;outline:0;transition:background .15s var(--ease),color .15s}
+.atdx select.sel.mini:hover{background-color:var(--cream-2);color:var(--ink)}
+.atdx select.sel.mini:focus-visible{outline:2px solid var(--terra);outline-offset:1px}
+.atdx .sel.mini.wo{display:inline-block;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;background:none;padding-left:0;margin-left:0}
+.atdx td.cwork{padding:6px 4px;cursor:pointer}
+.atdx td.cwork .cw{display:flex;align-items:center;gap:14px;min-width:0;height:38px;border:1px dashed var(--gap);border-radius:var(--r-s);padding:0 12px 0 4px;transition:border-color .15s var(--ease),background .15s var(--ease)}
+.atdx td.cwork:hover .cw{border-color:var(--hair-2);background:var(--cream)}
+.atdx td.cwork .sel.mini.stage{color:var(--ink);font-weight:500;font-size:13px;max-width:46%;flex:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-left:0}
+.atdx td.cwork .bar{flex:1;height:4px;border-radius:2px;background:var(--cream-2);position:relative;min-width:60px;overflow:hidden}
+.atdx td.cwork .bar i{position:absolute;inset:0 auto 0 0;background:var(--sage);border-radius:2px;transition:width .3s var(--ease),background .15s}
+.atdx td.cwork:hover .bar i{background:var(--terra)}
+.atdx td.cwork .num{font-family:"DM Mono",monospace;color:var(--walnut);white-space:nowrap;font-size:13px}
+.atdx td.cwork .num b{color:var(--ink);font-weight:500}
+.atdx tr.contract td.tot .amt{display:block;color:var(--walnut)}
+.atdx tr.contract td.tot.zero .amt{color:var(--mute)}
+.atdx tr.contract td.tot .of{display:block;font-size:11px;color:var(--mute);margin-top:1px}
+
+/* popovers */
+.atdx .editor,.atdx .rowmenu{position:absolute;z-index:20;background:var(--paper);border-radius:var(--r-m);box-shadow:var(--shadow-2);display:none;transform-origin:top left}
+.atdx .editor.open,.atdx .rowmenu.open{display:block;animation:atdx-pop .18s var(--ease)}
+.atdx .editor{padding:12px 12px 10px;width:256px}
+.atdx .editor .hd{display:flex;justify-content:space-between;color:var(--mute);font-size:12.5px;margin-bottom:8px;padding:0 4px}
+.atdx .editor .hd b{color:var(--ink);font-weight:500}
+.atdx .editor .cat{display:flex;align-items:center;justify-content:space-between;padding:5px 4px}
+.atdx .editor .cat .k{font-size:13.5px}
+.atdx .editor .cat .r{color:var(--mute);font-size:12px;font-family:"DM Mono",monospace;margin-left:6px}
+.atdx .step{display:inline-flex;align-items:center;border-radius:var(--r-s);background:var(--cream-2);padding:2px}
+.atdx .step button{width:26px;height:26px;border-radius:6px;color:var(--walnut);font-size:15px;transition:background .15s var(--ease),transform .1s}
+.atdx .step button:hover{background:var(--paper);color:var(--ink)}
+.atdx .step button:active{transform:scale(.92)}
+.atdx .step input{width:34px;height:26px;text-align:center;border:0;background:transparent;font-family:"DM Mono",monospace;font-size:14px;color:var(--ink);outline:0}
+.atdx .editor .ft{display:flex;justify-content:space-between;align-items:center;box-shadow:inset 0 1px var(--hair);margin-top:8px;padding:9px 4px 0;font-size:12.5px;color:var(--mute)}
+.atdx .editor .ft .amt{font-family:"DM Mono",monospace;color:var(--ink)}
+.atdx .editor .ft button:hover{color:var(--terra-ink)}
+.atdx .editor .hint{font-size:11.5px;color:var(--mute);margin-top:6px;padding:0 4px;opacity:.8}
+.atdx .rowmenu{padding:6px;width:212px}
+.atdx .rowmenu button{display:block;width:100%;text-align:left;padding:8px 10px;border-radius:var(--r-s);font-size:13.5px;transition:background .12s var(--ease)}
+.atdx .rowmenu button:hover{background:var(--cream)}
+.atdx .rowmenu button.danger{color:var(--terra-ink)}
+.atdx .rowmenu hr{border:0;border-top:1px solid var(--hair);margin:5px 6px}
+
+/* toast */
+.atdx .toast{position:fixed;left:50%;bottom:32px;transform:translateX(-50%) translateY(10px);opacity:0;background:rgba(30,25,21,.92);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);color:#F6F1E9;padding:11px 18px;border-radius:999px;font-size:13.5px;transition:.22s var(--ease);z-index:95;white-space:nowrap;box-shadow:0 8px 30px rgba(0,0,0,.25);pointer-events:none}
+.atdx .toast.on{transform:translateX(-50%);opacity:1}
+
+/* notes */
+.atdx .notes{margin-top:56px;color:var(--walnut);font-size:13.5px;max-width:680px;line-height:1.55}
+.atdx .notes h3{font-family:"Playfair Display",Georgia,serif;font-weight:500;font-size:18px;color:var(--ink);margin:0 0 10px}
+.atdx .notes ul{margin:0;padding-left:18px}
+.atdx .notes li{margin:6px 0}
+.atdx kbd{font-family:"DM Mono",monospace;font-size:11.5px;border-radius:5px;padding:1px 6px;background:var(--paper);box-shadow:var(--shadow-1)}
+
+/* states + skeleton */
+.atdx .state{padding:40px 18px;text-align:center;color:var(--terra-ink);font-size:14px}
+.atdx .state .retry{text-decoration:underline;color:var(--terra-ink)}
+.atdx .sk-bar,.atdx .sk-cell{display:inline-block;background:linear-gradient(90deg,var(--cream-2) 25%,var(--paper) 50%,var(--cream-2) 75%);background-size:200% 100%;animation:atdx-sk 1.5s ease-in-out infinite;border-radius:6px}
+.atdx .sk-bar{height:11px}
+.atdx .sk-cell{width:44px;height:32px;margin-left:10px;border-radius:8px}
+@keyframes atdx-sk{0%{background-position:200% 0}100%{background-position:-200% 0}}
+
+/* settled week: freeze the sheet */
+.atdx.wk-locked .sheet tbody{opacity:.66;filter:saturate(.65)}
+.atdx.wk-locked .cell{pointer-events:none;cursor:default}
+
+/* rate card drawer */
+.atdx .rcdrawer{position:fixed;inset:0;z-index:88;pointer-events:none}
+.atdx .rcdrawer.open{pointer-events:auto}
+.atdx .rcd-scrim{position:absolute;inset:0;background:rgba(40,28,18,.24);opacity:0;transition:opacity .28s var(--ease)}
+.atdx .rcdrawer.open .rcd-scrim{opacity:1}
+.atdx .rcd-panel{position:absolute;top:0;right:0;bottom:0;width:min(460px,92vw);background:var(--paper);box-shadow:-24px 0 70px -30px rgba(40,28,18,.5);
+  transform:translateX(100%);transition:transform .34s var(--ease);display:flex;flex-direction:column;overflow:hidden}
+.atdx .rcdrawer.open .rcd-panel{transform:none}
+.atdx .rcd-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:22px 22px 14px;box-shadow:inset 0 -1px var(--hair)}
+.atdx .rcd-head b{font-family:"Playfair Display",Georgia,serif;font-weight:500;font-size:20px;display:block}
+.atdx .rcd-head span{color:var(--mute);font-size:12.5px;display:block;margin-top:3px;max-width:320px}
+.atdx .rcd-x{width:30px;height:30px;border-radius:50%;color:var(--walnut);font-size:20px;display:grid;place-items:center;flex:none}
+.atdx .rcd-x:hover{background:var(--cream-2);color:var(--ink)}
+.atdx .rcd-body{flex:1;overflow:auto;padding:8px 0}
+.atdx #atdxRcTable{width:100%;min-width:0;border-collapse:separate;border-spacing:0}
+.atdx #atdxRcTable th{font-size:12px;font-weight:500;color:var(--mute);padding:8px 10px;text-align:right;box-shadow:inset 0 -1px var(--hair)}
+.atdx #atdxRcTable th.cat{text-align:left;padding-left:22px;width:180px}
+.atdx #atdxRcTable th .p{display:block;font-size:11px;color:var(--mute)}
+.atdx #atdxRcTable td{padding:0;text-align:right;box-shadow:inset 0 -1px var(--hair);height:42px;background:var(--paper)}
+.atdx #atdxRcTable td.cat{text-align:left;padding-left:22px;font-size:14px}
+.atdx #atdxRcTable tr.grp td{background:var(--cream);height:28px;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--mute);text-align:left;padding-left:22px}
+.atdx #atdxRcTable .cc{display:flex;justify-content:flex-end;align-items:baseline;gap:6px;padding:0 16px;height:100%;cursor:text}
+.atdx #atdxRcTable .cc:hover{background:var(--cream)}
+.atdx #atdxRcTable .cc.rc-off{cursor:default}
+.atdx #atdxRcTable .cc .v{font-weight:500;font-family:"DM Mono",monospace}
+.atdx #atdxRcTable .rc-dash{color:var(--hair-2)}
+.atdx #atdxRcTable .cc .since{font-size:11px;color:var(--terra-ink)}
+.atdx #atdxRcTable .cc input{width:64px;text-align:right;border:0;border-bottom:1.5px solid var(--walnut);background:transparent;font-size:14px;padding:0;font-family:"DM Mono",monospace}
+.atdx #atdxRcTable .cc input:focus{outline:none}
+.atdx .rcd-foot{padding:14px 22px;box-shadow:inset 0 1px var(--hair)}
+.atdx .rcd-foot button{color:var(--walnut);font-weight:500;font-size:13.5px}
+.atdx .rcd-foot button:hover{color:var(--ink)}
+
+@keyframes atdx-pop{from{opacity:0;transform:translateY(-4px) scale(.97)}to{opacity:1;transform:none}}
+
+@media (max-width:760px){
+  .atdx .page{padding:24px 14px 80px}
+  .atdx .top h1{font-size:32px}
+  .atdx col.c-name{width:200px}
+  .atdx .sites{display:flex;overflow-x:auto}
+}
+@media (prefers-reduced-motion:reduce){.atdx *{animation:none!important;transition:none!important}}
+`;
