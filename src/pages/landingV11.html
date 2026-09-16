@@ -443,6 +443,38 @@ footer{border-top:1px solid var(--rule);background:var(--paper);color:var(--mute
 @media(min-width:761px){.sticky-cta{display:none}}
 
 a:focus-visible,button:focus-visible{outline:2.5px solid var(--red);outline-offset:3px}
+
+/* ---------- mobile polish: tighter rhythm, crafted spacing, comfortable targets ---------- */
+@media(max-width:640px){
+  section{padding:56px 0}
+  .hero{padding:88px 0 0}
+  .hero-grid{gap:30px}
+  .hero-copy{padding-left:20px}
+  .hero-phone{padding-left:0}
+  .hero .sub{margin-top:18px;font-size:1.05rem}
+  .hero .cta-zone{margin-top:26px}
+  .btn{min-height:52px;font-size:1rem}
+  .phone-cap{margin-top:12px}
+  .demo-tabs{width:100%;justify-content:stretch}
+  .demo-tabs button{flex:1;padding:8px 6px;font-size:.8rem;white-space:nowrap}
+  .dash-head{margin-bottom:22px}
+  .dash-head h2,.two h2{font-size:1.75rem}
+  .two{gap:22px 0}
+  .two .lede,.dash-head .lede{font-size:1rem}
+  .slip{padding:18px 0}
+  .steps li{padding:16px 0;gap:14px}
+  .vs,.halves{gap:12px}
+  .vs-col,.half{padding:20px 18px}
+  .price{gap:20px 0}
+  .amount{font-size:clamp(3.4rem,20vw,4.2rem)}
+  .price-card{padding:22px 20px}
+  .closing{padding:72px 0 84px}
+  .closing .wrap{padding-left:34px}
+  .closing p{margin:16px 0 26px}
+  .foot{padding:48px 0 108px}
+  .foot-top{gap:30px}
+}
+
 @media(prefers-reduced-motion:reduce){
   .msg{opacity:1;transform:none;transition:none}
   #lsheet.sk *{animation:none}.trow.new,.trow.new::before,.trow.new .chip{animation:none}.live i,.spin{animation:none}
