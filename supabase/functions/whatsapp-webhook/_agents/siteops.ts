@@ -1263,6 +1263,31 @@ export async function recentInboundImage(supabase: any, phone: string, excludeWa
   return false
 }
 
+/** The caption arrived AFTER the payment image was already staged (site-less), so the payment couldn't pull
+ *  it. When we suppress the caption's lone miss, push the site SiteOps just resolved ONTO that recent payment
+ *  entry — the last PENDING image rough-entry from this sender (60s) that has no site yet. Best-effort. */
+export async function enrichRecentPaymentProject(
+  supabase: any, orgId: string, sender: string, project: { id: string; name: string }, windowMs = 60_000,
+): Promise<boolean> {
+  try {
+    const since = new Date(Date.now() - windowMs).toISOString()
+    const { data } = await supabase.from('rough_entries')
+      .select('id, ai_extracted, source, status, created_at')
+      .eq('org_id', orgId).eq('sender_number', sender).gte('created_at', since)
+      .order('created_at', { ascending: false }).limit(5)
+    for (const r of (data ?? []) as { id: string; ai_extracted: any; source: string | null; status: string }[]) {
+      if (r.status !== 'PENDING') continue
+      if (!String(r.source ?? '').includes('IMAGE')) continue                       // a payment/bill IMAGE entry
+      const ai = (r.ai_extracted ?? {}) as Record<string, unknown>
+      if (ai.project_id || (ai.suggested_project as { id?: string } | null)?.id) continue   // already sited
+      const next = { ...ai, project_id: project.id, project_name: project.name, project_matched: true, project_unmatched: false, suggested_project: null }
+      const { error } = await supabase.from('rough_entries').update({ ai_extracted: next }).eq('id', r.id)
+      if (!error) return true
+    }
+  } catch (e) { console.error('[siteops] enrichRecentPaymentProject failed (degraded):', (e as Error)?.message ?? e) }
+  return false
+}
+
 export async function applyTerminals(ctx: SiteopsCtx, terminals: Terminal[], ex: ExecCtx): Promise<TerminalOutcome[]> {
   const meta = { org_id: ctx.orgId, wamid: ctx.wamid }
   ex.vmMemo ??= new Map()   // scoped to THIS call (see materializeProjectTasks)
@@ -1519,7 +1544,13 @@ export async function applyTerminals(ctx: SiteopsCtx, terminals: Terminal[], ex:
     // within 60s), that image claims it and IS the reply. Don't send a separate "couldn't tell which work"
     // miss for the caption. The verdict is already persisted (audit); we simply stay silent here.
     if (loneMiss && !ex.readbackSuffix && await recentInboundImage(ctx.supabase, ctx.from, ctx.wamid ?? null)) {
-      console.log('[siteops] lone miss suppressed — a recent image claims this text as its caption')
+      // The image already staged its payment before this caption arrived, so push the site the caption named
+      // onto that recent payment entry (if SiteOps resolved one) instead of dropping it.
+      let enriched = false
+      if (ex.projectId && ex.projectName) {
+        enriched = await enrichRecentPaymentProject(ctx.supabase, ctx.orgId, ctx.from, { id: ex.projectId, name: ex.projectName })
+      }
+      console.log(`[siteops] lone miss suppressed — a recent image claims this caption (payment site enriched=${enriched})`)
       return outcomes
     }
     // A BARE SITE NAME ("Chakradhar site", "Asm elite") is almost always the caption/context for a photo, not
