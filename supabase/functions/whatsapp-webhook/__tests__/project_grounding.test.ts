@@ -10,6 +10,7 @@
 
 import { suite, test, expect } from './harness'
 import { buildPlan, lingeringProjectHint } from '../_agents/transaction.ts'
+import { isBareSiteMention, ackSiteOnly } from '../_siteops_resolution.ts'
 import type { TxnExtract } from '../_extract.ts'
 
 const FROM = '919900000000'
@@ -70,6 +71,13 @@ suite('project from a lingering SiteOps site-name text (photo + a bare "<site> s
     expect(lingeringProjectHint({ slots_so_far: {} } as any, PROJECTS)).toBe(null);
   });
 
+  test('lingeringProjectHint falls back to the project the convo NAMED when no project_id is stamped', () => {
+    const noPid = { slots_so_far: {}, last_action_summary: "Noted 👍 — for Chakradhar's Residence." } as any;
+    expect(lingeringProjectHint(noPid, PROJECTS)).toEqual({ id: 'PRJ-CHAKRADHAR-S', name: "Chakradhar's Residence" });
+    const unrelated = { slots_so_far: {}, last_action_summary: 'got your photo' } as any;
+    expect(lingeringProjectHint(unrelated, PROJECTS)).toBe(null);
+  });
+
   test('a site-less payment offers the lingering site as a suggestion', () => {
     const hint = lingeringProjectHint(lingering, PROJECTS);
     const plan = buildPlan(extOf({ payee: 'Sri Phanibhushana Steels', project: null }), NO_STAKE, PROJECTS, FROM, 'cheque ₹3,00,000', hint);
@@ -82,5 +90,28 @@ suite('project from a lingering SiteOps site-name text (photo + a bare "<site> s
     const other = [{ project_id: 'P2', name: 'The Pride' }, ...PROJECTS];
     const plan = buildPlan(extOf({ project: 'Pride' }), NO_STAKE, other, FROM, 'paid at Pride site', hint);
     expect(plan.projectName).toBe('The Pride');
+  });
+})
+
+// A bare site name ("Chakradhar site", "Asm elite") is a photo's caption, not a failed work update — it must
+// be acked quietly, never scolded with "name the work".
+suite('siteops — a bare site name is acked quietly, not nagged', () => {
+  test('isBareSiteMention: only the site (project words + generic words) → true', () => {
+    expect(isBareSiteMention('Chakradhar site', "Chakradhar's Residence")).toBe(true);
+    expect(isBareSiteMention('Asm elite', 'ASM Elite Apartments')).toBe(true);
+    expect(isBareSiteMention('for the Chakradhar site', "Chakradhar's Residence")).toBe(true);
+  });
+  test('isBareSiteMention: site PLUS real work → false (keep the nag)', () => {
+    expect(isBareSiteMention('ASM Elite plastering issue', 'ASM Elite Apartments')).toBe(false);
+    expect(isBareSiteMention('tiles laid on 4th floor', "Chakradhar's Residence")).toBe(false);
+  });
+  test('isBareSiteMention: guards', () => {
+    expect(isBareSiteMention('', "Chakradhar's Residence")).toBe(false);
+    expect(isBareSiteMention('Chakradhar site', null)).toBe(false);
+  });
+  test('ackSiteOnly names the site, no "name the work"', () => {
+    const m = ackSiteOnly("Chakradhar's Residence");
+    expect(m.includes("Chakradhar's Residence")).toBe(true);
+    expect(/name the work/i.test(m)).toBe(false);
   });
 })

@@ -44,6 +44,7 @@ import {
 } from '../_siteops_batch.ts'
 import {
   composeReadback, homesOf, assertAllApplied, executeResolution, nothingToUpdate, COULDNT_READ_THAT, ALREADY_LOGGED,
+  isBareSiteMention, ackSiteOnly,
   type Terminal, type TerminalOutcome, type AttachUpdate, type StructureSlot,
 } from '../_siteops_resolution.ts'
 import { resolveInbound, prefetchResolveInputs, type ResolveInboundCtx } from '../_siteops_resolution_llm.ts'
@@ -1495,9 +1496,14 @@ export async function applyTerminals(ctx: SiteopsCtx, terminals: Terminal[], ex:
     // lead with what we held (the saved rest), not the miss. composeReadback would put the lone didn't-catch
     // first and append the saved suffix; reorder that one case so the understood part leads.
     const loneMiss = outcomes.length === 1 && outcomes[0].terminal.kind === 'acked_didnt_catch' && outcomes[0].status === 'ok'
+    // A BARE SITE NAME ("Chakradhar site", "Asm elite") is almost always the caption/context for a photo, not
+    // a failed work update — ack it quietly instead of nagging "name the work" (the photo's payment adopts it).
+    const bareSite = loneMiss && !ex.readbackSuffix && !!ex.projectName && isBareSiteMention(ex.message, ex.projectName)
     let body = (loneMiss && ex.readbackSuffix)
       ? `Got it —${ex.readbackSuffix.replace(/^ ·/, '')} · didn't catch anything else in that`
-      : composeReadback(outcomes, ctx.lang) + (ex.readbackSuffix ?? '')
+      : bareSite
+        ? ackSiteOnly(ex.projectName!, ctx.lang)
+        : composeReadback(outcomes, ctx.lang) + (ex.readbackSuffix ?? '')
     // T8b (clause 4) — DISCLOSE a batch-ASSUMED project so a wrong adoption is visible and correctable
     // (there's no project-correction tap yet — reuse the fresh path: "send it again with the site").
     if (ex.assumedSite) body += ` · logged at *${ex.assumedSite}* (assumed from your open chase) — wrong site? send it again with the site`

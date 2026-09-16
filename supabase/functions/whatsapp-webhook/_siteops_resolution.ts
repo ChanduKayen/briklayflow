@@ -706,6 +706,29 @@ export function nothingToUpdate(lang: Lang = 'en'): string {
 /** The English form, kept as a constant for the identity check in _siteops_readback (see isMiss). */
 export const NOTHING_TO_UPDATE = nothingToUpdate('en')
 
+// A message that names ONLY a site (its project's own words + generic site words) and nothing to act on is
+// almost always the CAPTION/context for a photo ("Chakradhar site", "Asm elite"), not a failed work update.
+// Scolding it with "name the work" is wrong; a quiet ack is right, and the photo's payment adopts the site.
+const GENERIC_SITE_WORDS = new Set([
+  'site', 'sites', 'project', 'projects', 'apartment', 'apartments', 'residence', 'residences',
+  'home', 'homes', 'villa', 'villas', 'tower', 'towers', 'the', 'at', 'for', 'in', 'on', 'of',
+])
+/** True when the raw message is just the site — its project name's words plus generic site words, nothing else. */
+export function isBareSiteMention(rawText: string | null | undefined, projectName: string | null | undefined): boolean {
+  if (!rawText || !projectName) return false
+  const proj = new Set((projectName.toLowerCase().match(/[a-z0-9]+/g) ?? []))
+  const toks = rawText.toLowerCase().match(/[a-z0-9]+/g) ?? []
+  if (!toks.length) return false
+  const leftover = toks.filter((w) => w.length > 1 && !proj.has(w) && !GENERIC_SITE_WORDS.has(w))
+  return leftover.length === 0
+}
+/** The quiet ack for a bare site name — no "name the work" nag (it's a photo's context, not a miss). */
+export function ackSiteOnly(projectName: string, lang: Lang = 'en'): string {
+  if (lang === 'te' || lang === 'te-en') return `అర్థమైంది 👍 — ${projectName} కోసం.`
+  if (lang === 'hi') return `समझ गया 👍 — ${projectName} के लिए।`
+  return `Noted 👍 — for ${projectName}.`
+}
+
 /** Is this readback body the "couldn't place it" message, in ANY language? The combined readback collapses it
  *  to a single clause, and it did so by comparing the body against the English constant — which would have
  *  silently stopped matching the moment the message was translated, letting the long form leak back into

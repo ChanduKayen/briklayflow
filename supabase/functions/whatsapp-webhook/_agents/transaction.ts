@@ -144,10 +144,22 @@ export function lingeringProjectHint(
 ): { id: string; name: string } | null {
   if (!lingering) return null
   const slots = (lingering.slots_so_far ?? {}) as Record<string, unknown>
+  // 1) the settled project_id, when the SiteOps convo stamped one.
   const pid = typeof slots.project_id === 'string' ? slots.project_id : null
-  if (!pid) return null
-  const p = projects.find((x) => x.project_id === pid)
-  return p ? { id: p.project_id, name: p.name } : null
+  if (pid) { const p = projects.find((x) => x.project_id === pid); if (p) return { id: p.project_id, name: p.name } }
+  // 2) fallback — a bare-site miss may NOT stamp project_id; read the project NAME the convo recorded from any
+  //    text it carried (slots name fields, the pending question, the last action summary) via the matcher.
+  const hay = [
+    typeof slots.project_name === 'string' ? slots.project_name : '',
+    typeof slots.project === 'string' ? slots.project : '',
+    lingering.last_action_summary ?? '',
+    lingering.pending_question ?? '',
+  ].join(' ').trim()
+  if (hay) {
+    const pm = matchProject(hay, projects)
+    if (pm.band === 'auto' && pm.id && pm.name) return { id: pm.id, name: pm.name }
+  }
+  return null
 }
 
 // ── atomic staging / update (entry + rendered reply [+ ✓ reaction] in one tx) ─────
