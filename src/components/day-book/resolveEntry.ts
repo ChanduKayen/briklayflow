@@ -24,6 +24,10 @@ export interface EntryResolution {
   projectId: string | null;
   projectName: string | null;
   projectRaw: string | null;
+  /** the WhatsApp scorer's CONFIRM-band near-matches (its own accurate result), when nothing auto-linked —
+   *  so the review shows the SAME suggestion WhatsApp did, never a bare "not in your contacts"/"which site?" */
+  suggestedPayee: { id: string; name: string } | null;
+  suggestedProject: { id: string; name: string } | null;
   description: string;
   amount: number;
   resolved: ResolvedFields;
@@ -61,6 +65,15 @@ export function resolveEntry(
   const description = (ai.description || ai.description_raw || '').trim();
   const amount = parseFloat(String(ai.amount ?? '').replace(/[^\d.]/g, '')) || 0;
 
+  // The WhatsApp scorer's confirm-band near-match (only when nothing auto-linked), validated against a live
+  // row so a stale suggestion never shows. This is what WhatsApp already told the user ("Recorded for X").
+  const sp = (ai.suggested_payee ?? null) as { id?: string; name?: string } | null;
+  const suggestedPayee = (!payeeId && sp?.id && stakeholders.some((s) => s.stakeholder_id === sp.id))
+    ? { id: sp.id, name: stakeholders.find((s) => s.stakeholder_id === sp.id)!.name } : null;
+  const gp = (ai.suggested_project ?? null) as { id?: string; name?: string } | null;
+  const suggestedProject = (!projectId && gp?.id && projects.some((p) => p.project_id === gp.id))
+    ? { id: gp.id, name: projects.find((p) => p.project_id === gp.id)!.name } : null;
+
   const resolved: ResolvedFields = { payeeId: payeeId || '', projectId: projectId || '', amount, description, generalExpense: false };
-  return { payeeId, payeeName, projectId, projectName, projectRaw, description, amount, resolved, gaps: gapsOf(resolved), ready: isResolved(resolved) };
+  return { payeeId, payeeName, projectId, projectName, projectRaw, suggestedPayee, suggestedProject, description, amount, resolved, gaps: gapsOf(resolved), ready: isResolved(resolved) };
 }

@@ -139,7 +139,7 @@ export function ReviewCard({
    */
   // The AI's ids are guesses, not foreign keys — resolveEntry checks them against the org's real
   // rows and is shared with the phone's review deck so the two can never disagree.
-  const { payeeId, payeeName, projectId, projectName, projectRaw, description, amount: amountNum, resolved } =
+  const { payeeId, payeeName, projectId, projectName, projectRaw, suggestedPayee, suggestedProject, description, amount: amountNum, resolved } =
     resolveEntry(entry, stakeholders, projects);
   const gaps = archived ? [] : gapsOf(resolved);
   const ready = !archived && isResolved(resolved);
@@ -520,6 +520,7 @@ export function ReviewCard({
           <div className="mt-2.5" style={{ ...font, fontSize: 15, lineHeight: 1.45, overflowWrap: 'break-word', color: V.ink }}>
             <span style={{ color: V.faint, fontSize: 12, marginRight: 5 }}>to</span>
             {payeeId ? <b style={{ fontWeight: 600 }}>{payeeName}</b>
+              : suggestedPayee ? <><b style={{ fontWeight: 600 }}>{suggestedPayee.name}</b> {pill('confirm?')}</>
               : payeeName ? <><b style={{ fontWeight: 600 }}>{payeeName}</b> {pill('not in your contacts')}</>
               : blank('who was paid?')}
           </div>
@@ -530,6 +531,11 @@ export function ReviewCard({
               <>
                 <span className="flex-none" style={{ width: 5, height: 5, borderRadius: 2, background: V.sage, opacity: .7, transform: 'translateY(-1px)' }} />
                 {projectName}
+              </>
+            ) : suggestedProject ? (
+              <>
+                <span className="flex-none" style={{ width: 5, height: 5, borderRadius: 2, background: V.sage, opacity: .5, transform: 'translateY(-1px)' }} />
+                {suggestedProject.name} {pill('confirm?')}
               </>
             ) : projectRaw ? (
               <>

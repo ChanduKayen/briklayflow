@@ -9,6 +9,7 @@
 
 import { callClaude, callOpenAI } from './_classify.ts'
 import { isBareAffirmation } from './_siteops_assoc.ts'
+import { matchProject } from './_match.ts'
 
 export type NoteVerdict = 'note' | 'fresh' | 'noop'
 
@@ -68,7 +69,7 @@ export async function readsAsTxnNote(summary: string, text: string): Promise<boo
  * Day Book / bill card with the entry. Best-effort; one merged write (reads the row for the existing values).
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function attachNoteToEntry(supabase: any, entryId: string, text: string): Promise<boolean> {
+export async function attachNoteToEntry(supabase: any, entryId: string, text: string, orgId?: string): Promise<boolean> {
   const note = (text ?? '').trim()
   if (!note) return false
   const { data } = await supabase.from('rough_entries').select('raw_text, ai_extracted').eq('id', entryId).maybeSingle()
@@ -77,9 +78,23 @@ export async function attachNoteToEntry(supabase: any, entryId: string, text: st
   const ai = (data.ai_extracted ?? {}) as Record<string, unknown>
   const prevDesc = (ai.description_raw ?? '').toString().trim()
   const notes = Array.isArray((ai as { wa_notes?: unknown[] }).wa_notes) ? (ai as { wa_notes: unknown[] }).wa_notes : []
+
+  // A caption note often carries the SITE too ("Dr soundharya site wood purchase") — claim it when the entry
+  // has none and it resolves to a real project. Auto → set it; a near-match → suggest it (the card shows it).
+  let projectPatch: Record<string, unknown> = {}
+  const hasSite = !!(ai.project_id || (ai.suggested_project as { id?: string } | null)?.id)
+  if (orgId && !hasSite) {
+    try {
+      const { data: projs } = await supabase.from('projects').select('project_id, name').eq('org_id', orgId).eq('status', 'Active')
+      const pm = matchProject(note, ((projs ?? []) as { project_id: string; name: string }[]).map((p) => ({ project_id: p.project_id, name: p.name })))
+      if (pm.band === 'auto' && pm.id) projectPatch = { project_id: pm.id, project_name: pm.name, project_matched: true, project_unmatched: false }
+      else if (pm.band === 'confirm' && pm.id) projectPatch = { suggested_project: { id: pm.id, name: pm.name, score: pm.score } }
+    } catch (e) { console.error('[txn-note] site-from-note failed (degraded):', (e as Error)?.message ?? e) }
+  }
+
   const { error } = await supabase.from('rough_entries').update({
     raw_text: prevRaw ? `${prevRaw}\n${note}` : note,
-    ai_extracted: { ...ai, description_raw: prevDesc ? `${prevDesc} · ${note}` : note, wa_notes: [...notes, note] },
+    ai_extracted: { ...ai, description_raw: prevDesc ? `${prevDesc} · ${note}` : note, wa_notes: [...notes, note], ...projectPatch },
   }).eq('id', entryId)
   if (error) { console.error('[txn-note] attach failed:', error.message); return false }
   return true

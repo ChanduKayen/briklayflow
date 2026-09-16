@@ -417,7 +417,7 @@ export async function dispatch(ctx: DispatchCtx, text: string): Promise<void> {
       const { data: ent } = await supabase.from('rough_entries').select('ai_extracted').eq('id', view.open.staged_entry_id).maybeSingle()
       const readsNote = ent?.ai_extracted ? await readsAsTxnNote(entrySummary(ent.ai_extracted as Record<string, unknown>), text) : false
       if (readsNote) {
-        const ok = await attachNoteToEntry(supabase, view.open.staged_entry_id, text)
+        const ok = await attachNoteToEntry(supabase, view.open.staged_entry_id, text, orgId)
         console.log('[dispatch] bill note attached during AWAIT_BILL_PAYMENT to', view.open.staged_entry_id, '=', ok)
         await send(supabase, from, M.mBillNoteReAsk(lang), { org_id: orgId, wamid })
         return   // keep the question open — the note is recorded, the amount is still awaited
@@ -443,9 +443,10 @@ export async function dispatch(ctx: DispatchCtx, text: string): Promise<void> {
       if (ent?.ai_extracted) readsNote = await readsAsTxnNote(entrySummary(ent.ai_extracted as Record<string, unknown>), text)
     }
     if (noteVerdict(withinHold, text, readsNote) === 'note') {
-      const ok = await attachNoteToEntry(supabase, view.lingering.staged_entry_id, text)
-      console.log('[dispatch] txn/bill note attached to', view.lingering.staged_entry_id, '=', ok)
-      await send(supabase, from, M.mNoteAdded(lang), { org_id: orgId, wamid })
+      // Attach the caption as the note AND claim its site (a caption often carries "<site> site"). No separate
+      // "added to the note" reply — the entry already stands; the site simply appears on it in the Day Book.
+      const ok = await attachNoteToEntry(supabase, view.lingering.staged_entry_id, text, orgId)
+      console.log('[dispatch] txn/bill note+site attached to', view.lingering.staged_entry_id, '=', ok)
       return
     }
     // 'noop' (bare ok) and 'fresh' (a real new turn) fall through to normal routing below — unchanged.
