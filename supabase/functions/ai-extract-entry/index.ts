@@ -50,6 +50,21 @@ function matchPayee(raw: string, stakeholders: StakeholderRow[]): {
   const scoreOne = (name: string): { score: number; conf: Conf } => {
     const sn = name.toLowerCase();
     if (sn === q) return { score: 0, conf: 'HIGH' };
+    // Jumbled words that match perfectly, order-independent ("Aradadi Raju" ≡ "Raju Aradadi"), tolerant to
+    // a ≤1-edit romanisation per token. Same set of words, any order → treat as an exact match.
+    const qt = q.split(/[^a-z0-9]+/).filter(Boolean);
+    const nt = sn.split(/[^a-z0-9]+/).filter(Boolean);
+    if (qt.length >= 2 && qt.length === nt.length) {
+      const used = new Array(nt.length).fill(false);
+      let all = true;
+      for (const a of qt) {
+        let hit = -1;
+        for (let i = 0; i < nt.length; i++) { if (used[i]) continue; if (a === nt[i] || levenshtein(a, nt[i]) <= 1) { hit = i; break; } }
+        if (hit < 0) { all = false; break; }
+        used[hit] = true;
+      }
+      if (all) return { score: 0, conf: 'HIGH' };
+    }
     if (sn.includes(q) && q.length >= 3) return { score: 1, conf: 'HIGH' };
     if (q.includes(sn) && sn.length >= 3) return { score: 1, conf: 'HIGH' };
     const snFirst = sn.split(/\s+/)[0];

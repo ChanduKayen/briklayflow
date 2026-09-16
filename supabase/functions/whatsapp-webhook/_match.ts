@@ -15,7 +15,9 @@
 // 0.90 lets a CONFIDENT person match auto-link, and the AMBIGUITY GUARD below is what keeps it safe: if two
 // contacts tie at that height ("two Ramus"), the match is demoted to 'confirm' so it never silently links to
 // the wrong ledger. Env-tunable.
-const TXN_PAYEE_AUTO   = Number(Deno.env.get('TXN_PAYEE_AUTO_THRESHOLD')   ?? '0.90')
+// Payee auto-link needs NEAR-EXACT (0.95): attributing money to the wrong person is worse than the wrong
+// project, so anything short of an exact / exact-jumble name is a 'confirm' ("which Raju?"), never a guess.
+const TXN_PAYEE_AUTO   = Number(Deno.env.get('TXN_PAYEE_AUTO_THRESHOLD')   ?? '0.95')
 const TXN_PROJECT_AUTO = Number(Deno.env.get('TXN_PROJECT_AUTO_THRESHOLD') ?? Deno.env.get('TXN_AUTO_THRESHOLD') ?? '0.82')
 const TXN_CONFIRM      = Number(Deno.env.get('TXN_CONFIRM_THRESHOLD')      ?? '0.60')
 

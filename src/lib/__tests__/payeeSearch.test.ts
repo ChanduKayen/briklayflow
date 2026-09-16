@@ -95,6 +95,21 @@ suite('payee search — an empty box is not a filter', () => {
   });
 });
 
+// Jumbled words — the same words in a different order. A substring/prefix can't reach them; the order-
+// independent token bag does. This is what the review search box now folds in (rankPayeeName).
+suite('payee search — jumbled word order still finds the man', () => {
+  test('"Aradadi Raju" ranks "Raju Aradadi" at the top', () => {
+    const list = [{ name: 'Raju Aradadi' }, { name: 'Suresh Kumar' }];
+    expect(searchPayees(list, 'aradadi raju').map((s) => s.name)[0]).toBe('Raju Aradadi');
+  });
+  test('a reordered full name scores near-exact (>= 0.95)', () => {
+    expect(rankPayeeName('aradadi raju', 'Raju Aradadi') >= 0.95).toBe(true);
+  });
+  test('an auto-link accepts a jumbled full name', () => {
+    expect(matchPayee('aradadi raju', [{ stakeholder_id: 'A', name: 'Raju Aradadi' }]).best?.id).toBe('A');
+  });
+});
+
 // ── The known gap, pinned honestly ───────────────────────────────────────────────────────────────────────
 // d<=2 carries one- and two-edit variance, which is most of it. It does NOT carry multi-character
 // substitutions: ksh→x is three edits. laxmi/Lakshmi scores 0.57 and falls below the floor — in the Day

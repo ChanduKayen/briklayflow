@@ -218,7 +218,9 @@ export function rankPayeeName(query: string, name: string): number {
   const word = n.split(/\s+/).some((w) => w.startsWith(q));
   if (word) return Math.max(fuzzy, 0.96);                  // "reddy" → Srinu Reddy
   if (n.includes(q)) return Math.max(fuzzy, 0.95);
-  return fuzzy;
+  // Jumbled words that a substring/prefix can't reach — "Aradadi Raju" ↔ "Raju Aradadi". The order-
+  // independent token bag scores reordered (and per-token romanised) names the substring rules miss.
+  return Math.max(fuzzy, nameTokenScore(tokenize(q), tokenize(n)));
 }
 
 /**

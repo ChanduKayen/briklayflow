@@ -1,30 +1,29 @@
-// PAYEE MATCH QUALITY — the fix for "the search almost never finds a name, it says I don't have that payee".
-// People type the FIRST name / a jumble / a romanised spelling; the stored name is the full name. The old
-// 0.95 auto floor made every non-verbatim match "new". Now a confident, unambiguous person match auto-links,
-// a same-name tie is demoted (never a silent wrong-ledger link), and a strong near-match is soft-confirmed.
+// PAYEE MATCH QUALITY — money attribution is name-strict. People type the FIRST name / a jumble / a romanised
+// spelling; the stored name is the full name. The auto floor is 0.95 (near-exact / exact-jumble ONLY): an
+// exact or reordered full name auto-links; a first-name-only or romanised near-match is a CONFIRM (it names
+// the likely person but asks), so money never silently lands on the wrong same-first-name person.
 import { suite, test, expect } from './harness'
 import { matchPayee, scorePayeeRich } from '../_match.ts'
 
-suite('payee match — a first name links to the full-name contact', () => {
-  test('"ramu" → the only Ramu, auto-linked (not "new")', () => {
+suite('payee match — a first name CONFIRMS the full-name contact (never a silent auto-link)', () => {
+  test('"ramu" (first name only) → confirm the likely Ramu, not auto', () => {
     const m = matchPayee('ramu', [{ stakeholder_id: 'A', name: 'Ramu Kojjavarapu' }, { stakeholder_id: 'B', name: 'Suresh' }])
-    expect(m.band).toBe('auto')
+    expect(m.band).toBe('confirm')
     expect(m.id).toBe('A')
-    expect(m.ambiguous).toBe(false)
   })
   test('an exact full name still auto-links', () => {
     expect(matchPayee('ramu kojjavarapu', [{ stakeholder_id: 'A', name: 'Ramu Kojjavarapu' }]).band).toBe('auto')
   })
 })
 
-suite('payee match — ambiguity is guarded (money never silently links to the wrong twin)', () => {
-  test('"ramu" with TWO Ramus → NOT auto; demoted + flagged ambiguous', () => {
+suite('payee match — money never silently links to the wrong twin', () => {
+  test('"ramu" with TWO Ramus → NOT auto (a confirm)', () => {
     const m = matchPayee('ramu', [
       { stakeholder_id: 'A', name: 'Ramu Kojjavarapu' },
       { stakeholder_id: 'B', name: 'Ramu Aradadi' },
     ])
+    expect(m.band === 'auto').toBe(false)
     expect(m.band).toBe('confirm')
-    expect(m.ambiguous).toBe(true)
   })
 })
 
