@@ -49,6 +49,11 @@ suite('payee match — money safety preserved (romanisation still asks, stranger
     expect(m.band).toBe('open')
     expect(m.id).toBeNull()
   })
+  test('a longer new name is NOT pulled onto a short existing one: "Darlanka Sivaramu" ≠ "Siva" → new', () => {
+    const m = matchPayee('darlanka sivaramu', [{ stakeholder_id: 'S', name: 'Siva', category: 'Scaffolding Supplier' }])
+    expect(m.band).toBe('open')
+    expect(m.id).toBeNull()
+  })
   test('scorePayeeRich: first-name >= 0.9, stranger low', () => {
     expect(scorePayeeRich('ramu', { name: 'Ramu Kojjavarapu' }) >= 0.9).toBe(true)
     expect(scorePayeeRich('lakshmi', { name: 'Srinu' }) < 0.6).toBe(true)

@@ -108,6 +108,10 @@ suite('payee search — jumbled word order still finds the man', () => {
   test('an auto-link accepts a jumbled full name', () => {
     expect(matchPayee('aradadi raju', [{ stakeholder_id: 'A', name: 'Raju Aradadi' }]).best?.id).toBe('A');
   });
+  test('a longer new name is NOT matched to a short existing one ("Darlanka Sivaramu" ≠ "Siva")', () => {
+    const m = matchPayee('darlanka sivaramu', [{ stakeholder_id: 'S', name: 'Siva' }]);
+    expect(m.best).toBe(null);
+  });
 });
 
 // ── The known gap, pinned honestly ───────────────────────────────────────────────────────────────────────

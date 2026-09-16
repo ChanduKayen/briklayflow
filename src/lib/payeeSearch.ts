@@ -126,14 +126,29 @@ const isKnownTrade = (c?: string | null): boolean => {
   return !!s && s !== 'general' && s !== 'other';
 };
 
-/** Fuzzy equality of two name tokens, 0..1. Prefix + 1–2 edits carry romanisation token-wise. */
+/** Fuzzy equality of two name tokens, 0..1. Prefix + 1–2 edits carry romanisation token-wise. A prefix
+ *  only counts as strong when the two are close in LENGTH: "siva" is a prefix of "sivaramu" but they are
+ *  different names (ratio .5), so a short-inside-long prefix is weak, not a 0.92 near-match. */
 function tokenSim(a: string, b: string): number {
   if (a === b) return 1;
-  const min = Math.min(a.length, b.length);
-  if (min >= 3 && (a.startsWith(b) || b.startsWith(a))) return 0.92;
+  const min = Math.min(a.length, b.length), max = Math.max(a.length, b.length);
+  if (min >= 3 && (a.startsWith(b) || b.startsWith(a))) return min / max >= 0.6 ? 0.92 : 0.55;
   if (min >= 3 && levenshtein(a, b) <= 2) return 0.85;
-  const rel = levenshtein(a, b) / Math.max(a.length, b.length);
+  const rel = levenshtein(a, b) / max;
   return rel <= 0.34 ? 0.7 : 0;
+}
+/** The whole-name scorer (mirror of scorePayeeName) but BOUNDARY-AWARE: containment counts only across
+ *  WHOLE WORDS, so "siva" inside "sivaramu" no longer scores 0.9. The fuzzy tail (first-word, 1–2 edits,
+ *  relative distance) is kept, so a romanised near-name still whispers (laxmi→Lakshmi ≈ 0.57). */
+function wholeNameFloor(q: string, name: string): number {
+  if (name === q) return 1.0;
+  if (q.length >= 3 && ` ${name} `.includes(` ${q} `)) return 0.9;      // stored contains query as whole words
+  if (name.length >= 3 && ` ${q} `.includes(` ${name} `)) return 0.9;  // query contains stored as whole words
+  if (name.split(/\s+/)[0] === q.split(/\s+/)[0] && q.length > 2) return 0.8;
+  const d = levenshtein(q, name), rel = d / Math.max(q.length, name.length);
+  if (d <= 2) return 0.7;
+  if (rel <= 0.4) return 0.55;
+  return Math.max(0, 1 - rel);
 }
 
 /** Order-independent token-bag similarity. Weighted toward covering the QUERY (the sheet name we're
@@ -178,7 +193,9 @@ export function scorePayeeRich(q: string, cand: { name: string; type?: string | 
   if (!qName.length) qName = qAll;                    // the sheet gave ONLY a role word — use it as the name
 
   const cl = cand.name.toLowerCase();
-  let score = Math.max(nameTokenScore(qName, tokenize(cl)), scorePayeeName(query, cl));
+  // Floor with a BOUNDARY-AWARE whole-name check, not scorePayeeName's raw substring — the latter scored
+  // "Siva" a 0.9 match for "Darlanka Sivaramu" (siva sits inside sivaramu). The token bag carries the rest.
+  let score = Math.max(nameTokenScore(qName, tokenize(cl)), wholeNameFloor(query, cl));
 
   if (qRoles.length) {
     const v = roleVerdict(qRoles, cand);

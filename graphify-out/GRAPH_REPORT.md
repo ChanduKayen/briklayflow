@@ -1,11 +1,11 @@
 # Graph Report - Briklay Fly  (2026-09-16)
 
 ## Corpus Check
-- 838 files · ~1,510,784 words
+- 838 files · ~1,511,087 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 3662 nodes · 5789 edges · 85 communities detected
+- 3662 nodes · 5791 edges · 85 communities detected
 - Extraction: 85% EXTRACTED · 15% INFERRED · 0% AMBIGUOUS · INFERRED: 884 edges (avg confidence: 0.8)
 - Token cost: 0 input · 0 output
 
@@ -113,8 +113,8 @@
   src\components\attendance\AttendanceMobile.tsx → src\lib\attendanceApi.ts
 - `VendorHub()` --calls--> `useOrgId()`  [INFERRED]
   src\components\txn-ledger\VendorHub.tsx → src\lib\auth\AuthProvider.tsx
-- `readParty()` --calls--> `loadWorkerWageEntries()`  [INFERRED]
-  src\lib\ledgerRead.ts → src\lib\partyLedgerApi.ts
+- `bookConsolidatedBill()` --calls--> `save()`  [INFERRED]
+  src\lib\partyLedgerApi.ts → src\pages\StakeholderDetail.tsx
 - `buildChase()` --calls--> `nameOf()`  [INFERRED]
   src\lib\desk\fromDb.ts → supabase\functions\siteops-notify-assignment\index.ts
 - `cadenceFor()` --calls--> `loadCadenceMap()`  [INFERRED]
@@ -139,44 +139,44 @@ Cohesion: 0.02
 Nodes (128): bindingKey(), graphIsMaterialized(), materializeProjectTasksUncached(), placeOfTask(), gatesByTask(), gatesFromBinding(), safeGeometry(), safeInstantiate() (+120 more)
 
 ### Community 4 - "Community 4"
-Cohesion: 0.02
-Nodes (73): confirm(), commit(), createVendor(), createParty(), autoSettleCrewWages(), cardKeyToCols(), cellFrom(), commitCrewSettlement() (+65 more)
-
-### Community 5 - "Community 5"
 Cohesion: 0.04
 Nodes (82): isStopWord(), addCustomBrand(), brandsFor(), getCustomBrands(), LS_KEY(), buildConflictPills(), buildNovelVariantPills(), buildPills() (+74 more)
 
-### Community 6 - "Community 6"
+### Community 5 - "Community 5"
 Cohesion: 0.04
 Nodes (97): answerBillPayment(), attachBillDoc(), billAi(), billRawText(), billReplyKind(), findPrecedingCaption(), fmtNum(), isCleanAmount() (+89 more)
 
-### Community 7 - "Community 7"
+### Community 6 - "Community 6"
 Cohesion: 0.03
 Nodes (68): wa(), buildComponents(), buildTemplateMessage(), sendTemplate(), line(), promptFor(), withTask(), cadenceFor() (+60 more)
+
+### Community 7 - "Community 7"
+Cohesion: 0.03
+Nodes (59): confirm(), commit(), autoSettleCrewWages(), cardKeyToCols(), cellFrom(), commitCrewSettlement(), crewPhases(), iso() (+51 more)
 
 ### Community 8 - "Community 8"
 Cohesion: 0.03
 Nodes (44): call(), issue(), prog(), seed(), task(), src(), stripComments(), classifyWithLLM() (+36 more)
 
 ### Community 9 - "Community 9"
-Cohesion: 0.04
-Nodes (60): guessVendor(), low(), save(), whatsMissing(), autoSplit(), blank(), doCreate(), evenAmounts() (+52 more)
+Cohesion: 0.03
+Nodes (65): intakeCommit(), intakeExtract(), intakeResolveVendor(), runIntake(), linkParts(), rankLoosePayments(), convertLegacyPoBill(), extractBill() (+57 more)
 
 ### Community 10 - "Community 10"
+Cohesion: 0.04
+Nodes (62): createVendor(), guessVendor(), low(), save(), whatsMissing(), autoSplit(), blank(), doCreate() (+54 more)
+
+### Community 11 - "Community 11"
 Cohesion: 0.05
 Nodes (78): clean(), dayBookLink(), entryLink(), partyLedgerLink(), problemLink(), reviewLink(), taskLink(), tasksLink() (+70 more)
 
-### Community 11 - "Community 11"
-Cohesion: 0.04
-Nodes (56): intakeCommit(), intakeExtract(), intakeResolveVendor(), runIntake(), linkParts(), rankLoosePayments(), convertLegacyPoBill(), extractBill() (+48 more)
-
 ### Community 12 - "Community 12"
-Cohesion: 0.03
-Nodes (30): parseAmount(), inr(), rupees(), Thumb(), commitEdit(), deleteBill(), unlinkBillFromPO(), openDoc() (+22 more)
+Cohesion: 0.04
+Nodes (60): createBill(), loadUnpaidBillsForVendor(), allocIdOf(), assertLinkable(), attachToContract(), createContract(), fallbackTitle(), fileAsLabour() (+52 more)
 
 ### Community 13 - "Community 13"
-Cohesion: 0.05
-Nodes (57): createBill(), allocIdOf(), assertLinkable(), attachToContract(), createContract(), fallbackTitle(), fileAsLabour(), generateContractTitle() (+49 more)
+Cohesion: 0.03
+Nodes (30): parseAmount(), inr(), rupees(), Thumb(), commitEdit(), deleteBill(), unlinkBillFromPO(), openDoc() (+22 more)
 
 ### Community 14 - "Community 14"
 Cohesion: 0.04
@@ -251,7 +251,7 @@ Cohesion: 0.14
 Nodes (20): buildClassifierPrompt(), clamp01(), classifyUserTask(), dedupe(), gatewayAnchor(), introducesCycle(), resolveFreedomSet(), sanitizeScope() (+12 more)
 
 ### Community 32 - "Community 32"
-Cohesion: 0.15
+Cohesion: 0.16
 Nodes (18): bandedMatch(), canonRole(), isKnownTrade(), levenshtein(), matchPayee(), nameTokenScore(), rankPayeeName(), roleVerdict() (+10 more)
 
 ### Community 33 - "Community 33"
@@ -515,11 +515,11 @@ Nodes (2): placeOf(), stageOfFloorless()
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `parseAmount()` connect `Community 12` to `Community 6`, `Community 23`?**
+- **Why does `parseAmount()` connect `Community 13` to `Community 5`, `Community 23`?**
   _High betweenness centrality (0.117) - this node is a cross-community bridge._
-- **Why does `NewInvoice()` connect `Community 23` to `Community 25`, `Community 12`, `Community 4`?**
+- **Why does `NewInvoice()` connect `Community 23` to `Community 25`, `Community 13`, `Community 7`?**
   _High betweenness centrality (0.100) - this node is a cross-community bridge._
-- **Why does `show()` connect `Community 2` to `Community 12`?**
+- **Why does `show()` connect `Community 2` to `Community 13`?**
   _High betweenness centrality (0.089) - this node is a cross-community bridge._
 - **Are the 43 inferred relationships involving `send()` (e.g. with `processJob()` and `resurfacePending()`) actually correct?**
   _`send()` has 43 INFERRED edges - model-reasoned connections that need verification._
