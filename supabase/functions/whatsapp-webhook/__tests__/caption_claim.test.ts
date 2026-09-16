@@ -38,6 +38,13 @@ suite('caption claim — recentInboundText (the payment pulls the caption)', () 
   test('no inbound text → null', async () => {
     expect(await recentInboundText(fakeSb([]), '91999', null)).toBe(null)
   })
+  test('skips the image row (its OCR is not a typed caption) and returns the real text', async () => {
+    const rows = [
+      { direction: 'IN', message_type: 'image', content: 'Cheque for 3,00,000 payable to ...', created_at: '2026-09-16T10:10:12Z', wa_message_id: 'img' },
+      { direction: 'IN', message_type: 'text', content: 'Chakradhar site', created_at: '2026-09-16T10:10:05Z', wa_message_id: 'w1' },
+    ]
+    expect(await recentInboundText(fakeSb(rows), '91999', null)).toBe('Chakradhar site')
+  })
 })
 
 suite('caption claim — recentInboundImage (a lone miss is suppressed when an image owns the caption)', () => {

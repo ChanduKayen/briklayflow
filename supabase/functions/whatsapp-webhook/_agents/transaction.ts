@@ -143,14 +143,15 @@ export async function recentInboundText(
   try {
     const since = new Date(Date.now() - windowMs).toISOString()
     const { data } = await supabase.from('wa_message_log')
-      .select('direction, content, created_at, wa_message_id')
+      .select('direction, content, message_type, created_at, wa_message_id')
       .eq('phone_number', phone).gte('created_at', since)
       .order('created_at', { ascending: false }).limit(8)
-    for (const r of (data ?? []) as { direction: string; content: string | null; wa_message_id: string | null }[]) {
+    for (const r of (data ?? []) as { direction: string; content: string | null; message_type: string | null; wa_message_id: string | null }[]) {
       if (r.direction === 'OUT') continue                       // our own replies are not a caption
       if (excludeWamid && r.wa_message_id === excludeWamid) continue
+      if (r.message_type && r.message_type !== 'text') continue // ONLY a typed text — never the image's own OCR row
       const t = (r.content ?? '').trim()
-      if (t) return t                                            // the most recent thing the sender typed
+      if (t) return t                                            // the most recent thing the sender TYPED
     }
   } catch (e) { console.error('[txn] recentInboundText failed (degraded):', (e as Error)?.message ?? e) }
   return null
@@ -425,21 +426,24 @@ export async function runTransaction(
   const projectNames = projects.map((p) => p.name)
   // A payment image -> one strong vision call (skip the describe->re-parse hop); plain
   // text/voice -> the text extractor. Both honor the SAME contract + reconcileAmount.
-  // The image CLAIMS a nearby text as its caption: if it carried none of its own, use the sender's most
-  // recent text (sent just before/after the photo) — so "cheque + 'Chakradhar site'" is ONE thing, content
-  // no matter. Fed to the extractor as the caption, and used to GROUND the project below.
+  // The image's OWN caption/OCR is read by vision (never used as a site — a cheque's printed line is not a
+  // project). Extract first.
   const attachedCaption = (ctx.image?.caption ?? '').trim()
-  // A caption sent BEFORE the photo is already logged — feed it to the vision extractor for content.
-  let claimedCaption = attachedCaption || (ctx.image ? (await recentInboundText(supabase, from, opts.keyWamid ?? null)) ?? '' : '')
   const ext = opts.preExtract ?? (ctx.image
-    ? await extractTransactionFromImage(ctx.image.base64, ctx.image.mime, claimedCaption, projectNames, stakeholders.map((s) => s.name))
+    ? await extractTransactionFromImage(ctx.image.base64, ctx.image.mime, attachedCaption, projectNames, stakeholders.map((s) => s.name))
     : await extractTransaction(text, projectNames))
 
-  // A caption typed just AFTER the photo arrives DURING the slow vision call, so it wasn't logged when we
-  // first looked. Re-check now (post-vision) and adopt it as the site if the cheque named none — this is the
-  // usual order (photo, then "<site> site") and is why the site was being lost.
-  if (ctx.image && !claimedCaption) claimedCaption = (await recentInboundText(supabase, from, opts.keyWamid ?? null)) ?? ''
-  if (ctx.image && !ext.project && claimedCaption) ext.project = claimedCaption
+  // Claim a SEPARATE nearby text ("Chakradhar site") as the SITE — but ONLY if it actually resolves to a real
+  // project. A description, or the cheque's own words, must never become a site. Re-checked here (post-vision)
+  // so a site typed during the slow read is caught; grounded via siteCaption so buildPlan keeps it.
+  let siteCaption = ''
+  if (ctx.image && !ext.project) {
+    const nearby = await recentInboundText(supabase, from, opts.keyWamid ?? null)
+    if (nearby) {
+      const pm = matchProject(nearby, projects)
+      if (pm.band !== 'open' && pm.name) { ext.project = pm.name; siteCaption = nearby }
+    }
+  }
 
   // Lingering reference resolution stays -- a silent READ, never a question.
   if (!ext.payee && ext.ref && opts.lingering) {
@@ -462,7 +466,7 @@ export async function runTransaction(
 
   // Ground the project on the message OR the claimed caption, so a site the image pulled from a separate
   // "<site> site" text isn't dropped by the grounding guard for being absent from the (empty) image text.
-  const groundText = (text && text.trim()) ? text : (claimedCaption || text)
+  const groundText = [text, siteCaption].filter((s) => s && s.trim()).join(' ') || text
   const plan = buildPlan(ext, stakeholders, projects, from, groundText, lingeringProjectHint(opts.lingering ?? null, projects))
 
   // TRACE 4/4 -- the deterministic PLAN: matched payee, gate, what gets committed.
