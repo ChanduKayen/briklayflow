@@ -15,7 +15,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { RoughEntry } from '../../types';
 import { fileRoughEntry, fileRoughEntrySplit, rejectRoughEntry, createParty, errMessage, type ProjectSplit } from './fileEntry';
 import { resolveEntry, type ProjectLite, type StakeholderLite } from './resolveEntry';
-import { BillReviewCard } from './BillReviewCard';
+import { BillRowCard } from './BillRowCard';
 import { NatureChip, natureOf } from './atoms';
 import DragSheet from '../DragSheet';
 import { loadWallets, walletForSender, type WalletBalance } from '../../lib/walletApi';
@@ -755,12 +755,12 @@ export default function ReviewMobile(p: ReviewMobileProps) {
           {live.map(e => (
             e.ai_extracted?.kind === 'BILL' ? (
               // A captured bill is NOT a payment card — it files into `bills` (never a ₹0 transaction).
-              // Reuse the self-contained bill card so mobile is correct without a second bill UI.
+              // BillRowCard renders it in this deck's own language (`.rvm rcard`) so a bill reads and
+              // behaves exactly like a payment card here; the write path (fileBill) is unchanged.
               <div className="cw" key={e.id} ref={el => { wraps.current[e.id] = el; }}>
-                <BillReviewCard
+                <BillRowCard
                   entry={e}
                   orgId={p.orgId}
-                  canManage
                   stakeholders={p.stakeholders}
                   projects={projects}
                   onFiled={() => { leave(e.id, 'file'); p.onChanged(); }}
