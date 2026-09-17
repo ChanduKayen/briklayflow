@@ -17,13 +17,19 @@ body{background:var(--paper);color:var(--ink);font-family:'Bricolage Grotesque',
 a{color:inherit}button{font-family:inherit}p{text-wrap:pretty}
 [hidden]{display:none!important}
 
-nav{padding:26px 22px 0;display:flex;justify-content:center}
+nav{padding:26px 22px 0;display:flex;justify-content:center;position:relative}
+.close{position:absolute;right:14px;top:20px;width:42px;height:42px;display:grid;place-items:center;border-radius:50%;color:var(--mute);text-decoration:none;transition:background .2s,color .2s}
+.close svg{width:20px;height:20px}
+.close:hover,.close:focus-visible{color:var(--ink);background:rgba(18,38,31,.06)}
 .brand{display:inline-flex;align-items:center;gap:9px;text-decoration:none}
 .brand b{font-weight:700;font-size:1.35rem;letter-spacing:-.03em;line-height:1}
 .brand .dot{color:var(--red);display:inline-block}
 
-main{flex:1;display:grid;place-items:center;padding:24px 22px 60px}
-.stage{width:100%;max-width:520px;text-align:center}
+/* The single column is capped at the viewport (min(100%,520px)) so a child's max-width
+   (e.g. the 420px button) can never push the track past the screen — that was the mobile
+   horizontal overflow. */
+main{flex:1;display:grid;grid-template-columns:min(100%,520px);justify-content:center;align-content:center;padding:24px 22px 60px}
+.stage{width:100%;text-align:center}
 .step{display:none}
 .step.on{display:block;animation:stepin .4s cubic-bezier(.2,.8,.3,1) both}
 .step.back{animation-name:stepback}
@@ -119,7 +125,7 @@ a:focus-visible,button:focus-visible{outline:2.5px solid var(--red);outline-offs
 /* ---------- mobile: tighter rhythm, the alt sign-ins stack, no overflow ---------- */
 @media(max-width:560px){
   nav{padding:20px 18px 0}
-  main{padding:18px 18px 40px;place-items:start center}
+  main{padding:14px 18px 40px;align-content:start}
   h1{font-size:clamp(1.6rem,7.4vw,2.05rem)}
   .hint{font-size:.96rem;margin-top:10px}
   .field{margin:30px auto 0}
@@ -142,6 +148,9 @@ a:focus-visible,button:focus-visible{outline:2.5px solid var(--red);outline-offs
 <nav>
   <a class="brand" target="_top" href="/" aria-label="Briklay home">
     <b>Briklay<span class="dot">.</span></b>
+  </a>
+  <a class="close" target="_top" href="/" aria-label="Close, back to home">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
   </a>
 </nav>
 <main>
