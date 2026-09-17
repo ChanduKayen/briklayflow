@@ -9,7 +9,7 @@
  */
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Check, X } from 'lucide-react';
+import { Check, X, Pencil } from 'lucide-react';
 import type { RoughEntry } from '../../types';
 import type { StakeholderLite, ProjectLite } from './ReviewCard';
 import { V, font, nums, display, mono } from './tokens';
@@ -73,6 +73,9 @@ export function BillReviewCard({
   const fromWallet = billFunding === 'wallet' ? true : billFunding === 'bank' ? false : !!(senderWallet && senderWallet.balance > 0);
   const [msgOpen, setMsgOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);   // lift the card above its neighbours while a list is open
+  // Read-first, like the payment card: the voucher shows the fact; the editor (the fields below) opens
+  // only on Edit, or when Approve finds a blank.
+  const [editing, setEditing] = useState(false);
 
   const vendorItems = useMemo<PickerItem[]>(() => {
     const mk = (s: StakeholderLite): PickerItem => ({ id: s.stakeholder_id, name: s.name, tag: s.type });
@@ -118,6 +121,14 @@ export function BillReviewCard({
     finally { setBusy(false); }
   }
 
+  // Approve: files when the voucher is complete; otherwise reveals the editor and says what's missing
+  // (the same read → approve → fill-the-blanks the payment card uses).
+  const onPrimary = () => {
+    if (canSave) { void save(); return; }
+    setEditing(true);
+    onError(whatsMissing());
+  };
+
   // ── archived: a compact, muted strip (mirrors ReviewCard's filed row) ──
   if (archived) {
     const done = entry.status === 'POSTED';
@@ -141,6 +152,11 @@ export function BillReviewCard({
         <NatureChip label={effectivePaid ? 'Bill · Paid' : 'Bill'} tone="terra" />
         {ai.bill_no && <span style={{ ...mono, fontSize: 10.5, color: V.faint, letterSpacing: '.04em' }}>Nº {ai.bill_no}</span>}
         <span className="flex-1" />
+        {canManage && !editing && (
+          <button type="button" onClick={() => setEditing(true)} style={{ ...font, fontSize: 12, fontWeight: 600, color: V.sys, background: 'none', border: `1px solid ${V.line}`, borderRadius: 999, padding: '4px 10px', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+            <Pencil size={11} /> Edit
+          </button>
+        )}
         <WhatsAppGlyph />
       </div>
 
@@ -156,6 +172,11 @@ export function BillReviewCard({
               ? <span style={{ ...font, fontSize: 12.5, color: V.sage, fontWeight: 600, marginLeft: 8 }}>· {'₹' + inr(effectivePaid)} paid</span>
               : <span style={{ ...font, fontSize: 12.5, color: V.faint, fontWeight: 500, marginLeft: 8 }}>· for record</span>}
           </div>
+          {!editing && (
+            <div style={{ ...font, fontSize: 12.5, marginTop: 5, color: projectId ? V.sys : V.terra, fontWeight: projectId ? 500 : 600 }}>
+              {projectId ? `Site · ${projectName || projMatch?.name || ''}` : 'Site not set'}
+            </div>
+          )}
           {lines.length > 0 && (
             <div style={{ ...font, fontSize: 12, color: V.faint, marginTop: 5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
               {lines.slice(0, 3).map((l) => l?.name).filter(Boolean).join(', ')}{lines.length > 3 ? ` +${lines.length - 3} more` : ''}
@@ -177,6 +198,7 @@ export function BillReviewCard({
         )}
       </div>
 
+      {editing && (<>
       {/* THE FIELDS — vendor + site are both required; the total is editable. */}
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 10, marginTop: 14 }}>
         <div style={{ ...fieldLabel, minWidth: 0 }}>
@@ -235,17 +257,23 @@ export function BillReviewCard({
           </div>
         )}
       </div>
+      </>)}
 
-      {/* THE ACTION — states exactly what Save does */}
+      {/* THE ACTION — Save files when complete; otherwise it opens the editor at the blank. */}
       {canManage && (
         <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
-          <button onClick={save} disabled={!canSave} style={{
-            flex: 1, ...font, fontSize: 14, fontWeight: 700, color: '#fff', background: canSave ? V.terra : V.line,
-            border: 'none', borderRadius: 10, padding: '11px 12px', cursor: canSave ? 'pointer' : 'default',
+          <button onClick={onPrimary} style={{
+            flex: 1, ...font, fontSize: 14, fontWeight: 700, color: '#fff', background: V.terra,
+            border: 'none', borderRadius: 10, padding: '11px 12px', cursor: 'pointer',
             display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
           }}>
             <Check size={16} /> {busy ? 'Saving…' : saveLabel}
           </button>
+          {!editing && (
+            <button onClick={() => setEditing(true)} title="Edit the details" style={{ ...font, fontSize: 13, color: V.sys, background: 'none', border: `1px solid ${V.line}`, borderRadius: 10, padding: '0 12px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Pencil size={14} /> Edit
+            </button>
+          )}
           <button onClick={onDismiss} title="Not a bill" style={{ ...font, fontSize: 13, color: V.faint, background: 'none', border: `1px solid ${V.line}`, borderRadius: 10, padding: '0 12px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
             <X size={15} /> Not a bill
           </button>
