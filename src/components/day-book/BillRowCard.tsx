@@ -35,7 +35,7 @@ function guessVendor(name: string | null | undefined, stakeholders: StakeholderL
 }
 
 export function BillRowCard({
-  entry, orgId, stakeholders, projects, onFiled, onDismiss, onLightbox, onError, onVendorCreated,
+  entry, orgId, stakeholders, projects, onFiled, onDismiss, onError, onVendorCreated,
 }: {
   entry: RoughEntry;
   orgId: string;
@@ -69,6 +69,9 @@ export function BillRowCard({
   const [ddq, setDdq] = useState('');
   const [flash, setFlash] = useState<null | 'vendor' | 'site'>(null);
   const [msgOpen, setMsgOpen] = useState(false);
+  const [lightbox, setLightbox] = useState<string | null>(null);   // the bill doc, full-screen
+  const isPdf = !!docUrl && /\.pdf(\?|$)/i.test(docUrl);
+  const openDoc = () => { if (!docUrl) return; if (isPdf) window.open(docUrl, '_blank', 'noopener'); else setLightbox(docUrl); };
   const cardRef = useRef<HTMLDivElement>(null);
   const ddRef = useRef<HTMLInputElement>(null);
 
@@ -143,12 +146,21 @@ export function BillRowCard({
       <div className="top">
         <NatureChip label={effectivePaid ? 'Bill · Paid' : 'Bill'} tone="terra" />
         <div className="f">{via} · {sentTime}{ai.bill_no ? ` · Nº ${ai.bill_no}` : ''}</div>
-        {docUrl && (
-          <button type="button" className="editpill" onClick={() => onLightbox(docUrl)}>Bill</button>
-        )}
       </div>
 
-      <div className="amt">{total > 0 ? `₹${inr(total)}` : <span style={{ fontSize: 17, fontWeight: 600, color: 'var(--ink-3)' }}>Enter the amount below</span>}</div>
+      {/* the figure and, beside it, the bill itself — evidence in reach without crowding the fact */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+        <div className="amt" style={{ flex: 1, minWidth: 0 }}>{total > 0 ? `₹${inr(total)}` : <span style={{ fontSize: 17, fontWeight: 600, color: 'var(--ink-3)' }}>Enter the amount below</span>}</div>
+        {docUrl && (
+          <button type="button" onClick={openDoc} title="View the bill"
+            style={{ width: 62, height: 62, borderRadius: 12, overflow: 'hidden', flexShrink: 0, padding: 0, cursor: 'pointer', border: '1px solid var(--hair)', background: 'rgba(27,23,19,.04)', position: 'relative' }}>
+            {isPdf
+              ? <span style={{ display: 'grid', placeItems: 'center', width: '100%', height: '100%', fontSize: 11, fontWeight: 700, color: 'var(--ink-2)' }}>PDF</span>
+              : <img src={docUrl} alt="Bill" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />}
+            <span style={{ position: 'absolute', bottom: 3, right: 3, background: 'rgba(20,16,12,.62)', color: '#fff', fontSize: 8.5, fontWeight: 700, letterSpacing: '.04em', padding: '2px 4px', borderRadius: 5 }}>BILL</span>
+          </button>
+        )}
+      </div>
 
       <div className="kvs">
         {/* Vendor */}
@@ -247,6 +259,15 @@ export function BillRowCard({
         <button type="button" className="cta" disabled={busy} onClick={() => void save()}>{saveLabel}</button>
         <button type="button" className="splitbtn" onClick={onDismiss} aria-label="Not a bill">Not a bill</button>
       </div>
+
+      {lightbox && (
+        <div onClick={() => setLightbox(null)} role="dialog" aria-label="Bill"
+          style={{ position: 'fixed', inset: 0, zIndex: 100000, background: 'rgba(12,9,6,.92)', display: 'grid', placeItems: 'center', padding: 18 }}>
+          <img src={lightbox} alt="Bill" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain', borderRadius: 8 }} />
+          <button type="button" onClick={() => setLightbox(null)} aria-label="Close"
+            style={{ position: 'fixed', top: 'calc(14px + env(safe-area-inset-top))', right: 16, width: 42, height: 42, borderRadius: '50%', border: 0, background: 'rgba(255,255,255,.16)', color: '#fff', fontSize: 20, cursor: 'pointer' }}>✕</button>
+        </div>
+      )}
     </div>
   );
 }
