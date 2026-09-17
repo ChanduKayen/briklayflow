@@ -117,9 +117,9 @@ nav.scrolled{background:rgba(247,246,241,.88);backdrop-filter:blur(14px);box-sha
 .hero-copy{padding-left:22px}
 @media(min-width:900px){.hero-copy{padding-left:64px}}
 .hero h1{
-  font-size:clamp(2.45rem,9.4vw,4.15rem);
+  font-size:clamp(2rem,8.5vw,4.15rem);
   font-variation-settings:'wdth' 88;
-  margin:0;line-height:.98;
+  margin:0;line-height:1;
 }
 .hero h1 .plus{color:var(--red);font-weight:500}
 @media(min-width:900px){.hero h1 .hang{margin-left:-.62em}}
@@ -408,7 +408,9 @@ section.sheet{background:var(--sheet)}
 .closing .btn{--fill:#fff;--ink-on:var(--ink);--lift:var(--wa);--hover-fill:var(--wa);--hover-ink:#fff}
 
 footer{border-top:1px solid var(--rule);background:var(--paper);color:var(--mute)}
-.foot{padding:60px 0 40px}
+/* vertical only — must NOT reset the horizontal gutter that .wrap provides (padding:0 22px),
+   or the whole footer goes flush to the edge and the logo jams the margin */
+.foot{padding-top:60px;padding-bottom:40px}
 @media(max-width:760px){.foot{padding-bottom:110px}} /* clear the sticky mobile CTA */
 .foot-top{display:grid;grid-template-columns:1fr;gap:36px}
 @media(min-width:761px){.foot-top{grid-template-columns:minmax(0,1.4fr) minmax(0,2fr);gap:56px}}
@@ -421,7 +423,7 @@ footer{border-top:1px solid var(--rule);background:var(--paper);color:var(--mute
 .foot-cols{display:grid;grid-template-columns:repeat(2,1fr);gap:30px 24px}
 @media(min-width:560px){.foot-cols{grid-template-columns:repeat(3,1fr)}}
 .foot-col h4{font-size:.74rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--ink);margin-bottom:12px}
-.foot-col a{display:block;color:var(--mute);text-decoration:none;font-size:.95rem;padding:5px 0;cursor:pointer;transition:color .18s,transform .18s}
+.foot-col a{display:block;color:var(--mute);text-decoration:none;font-size:.95rem;padding:7px 0;cursor:pointer;transition:color .18s,transform .18s}
 .foot-col a:hover{color:var(--ink)}
 .foot-bar{display:flex;flex-direction:column;gap:12px;align-items:flex-start;margin-top:44px;padding-top:22px;border-top:1px solid var(--rule);font-size:.85rem;color:var(--mute)}
 @media(min-width:640px){.foot-bar{flex-direction:row;justify-content:space-between;align-items:center}}
@@ -448,11 +450,16 @@ a:focus-visible,button:focus-visible{outline:2.5px solid var(--red);outline-offs
 @media(max-width:640px){
   section{padding:56px 0}
   .hero{padding:88px 0 0}
-  .hero-grid{gap:30px}
-  .hero-copy{padding-left:20px}
+  .hero::before{left:12px}  /* pull the margin rule off the nav logo so "Briklay." doesn't sit on the line */
+  .hero-grid{gap:40px}
+  .hero-copy{padding-left:20px;padding-right:14px} /* keep the big type off the right edge */
   .hero-phone{padding-left:0}
   .hero .sub{margin-top:18px;font-size:1.05rem}
   .hero .cta-zone{margin-top:26px}
+  /* the WhatsApp mock is a fixed 400px block — let it breathe with the viewport so the
+     demo stops eating a whole screen right under the headline */
+  .chat{height:clamp(300px,52vh,400px)}
+  .entry dl{gap:4px 10px}
   .btn{min-height:52px;font-size:1rem}
   .phone-cap{margin-top:12px}
   .demo-tabs{width:100%;justify-content:stretch}
@@ -471,8 +478,22 @@ a:focus-visible,button:focus-visible{outline:2.5px solid var(--red);outline-offs
   .closing{padding:72px 0 84px}
   .closing .wrap{padding-left:34px}
   .closing p{margin:16px 0 26px}
-  .foot{padding:48px 0 108px}
-  .foot-top{gap:30px}
+  .foot{padding-top:52px;padding-bottom:108px} /* vertical only — keep .wrap's 22px gutter */
+  .foot-top{gap:40px}
+  .foot-cols{gap:34px 20px}
+  .foot-wa{margin-top:20px}
+  .foot-bar{margin-top:40px;padding-top:28px;gap:16px} /* off the divider line */
+  /* the sticky "See it on my site" bar (~66px) is fixed over the fold — leave room so the
+     demo's Approve rows and the pricing card can clear it */
+  #demo,#pricing{padding-bottom:82px}
+}
+
+/* narrow phones: Legal was orphaned in an empty right cell — make it a full-width band with
+   inline links so the footer reads as one composed block, not jammed into the bottom-left */
+@media(max-width:559px){
+  .foot-col:nth-child(3){grid-column:1 / -1;margin-top:6px;padding-top:22px;border-top:1px solid var(--rule)}
+  .foot-col:nth-child(3) h4{margin-bottom:10px}
+  .foot-col:nth-child(3) a{display:inline-block;margin-right:26px;padding:4px 0}
 }
 
 @media(prefers-reduced-motion:reduce){
