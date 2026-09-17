@@ -20,12 +20,12 @@ import { supabase } from '../lib/supabase';
 import { safeRedirect } from '../lib/auth/routes';
 import loginHtml from './loginV1.html?raw';
 
-type Reply = { id: number; ok: boolean; error?: string; kind?: 'exists' | 'unconfirmed' };
+type Reply = { id: number; ok: boolean; error?: string; kind?: 'exists' | 'unconfirmed' | 'nouser' };
 type Req = {
   type?: string;
   id?: number;
   action?: string;
-  payload?: { phone?: string; token?: string; email?: string; password?: string; name?: string; firm?: string; mode?: string };
+  payload?: { phone?: string; token?: string; email?: string; password?: string; name?: string; firm?: string; mode?: string; resend?: boolean };
 };
 
 // Normalize to E.164 (mirrors AuthPanel.toE164). India default: bare 10 digits → +91XXXXXXXXXX.
@@ -72,25 +72,58 @@ export default function LoginRegister() {
       if (!d || d.type !== 'brik-auth-req') return;
       const source = e.source as Window | null;
       const reply = (r: Omit<Reply, 'id'>) => source?.postMessage({ type: 'brik-auth-res', id: d.id, ...r }, '*');
+      // Fire the "dot becomes a door" celebration (SignInCelebration, mounted above the auth
+      // tree) the instant a sign-in succeeds — dispatched before the session flip unmounts us.
+      const celebrate = (mode: 'login' | 'signup', name?: string) =>
+        window.dispatchEvent(new CustomEvent('brik-celebrate', { detail: { mode, name } }));
       const p = d.payload ?? {};
 
       try {
         switch (d.action) {
           case 'send-otp': {
-            // shouldCreateUser default true → one flow for signup + signin. Name/firm ride on creation.
-            const meta = p.mode === 'signup' && (p.name || p.firm)
-              ? { full_name: p.name || undefined, firm_name: p.firm || undefined }
-              : undefined;
-            const { error } = await supabase.auth.signInWithOtp({
-              phone: toE164(p.phone ?? ''),
-              options: { shouldCreateUser: true, data: meta },
-            });
-            reply({ ok: !error, error: error?.message });
+            const phone = toE164(p.phone ?? '');
+            // A resend (the user already exists at this point) — just re-send, no existence gate.
+            if (p.resend) {
+              const { error } = await supabase.auth.signInWithOtp({ phone, options: { shouldCreateUser: false } });
+              reply({ ok: !error, error: error?.message });
+              break;
+            }
+            if (p.mode === 'signup') {
+              // SIGN-UP is for NEW numbers only. Probe with shouldCreateUser:false: no error means the
+              // number already has an account → block (send them to log in). An error means it does not
+              // exist → create it and send the code.
+              const probe = await supabase.auth.signInWithOtp({ phone, options: { shouldCreateUser: false } });
+              if (!probe.error) { reply({ ok: false, kind: 'exists' }); break; }
+              const { error } = await supabase.auth.signInWithOtp({ phone, options: { shouldCreateUser: true } });
+              reply({ ok: !error, error: error?.message });
+              break;
+            }
+            // LOG-IN is for EXISTING numbers only — never silently create one.
+            const { error } = await supabase.auth.signInWithOtp({ phone, options: { shouldCreateUser: false } });
+            if (error) {
+              if (/not found|no user|signups?\s*not\s*allowed|otp.?disabled|user.*not.*exist/i.test(error.message)) reply({ ok: false, kind: 'nouser' });
+              else reply({ ok: false, error: error.message });
+              break;
+            }
+            reply({ ok: true });
             break;
           }
           case 'verify-otp': {
+            // LOGIN: verify creates the session → the app's auth listener opens it.
             const { error } = await supabase.auth.verifyOtp({ phone: toE164(p.phone ?? ''), token: p.token ?? '', type: 'sms' });
             if (error) { reply({ ok: false, error: error.message }); break; }
+            celebrate('login');
+            reply({ ok: true });
+            if (redirectTo) navigate(redirectTo, { replace: true });
+            break;
+          }
+          case 'verify-signup': {
+            // SIGNUP: verify the code AND set the name together, so the account is born named
+            // (a phone user has no email fallback — without this the profile name is the raw digits).
+            const { error } = await supabase.auth.verifyOtp({ phone: toE164(p.phone ?? ''), token: p.token ?? '', type: 'sms' });
+            if (error) { reply({ ok: false, error: error.message }); break; }
+            if (p.name) await supabase.auth.updateUser({ data: { full_name: p.name } });
+            celebrate('signup', p.name);
             reply({ ok: true });
             if (redirectTo) navigate(redirectTo, { replace: true });
             break;
@@ -103,6 +136,7 @@ export default function LoginRegister() {
               else reply({ ok: false, error: error.message });
               break;
             }
+            celebrate('login');
             reply({ ok: true });
             if (redirectTo) navigate(redirectTo, { replace: true });
             break;
@@ -111,7 +145,7 @@ export default function LoginRegister() {
             const { data, error } = await supabase.auth.signUp({
               email: p.email ?? '',
               password: p.password ?? '',
-              options: { data: { full_name: p.name, firm_name: p.firm || undefined }, emailRedirectTo: `${origin}/welcome` },
+              options: { data: { full_name: p.name }, emailRedirectTo: `${origin}/welcome` },
             });
             if (error) reply({ ok: false, error: error.message });
             // Supabase returns an empty identities array for an already-confirmed account.

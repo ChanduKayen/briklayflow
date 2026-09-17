@@ -7,6 +7,7 @@ import { queryClient, persister, shouldPersistQuery } from './lib/queryClient';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import App from './App.tsx';
 import BootLoader from './components/brand/BootLoader';
+import SignInCelebration from './components/SignInCelebration';
 import './index.css';
 
 // A new deploy changes every lazy chunk's content hash, and Vercel serves only the LATEST build's
@@ -29,6 +30,9 @@ createRoot(document.getElementById('root')!).render(
     {/* Above everything, and outside every provider: the opening has to be able to survive the
         moment the app is ready, and to show up before any of this has finished mounting. */}
     <BootLoader />
+    {/* The "red dot becomes a door" sign-in moment. Above the auth tree so it survives the
+        session flip that unmounts the login screen; plays over the app's first resolve. */}
+    <SignInCelebration />
     <ErrorBoundary>
     <PersistQueryClientProvider
       client={queryClient}
