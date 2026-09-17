@@ -144,7 +144,7 @@ export function BillReviewCard({
         <WhatsAppGlyph />
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: docUrl ? '1fr 84px' : '1fr', gap: 14 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: docUrl ? 'minmax(0,1fr) 84px' : 'minmax(0,1fr)', gap: 14 }}>
         <div className="min-w-0">
           {/* THE FACT — vendor as the headline, the figure in the ledger's display voice */}
           <div style={{ ...display, fontSize: 19, fontWeight: 600, color: V.ink, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -178,8 +178,8 @@ export function BillReviewCard({
       </div>
 
       {/* THE FIELDS — vendor + site are both required; the total is editable. */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 14 }}>
-        <div style={fieldLabel}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 10, marginTop: 14 }}>
+        <div style={{ ...fieldLabel, minWidth: 0 }}>
           Vendor{!vendorId && <span style={{ color: V.terra }}> · needed</span>}
           <SearchPicker
             items={vendorItems}
@@ -192,7 +192,7 @@ export function BillReviewCard({
             onOpenChange={setPickerOpen}
           />
         </div>
-        <div style={fieldLabel}>
+        <div style={{ ...fieldLabel, minWidth: 0 }}>
           Site{!projectId && <span style={{ color: V.terra }}> · needed</span>}
           <SearchPicker
             items={projectItems}

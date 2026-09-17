@@ -45,9 +45,9 @@ export function SearchPicker({
   const showCreate = !!onCreate && ql.length > 0 && !exact;
 
   return (
-    <div ref={ref} style={{ position: 'relative', marginTop: 4 }}>
+    <div ref={ref} style={{ position: 'relative', marginTop: 4, minWidth: 0 }}>
       <button type="button" onClick={() => (open ? setOpen(false) : openNow())} style={fieldBtn}>
-        <span style={{ ...font, fontSize: 13.5, color: valueName ? V.ink : V.faint, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <span style={{ ...font, flex: 1, minWidth: 0, fontSize: 13.5, color: valueName ? V.ink : V.faint, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {valueName || placeholder}
         </span>
         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke={V.faint} strokeWidth="2.6" strokeLinecap="round" aria-hidden><path d="M6 9l6 6 6-6" /></svg>
