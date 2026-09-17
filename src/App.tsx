@@ -101,6 +101,8 @@ import LoginRegister from './pages/LoginRegister';
 import Privacy from './pages/Privacy';
 import Terms from './pages/Terms';
 import DataDeletion from './pages/DataDeletion';
+// No-auth demo record for landing prospects (the WhatsApp "see it work" flow). Public like the legal pages.
+import DemoRecord from './pages/DemoRecord';
 const ResetPassword = lazy(() => import('./pages/ResetPassword'));
 const ProcurementRequests = lazy(() => import('./pages/ProcurementRequests'));
 const ProcurementQuotes = lazy(() => import('./pages/ProcurementQuotes'));
@@ -390,6 +392,11 @@ function App() {
   }
   if (location.pathname === '/data-deletion') {
     return <DataDeletion />;
+  }
+  // No-auth demo record — a landing prospect's WhatsApp entry, filed on a mini dashboard.
+  // Public: renders regardless of session (they arrive from WhatsApp's own browser, no cookies).
+  if (location.pathname === '/demo') {
+    return <DemoRecord />;
   }
 
   if (!routerReady) {

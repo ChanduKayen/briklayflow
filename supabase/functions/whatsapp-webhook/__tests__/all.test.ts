@@ -98,6 +98,7 @@ import './media_race.test';
 import './caption_claim.test';
 import './bill_note_answer.test';
 import './split_reconcile.test';
+import './demo.test';
 import { runAll } from './harness';
 
 await runAll();

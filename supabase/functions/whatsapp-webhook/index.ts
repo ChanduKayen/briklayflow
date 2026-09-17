@@ -14,7 +14,7 @@ import { normalize, deriveDispatchMedia } from './_normalize.ts'
 import { waitForInflightPhoto } from './_media_race.ts'
 import { dispatch } from './_dispatch.ts'
 import { handleReaction } from './_agents/siteops.ts'   // STEP 5: reactions-as-confirm / retract
-import { runConcierge } from './_agents/concierge.ts'
+import { runDemo } from './_agents/demo.ts'
 import * as M from './_messages.ts'
 
 // A member who hasn't been active in this long gets a light "welcome back" on their
@@ -353,9 +353,12 @@ async function handleProspect(
     console.log('[wa-webhook] prospect daily cap reached, staying silent:', from)
     return
   }
-  await runConcierge(supabase, {
-    from, orgId: null, wamid, text, language: guessLang(text), mode: 'prospect',
-    prospect: { firstTouch: !!row?.first_touch },
+  // The landing "see it work on my site" flow: greet + a live sandbox demo that files their
+  // own words and hands back a no-auth /demo link, then invites setup. Prospects-only, off the
+  // member router entirely (see docs/wa-demo-concierge-spec.md).
+  await runDemo(supabase, {
+    from, wamid, text, language: guessLang(text),
+    firstTouch: !!row?.first_touch,
   })
 }
 
