@@ -116,6 +116,25 @@ footer{padding:18px 22px;color:var(--mute);font-size:.84rem;display:flex;justify
 footer a{text-decoration:none;color:var(--mute)}footer a:hover{color:var(--ink)}
 a:focus-visible,button:focus-visible{outline:2.5px solid var(--red);outline-offset:3px}
 @media(prefers-reduced-motion:reduce){.step.on,.d.pop,.line.shake,.otp.shake,.btn .spin{animation:none}.door{transition:none}}
+/* ---------- mobile: tighter rhythm, the alt sign-ins stack, no overflow ---------- */
+@media(max-width:560px){
+  nav{padding:20px 18px 0}
+  main{padding:18px 18px 40px;place-items:start center}
+  h1{font-size:clamp(1.6rem,7.4vw,2.05rem)}
+  .hint{font-size:.96rem;margin-top:10px}
+  .field{margin:30px auto 0}
+  .line .pre{font-size:1.05rem}
+  .line input{font-size:clamp(1.45rem,7.4vw,1.9rem)}
+  .line.text input{font-size:1.25rem}
+  .otp .digits{gap:7px}
+  .otp .d{min-height:56px;font-size:1.7rem}
+  .otp .d:nth-child(3){margin-right:9px}
+  .actions{margin-top:24px}
+  .btn{min-height:54px;font-size:1rem}
+  .alts{flex-direction:column;align-items:center;gap:14px;margin-top:26px}
+  .switch{margin-top:32px}
+  footer{padding:16px 18px}
+}
 </style>
 </head>
 <body>
@@ -248,7 +267,20 @@ function show(id,back){
   const to=$(id);to.classList.toggle('back',!!back);void to.offsetWidth;to.classList.add('on');cur=id;
   const f=to.querySelector('input');if(f&&!matchMedia('(max-width:900px)').matches)setTimeout(()=>f.focus(),400);
 }
-document.querySelectorAll('[data-step]').forEach(b=>b.addEventListener('click',()=>show(b.dataset.step,b.dataset.back)));
+/* Device back = previous step (stay on the page + close the keyboard), never a jump off the
+   login. Each forward step pushes a history entry; only the first step (s-phone) lets back leave.
+   Forward transitions go through toStep(); every back path goes through history.back(). */
+const stepStack=['s-phone'];
+function toStep(id){ if(id===cur)return; stepStack.push(id); try{history.pushState({s:id},'')}catch(e){} show(id,false); }
+function backStep(){
+  try{ if(document.activeElement && document.activeElement.blur) document.activeElement.blur(); }catch(e){}
+  if(stepStack.length>1){ stepStack.pop(); show(stepStack[stepStack.length-1],true); }
+}
+/* an in-page "back" that targets a specific earlier step pops history down to it (so the
+   device back stack stays in sync); forward steps push. */
+function goBackTo(target){ const i=stepStack.lastIndexOf(target); const delta=i>=0?stepStack.length-1-i:0; if(delta>0)history.go(-delta); else if(target!==cur)show(target,true); }
+addEventListener('popstate',backStep);
+document.querySelectorAll('[data-step]').forEach(b=>b.addEventListener('click',()=>{ if(b.dataset.back) goBackTo(b.dataset.step); else toStep(b.dataset.step); }));
 const go=()=>{
   /* the real session is already set in the parent by now; its auth listener opens the
      app. We only play the door, then tell the parent. */
@@ -329,7 +361,7 @@ $('sendCode').addEventListener('click',async ()=>{
   if(!res.ok){
     if(res.kind==='exists'){ /* sign-up, but this number already has an account */
       $('errP').innerHTML='This number already has an account. <button class="link" id="toLogin">Log in instead</button>.';
-      const t=$('toLogin');if(t)t.onclick=()=>{signup=false;setMode();$('errP').textContent='';$('sentTo').textContent=fmt(phone);OT.reset();$('errO').textContent='';show('s-code');startResend()};
+      const t=$('toLogin');if(t)t.onclick=()=>{signup=false;setMode();$('errP').textContent='';$('sentTo').textContent=fmt(phone);OT.reset();$('errO').textContent='';toStep('s-code');startResend()};
       return;
     }
     if(res.kind==='nouser'){ /* log-in, but there's no account for this number */
@@ -339,7 +371,7 @@ $('sendCode').addEventListener('click',async ()=>{
     }
     $('errP').textContent=res.error||'Could not send the code. Try again.';shakeEl($('phoneL'));return;
   }
-  $('sentTo').textContent=fmt(phone);OT.reset();$('errO').textContent='';show('s-code');startResend();
+  $('sentTo').textContent=fmt(phone);OT.reset();$('errO').textContent='';toStep('s-code');startResend();
 });
 let rt=null;
 function startResend(){clearInterval(rt);let n=30;const T=$('resendT'),R=$('resend');R.hidden=true;T.hidden=false;T.textContent='Resend in '+n+'s';rt=setInterval(()=>{n--;T.textContent='Resend in '+n+'s';if(n<=0){clearInterval(rt);T.hidden=true;R.hidden=false}},1000)}
@@ -352,7 +384,7 @@ async function verify(){
        takes over the instant it does — which would pre-empt this in-iframe name step. So we
        collect the name first, then verify + set the name together (see nameGo). */
     busy(b,false);b.disabled=false;$('otpBox').classList.add('ok');nameFor='phone';
-    done(b,'Verified',()=>show('s-name'));
+    done(b,'Verified',()=>toStep('s-name'));
     return;
   }
   const res=await ask('verify-otp',{phone,token:code});
@@ -367,7 +399,7 @@ $('nameGo').addEventListener('click',async ()=>{
   if(nameFor==='phone'){
     /* verify the code AND set the name together, so the account is born named */
     const res=await ask('verify-signup',{phone,token:code,name});
-    if(!res.ok){busy(b,false);b.disabled=false;$('errN').innerHTML=(res.error||'That code didn’t work.')+' <button class="link" id="backCode">Re-enter code</button>';const bc=$('backCode');if(bc)bc.onclick=()=>show('s-code',true);return}
+    if(!res.ok){busy(b,false);b.disabled=false;$('errN').innerHTML=(res.error||'That code didn’t work.')+' <button class="link" id="backCode">Re-enter code</button>';const bc=$('backCode');if(bc)bc.onclick=()=>goBackTo('s-code');return}
     done(b,'Welcome, '+name.split(' ')[0],go);
   }else{
     /* email sign-up: create the account now; email confirmation follows */
@@ -375,19 +407,19 @@ $('nameGo').addEventListener('click',async ()=>{
     const res=await ask('email-signup',{name,email,password:$('pw').value});
     busy(b,false);b.disabled=false;
     if(!res.ok){$('errN').textContent=res.kind==='exists'?'An account with this email already exists — log in instead.':(res.error||'Could not create the account.');return}
-    $('rsH').textContent='Confirm your email.';$('rsHint').innerHTML='We’ve sent a confirmation link to <b>'+email+'</b>. Open it, then log in here.';show('s-reset-sent');
+    $('rsH').textContent='Confirm your email.';$('rsHint').innerHTML='We’ve sent a confirmation link to <b>'+email+'</b>. Open it, then log in here.';toStep('s-reset-sent');
   }
 });
 
 /* email / google / reset (real Supabase via the bridge) */
 $('emailGo').addEventListener('click',async ()=>{
   const email=$('em').value.trim(),pw=$('pw').value;
-  if(signup){ nameFor='email'; show('s-name'); return; }   /* collect the name next, then create */
+  if(signup){ nameFor='email'; toStep('s-name'); return; }   /* collect the name next, then create */
   const b=$('emailGo');busy(b,true);$('errE').textContent='';
   const res=await ask('email-login',{email,password:pw});
   if(!res.ok){
     busy(b,false);b.disabled=false;
-    if(res.kind==='unconfirmed'){$('rsH').textContent='Confirm your email.';$('rsHint').innerHTML='Your email isn’t confirmed yet. We’ve sent a fresh link to <b>'+email+'</b>.';show('s-reset-sent');return}
+    if(res.kind==='unconfirmed'){$('rsH').textContent='Confirm your email.';$('rsHint').innerHTML='Your email isn’t confirmed yet. We’ve sent a fresh link to <b>'+email+'</b>.';toStep('s-reset-sent');return}
     $('errE').textContent=res.error||'Could not log in.';return;
   }
   done(b,'Logged in',go);
@@ -396,7 +428,7 @@ $('resetGo').addEventListener('click',async ()=>{
   const email=$('emF').value.trim();const b=$('resetGo');busy(b,true);
   await ask('forgot',{email});
   busy(b,false);b.disabled=false;
-  $('rsH').textContent='Check your email.';$('rsHint').innerHTML='A reset link is on its way to <b>'+email+'</b>. It works for 30 minutes.';show('s-reset-sent');
+  $('rsH').textContent='Check your email.';$('rsHint').innerHTML='A reset link is on its way to <b>'+email+'</b>. It works for 30 minutes.';toStep('s-reset-sent');
 });
 $('google').addEventListener('click',async ()=>{
   const b=$('sendCode');b.disabled=false;busy(b,true);b.querySelector('.lbl').textContent='Opening Google';

@@ -48,8 +48,13 @@ export default function SignInCelebration() {
   return (
     <div aria-hidden="true" style={{ position: 'fixed', inset: 0, zIndex: 2147483000, pointerEvents: 'none' }}>
       <style>{`
+        @keyframes bsc-bgin{to{opacity:1}}
         @keyframes bsc-open{0%{width:8px;height:8px;opacity:0}6%{opacity:1}100%{width:280vmax;height:280vmax;opacity:1}}
         @keyframes bsc-fade{to{opacity:1}}
+        /* opaque paper backdrop, fades in fast — so the app + its mobile nav underneath never
+           flicker through the expanding door (the login page is already this colour). */
+        .bsc-bg{position:fixed;inset:0;background:#F7F6F1;opacity:0;animation:bsc-bgin .16s ease forwards}
+        @media(prefers-reduced-motion:reduce){.bsc-bg{opacity:1;animation:none}}
         @keyframes bsc-up{to{opacity:1;transform:none}}
         @keyframes bsc-draw{to{transform:scaleX(1)}}
         @keyframes bsc-ripple{0%{opacity:0;width:8px;height:8px}10%{opacity:.22}100%{opacity:0;width:240vmax;height:240vmax}}
@@ -73,6 +78,7 @@ export default function SignInCelebration() {
           .bsc-txt span,.bsc-txt .rule,.bsc-txt small{opacity:1;transform:none;animation:none}
         }
       `}</style>
+      <div className="bsc-bg" />
       <div className="bsc-door" />
       <div className="bsc-in">
         <i className="bsc-ripple" /><i className="bsc-ripple" /><i className="bsc-ripple" />
