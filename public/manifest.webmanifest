@@ -1,0 +1,13 @@
+{
+  "name": "Briklay",
+  "short_name": "Briklay",
+  "description": "AI site engineer + accountant, inside WhatsApp.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F7F6F1",
+  "theme_color": "#F7F6F1",
+  "icons": [
+    { "src": "/icon.svg", "type": "image/svg+xml", "sizes": "any", "purpose": "any maskable" },
+    { "src": "/apple-touch-icon.png", "type": "image/png", "sizes": "180x180", "purpose": "any" }
+  ]
+}
