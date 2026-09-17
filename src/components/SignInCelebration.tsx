@@ -28,6 +28,8 @@ export default function SignInCelebration() {
     const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
     let removeTimer = 0;
     const onCelebrate = (e: Event) => {
+      // No orange door on phones — it fights the small viewport and the nav. Sign-in just proceeds.
+      if (window.innerWidth <= 768) return;
       clearTimeout(removeTimer);
       setDetail(((e as CustomEvent).detail ?? {}) as Detail);
       removeTimer = window.setTimeout(() => setDetail(null), reduced ? 900 : 2200);

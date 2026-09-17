@@ -122,24 +122,31 @@ footer{padding:18px 22px;color:var(--mute);font-size:.84rem;display:flex;justify
 footer a{text-decoration:none;color:var(--mute)}footer a:hover{color:var(--ink)}
 a:focus-visible,button:focus-visible{outline:2.5px solid var(--red);outline-offset:3px}
 @media(prefers-reduced-motion:reduce){.step.on,.d.pop,.line.shake,.otp.shake,.btn .spin{animation:none}.door{transition:none}}
-/* ---------- mobile: tighter rhythm, the alt sign-ins stack, no overflow ---------- */
+/* ---------- mobile: a calm, centred form — balanced vertically, decent rhythm ---------- */
 @media(max-width:560px){
-  nav{padding:20px 18px 0}
-  main{padding:14px 18px 40px;align-content:start}
-  h1{font-size:clamp(1.6rem,7.4vw,2.05rem)}
-  .hint{font-size:.96rem;margin-top:10px}
-  .field{margin:30px auto 0}
-  .line .pre{font-size:1.05rem}
-  .line input{font-size:clamp(1.45rem,7.4vw,1.9rem)}
-  .line.text input{font-size:1.25rem}
+  nav{padding:18px 16px 0}
+  /* centre the form in the space between the brand and the footer (not crammed at the top) */
+  main{padding:12px 22px 28px;align-content:center}
+  .stage{max-width:none}
+  h1{font-size:clamp(1.5rem,6.4vw,1.85rem);line-height:1.14}
+  .hint{font-size:.95rem;margin-top:12px;max-width:30ch;margin-left:auto;margin-right:auto}
+  .field{margin:34px auto 0;max-width:none}
+  .line{gap:10px}
+  .line .pre{font-size:1.02rem}
+  .line input{font-size:clamp(1.35rem,6.8vw,1.7rem)}
+  .line.text input{font-size:1.2rem}
+  .err{min-height:1.1em;font-size:.86rem}
+  .otp{max-width:none}
   .otp .digits{gap:7px}
-  .otp .d{min-height:56px;font-size:1.7rem}
-  .otp .d:nth-child(3){margin-right:9px}
-  .actions{margin-top:24px}
-  .btn{min-height:54px;font-size:1rem}
-  .alts{flex-direction:column;align-items:center;gap:14px;margin-top:26px}
-  .switch{margin-top:32px}
-  footer{padding:16px 18px}
+  .otp .d{min-height:54px;font-size:1.6rem}
+  .otp .d:nth-child(3){margin-right:8px}
+  .actions{margin-top:26px}
+  .btn{min-height:54px;font-size:1rem;border-radius:12px}
+  .quiet-row{margin-top:16px;font-size:.88rem}
+  .alts{flex-direction:column;align-items:center;gap:13px;margin-top:26px}
+  .alt{font-size:.98rem}
+  .switch{margin-top:30px;font-size:.95rem}
+  footer{padding:14px 18px;gap:14px}
 }
 </style>
 </head>
