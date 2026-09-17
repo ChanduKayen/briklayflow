@@ -22,7 +22,8 @@ function nameToSlug(n: string): string {
 
 export default function CreateWorkspace({ session }: { session: Session }) {
 
-  const [name,          setName]          = useState('');
+  // Prefilled from the "Firm" typed at sign-up (loginV1 → firm_name metadata), if any.
+  const [name,          setName]          = useState<string>(() => (session.user?.user_metadata?.firm_name as string | undefined) ?? '');
   const [slug,          setSlug]          = useState('');
   const [slugEdited,    setSlugEdited]    = useState(false);
   const [slugAvailable, setSlugAvailable] = useState<boolean | null>(null);

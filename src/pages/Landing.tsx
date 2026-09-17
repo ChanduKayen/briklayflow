@@ -3,48 +3,31 @@
  * (docs/reference → src/pages/landingV11.html) VERBATIM inside a full-viewport
  * iframe, so its bespoke stylesheet and the JS-driven WhatsApp/dashboard demo run
  * exactly as authored, with no global-CSS leakage into the app. Rendered at "/"
- * and "/login" for logged-out users only (see App.tsx route gate).
+ * for logged-out users only (see App.tsx route gate).
  *
  * Two integrations bridge the static reference to the live app:
  *   • the WhatsApp CTAs open wa.me/917330872705 with a prefilled message (baked
  *     into the .html), and
- *   • the nav "Log in" / "Sign up" links postMessage the parent, which opens the
- *     real AuthPanel (email / phone / Google).
+ *   • the nav "Log in" / "Sign up" links postMessage the parent, which navigates
+ *     to the register-book auth screen (LoginRegister, at /login and /signup).
  */
-import { useEffect, useState } from 'react';
-import AuthPanel from '../components/landing/AuthPanel';
+import { useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import landingHtml from './landingV11.html?raw';
 
 export default function Landing() {
-  const [auth, setAuth] = useState(false);
-  const [mode, setMode] = useState<'signin' | 'signup'>('signin');
-  const [authMethod, setAuthMethod] = useState<'email' | 'phone'>('email');
+  const navigate = useNavigate();
 
-  // Deep links open the AuthPanel automatically:
-  //   • /login                        → sign in (default)
-  //   • /signup                       → sign up
-  //   • ?method=phone (team-invite button → /login?method=phone) → straight into PHONE SIGNUP
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const params = new URLSearchParams(window.location.search);
-    const path = window.location.pathname;
-    if (params.get('method') === 'phone') { setMode('signup'); setAuthMethod('phone'); setAuth(true); return; }
-    if (path === '/signup') { setMode('signup'); setAuth(true); return; }
-    if (path === '/login') setAuth(true);
-  }, []);
-
-  // The reference's nav auth links postMessage up to here; open the real AuthPanel.
+  // The reference's nav auth links postMessage up to here; take the user to the real auth screen.
   useEffect(() => {
     const onMsg = (e: MessageEvent) => {
       const d = e.data as { type?: string; mode?: string } | null;
       if (!d || d.type !== 'brik-auth') return;
-      setMode(d.mode === 'signup' ? 'signup' : 'signin');
-      setAuthMethod('email');
-      setAuth(true);
+      navigate(d.mode === 'signup' ? '/signup' : '/login');
     };
     window.addEventListener('message', onMsg);
     return () => window.removeEventListener('message', onMsg);
-  }, []);
+  }, [navigate]);
 
   // Marketing metadata while mounted; restored on unmount.
   useEffect(() => {
@@ -63,13 +46,10 @@ export default function Landing() {
   }, []);
 
   return (
-    <>
-      <iframe
-        title="Briklay — AI site engineer + accountant, inside WhatsApp"
-        srcDoc={landingHtml}
-        style={{ position: 'fixed', inset: 0, width: '100%', height: '100%', border: 0, zIndex: 0, display: 'block' }}
-      />
-      <AuthPanel open={auth} mode={mode} setMode={setMode} initialMethod={authMethod} onClose={() => setAuth(false)} />
-    </>
+    <iframe
+      title="Briklay — AI site engineer + accountant, inside WhatsApp"
+      srcDoc={landingHtml}
+      style={{ position: 'fixed', inset: 0, width: '100%', height: '100%', border: 0, zIndex: 0, display: 'block' }}
+    />
   );
 }

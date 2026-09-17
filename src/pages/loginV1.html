@@ -1,0 +1,652 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Log in · Briklay</title>
+<meta name="description" content="Log in to Briklay with your WhatsApp number. Your sites, your Books, already filled in.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,300..800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#F7F6F1;--sheet:#E9EFE8;--ink:#12261F;--mute:#5D6E67;--rule:#C9D6CF;--rule-soft:#DEE6E0;
+  --red:#B23A2A;--wa:#008069;--wa-hover:#006B58;--ok:#0E6B4E;--row:34px;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%}
+body{
+  background:var(--paper);color:var(--ink);
+  font-family:'Bricolage Grotesque',system-ui,-apple-system,'Segoe UI',sans-serif;
+  font-size:17px;line-height:1.5;-webkit-font-smoothing:antialiased;
+  background-image:repeating-linear-gradient(to bottom,transparent 0,transparent calc(var(--row) - 1px),var(--rule-soft) calc(var(--row) - 1px),var(--rule-soft) var(--row));
+  background-position:0 6px;
+  display:flex;flex-direction:column;min-height:100%;
+}
+::selection{background:var(--ink);color:var(--paper)}
+a{color:inherit}
+h1{font-weight:700;letter-spacing:-.03em;line-height:1;font-size:clamp(2.1rem,7vw,3rem);font-variation-settings:'wdth' 88}
+p{text-wrap:pretty}
+button{font-family:inherit}
+
+/* red margin line */
+.margin{position:fixed;top:0;bottom:0;left:22px;width:1.5px;background:var(--red);opacity:.85;z-index:0}
+@media(min-width:900px){.margin{left:calc(50% - 560px + 40px + 2px)}}
+
+nav{display:flex;justify-content:space-between;align-items:center;padding:16px 22px;position:relative;z-index:2}
+@media(min-width:900px){nav{padding:18px 40px}}
+.brand{display:flex;align-items:center;gap:9px;text-decoration:none}
+.brand svg{width:24px;height:24px}
+.brand svg path{stroke:var(--ink);stroke-width:3.2;fill:none;stroke-linecap:round}
+.brand b{font-weight:700;font-size:1.15rem;letter-spacing:-.02em}
+.nav-note{font-size:.9rem;color:var(--mute)}
+.nav-note a{color:var(--ink);font-weight:600;text-decoration:none;position:relative}
+.nav-note a::after{content:"";position:absolute;left:0;right:0;bottom:-2px;height:1.5px;background:var(--ink);transform:scaleX(0);transform-origin:left;transition:transform .22s cubic-bezier(.2,.8,.3,1)}
+.nav-note a:hover::after{transform:scaleX(1)}
+
+main{flex:1;display:grid;place-items:start center;padding:26px 22px 60px;position:relative;z-index:1}
+@media(min-width:900px){main{padding-top:48px}}
+.page{width:100%;max-width:1120px;display:grid;grid-template-columns:1fr;gap:34px;padding-left:22px}
+@media(min-width:900px){.page{grid-template-columns:minmax(0,1fr) 440px;gap:60px;align-items:start;padding-left:64px;padding-right:40px}}
+
+/* left: the register heading */
+.lead h1 .l{display:block}
+.lead .sub{margin-top:18px;color:var(--mute);font-size:1.08rem;max-width:40ch}
+.lead .why{margin-top:34px;list-style:none;display:none;max-width:44ch}
+@media(min-width:900px){.lead .why{display:block}}
+.lead .why li{padding:12px 0;border-top:1px solid var(--rule);display:grid;grid-template-columns:120px 1fr;gap:14px;font-size:.95rem}
+.lead .why li:last-child{border-bottom:1px solid var(--rule)}
+.lead .why b{font-weight:600}
+.cover{margin-top:34px;max-width:46ch}
+.cover[hidden]{display:none}
+.cv-head{font-size:.78rem;font-weight:600;color:var(--mute);letter-spacing:.04em;text-transform:uppercase;padding-bottom:10px}
+.cv-row{display:grid;grid-template-columns:130px 1fr;gap:14px;padding:11px 0;border-top:1px solid var(--rule);font-size:.98rem;align-items:baseline}
+.cv-row:last-child{border-bottom:1px solid var(--rule)}
+.cv-row span{color:var(--mute)}
+.cv-row b{font-weight:600;min-height:1.4em;transition:color .3s}
+.cv-row b[data-empty="1"]{color:#C4CEC9;font-weight:500}
+.cv-row b.wrote{animation:wrote .35s cubic-bezier(.2,.8,.3,1)}
+@keyframes wrote{from{clip-path:inset(0 100% 0 0)}to{clip-path:inset(0 0 0 0)}}
+@media(max-width:899px){.cover{margin-top:22px}.cv-head{display:none}.cv-row{padding:8px 0;font-size:.92rem;grid-template-columns:110px 1fr}}
+.remember{display:flex;justify-content:space-between;gap:12px;margin-top:10px;font-size:.86rem;color:var(--mute)}
+.remember[hidden]{display:none}
+/* turning the page */
+.card.turn{transform-origin:left center;animation:turn .6s cubic-bezier(.4,0,.8,.4) forwards;pointer-events:none}
+.lead.turn{animation:fadeout .45s ease forwards}
+@keyframes turn{to{transform:perspective(1400px) rotateY(-72deg);opacity:0}}
+@keyframes fadeout{to{opacity:0;transform:translateX(-14px)}}
+.lead .why span{color:var(--mute)}
+
+/* card */
+.card{
+  background:#fff;border:1px solid var(--rule);border-radius:16px;
+  box-shadow:0 1px 0 rgba(18,38,31,.03),0 30px 60px -36px rgba(18,38,31,.35);
+  overflow:hidden;position:relative;
+}
+.tabs{display:flex;padding:6px;gap:4px;border-bottom:1px solid var(--rule);background:var(--paper)}
+.tabs button{flex:1;border:0;background:none;padding:10px;border-radius:9px;font-weight:600;font-size:.95rem;color:var(--mute);cursor:pointer;transition:background .2s,color .2s}
+.tabs button[aria-selected="true"]{background:#fff;color:var(--ink);box-shadow:0 1px 0 var(--rule)}
+.body{padding:26px 22px 24px;position:relative}
+@media(min-width:480px){.body{padding:30px 30px 28px}}
+
+/* steps slide */
+.steps{position:relative;overflow:hidden}
+.step{display:none}
+.step.on{display:block;animation:stepin .38s cubic-bezier(.2,.8,.3,1) both}
+.step.back{animation-name:stepback}
+@keyframes stepin{from{opacity:0;transform:translateX(26px)}to{opacity:1;transform:none}}
+@keyframes stepback{from{opacity:0;transform:translateX(-26px)}to{opacity:1;transform:none}}
+.step h2{font-size:1.45rem;font-weight:700;letter-spacing:-.02em;line-height:1.15}
+.step .hint{color:var(--mute);font-size:.95rem;margin-top:6px}
+.step .hint b{color:var(--ink);font-weight:600;white-space:nowrap}
+
+/* fields */
+.field{margin-top:18px}
+.field label{display:block;font-size:.86rem;font-weight:600;margin-bottom:8px}
+.input{
+  width:100%;min-height:52px;border:1.5px solid var(--rule);border-radius:10px;background:#fff;
+  padding:12px 14px;font:inherit;font-size:1.02rem;color:var(--ink);outline:none;
+  transition:border-color .2s,box-shadow .2s;
+}
+.input:focus{border-color:var(--ink);box-shadow:0 0 0 3px rgba(18,38,31,.08)}
+.input::placeholder{color:#9AA8A2}
+.pw{position:relative}
+.pw .input{padding-right:64px}
+.pw button{position:absolute;right:8px;top:50%;transform:translateY(-50%);border:0;background:none;font-weight:600;font-size:.82rem;color:var(--mute);cursor:pointer;padding:8px}
+.row-between{display:flex;justify-content:space-between;align-items:center;margin-top:10px;font-size:.88rem}
+.link{color:var(--ink);font-weight:600;text-decoration:none;border:0;background:none;cursor:pointer;font-size:inherit;padding:0;position:relative}
+.link::after{content:"";position:absolute;left:0;right:0;bottom:-2px;height:1.5px;background:var(--ink);transform:scaleX(0);transform-origin:left;transition:transform .22s cubic-bezier(.2,.8,.3,1)}
+.link:hover::after,.link:focus-visible::after{transform:scaleX(1)}
+.quiet{color:var(--mute);font-weight:500}
+
+/* ---------- the line: number written on the register ---------- */
+.line{position:relative;display:flex;align-items:baseline;gap:12px;padding:6px 0 10px;border-bottom:1.5px solid var(--rule)}
+.line .pre{font-size:1.15rem;font-weight:600;color:var(--mute);flex:none;transition:color .3s}
+.line input{
+  flex:1;min-width:0;border:0;background:none;outline:none;padding:0;
+  font:inherit;font-size:clamp(1.7rem,6vw,2.1rem);font-weight:600;letter-spacing:.04em;
+  font-variant-numeric:tabular-nums;color:var(--ink);caret-color:var(--red);
+}
+.line input::placeholder{color:#C4CEC9;font-weight:500}
+.line.text input{font-size:clamp(1.35rem,4.6vw,1.6rem);letter-spacing:-.01em;text-transform:none}
+.line.text{padding-top:2px}
+.line .showpw{flex:none;align-self:center;border:0;background:none;font-weight:600;font-size:.82rem;color:var(--mute);cursor:pointer;padding:6px}
+.line.pwl input{letter-spacing:.08em}
+.line .rule{position:absolute;left:0;right:0;bottom:-1.5px;height:2px;background:var(--ink);transform:scaleX(0);transform-origin:left;transition:transform .22s cubic-bezier(.2,.8,.3,1),background .3s}
+.line .tick{flex:none;align-self:center;width:22px;height:22px;border-radius:50%;background:var(--ok);display:grid;place-items:center;transform:scale(0);transition:transform .3s cubic-bezier(.2,.9,.3,1.3)}
+.line .tick::after{content:"";width:5px;height:10px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg) translate(-1px,-1px)}
+.line.full .rule{background:var(--ok)}
+.line.full .pre{color:var(--ok)}
+.line.full .tick{transform:scale(1)}
+.line.shake{animation:shake .4s}
+@keyframes shake{20%,60%{transform:translateX(-5px)}40%,80%{transform:translateX(5px)}}
+
+/* OTP: six blanks on the rule */
+.otp{position:relative;margin-top:10px}
+.otp .digits{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;max-width:340px}
+.otp .d{min-height:62px;border-bottom:2px solid var(--rule);display:grid;place-items:end center;padding-bottom:6px;font-size:2rem;font-weight:600;font-variant-numeric:tabular-nums;position:relative;transition:border-color .2s}
+.otp .d:nth-child(3){margin-right:14px}
+.otp .d.has{border-color:var(--ink)}
+.otp .d.cur{border-color:var(--red)}
+.otp .d.pop{animation:pop .28s cubic-bezier(.2,.9,.3,1.3)}
+@keyframes pop{0%{transform:translateY(8px);opacity:.3}100%{transform:none;opacity:1}}
+.otp input{position:absolute;inset:0;width:100%;height:100%;opacity:0;font-size:24px}
+.otp.shake{animation:shake .4s}
+.otp.ok .d{border-color:var(--ok)}
+.err{color:var(--red);font-size:.88rem;margin-top:10px;min-height:1.3em}
+
+/* ---------- stamp buttons ---------- */
+.btn{
+  --fill:var(--wa);--ink-on:#fff;--lift:var(--ink);--hover-fill:var(--ink);--hover-ink:var(--paper);
+  position:relative;isolation:isolate;overflow:hidden;
+  display:inline-flex;align-items:center;justify-content:center;gap:10px;
+  background:var(--fill);color:var(--ink-on);text-decoration:none;border:0;cursor:pointer;
+  min-height:54px;padding:14px 22px;border-radius:10px;font-weight:600;font-size:1.02rem;width:100%;
+  box-shadow:0 5px 0 var(--lift);transform:translateY(0);
+  transition:transform .16s cubic-bezier(.2,.8,.3,1),box-shadow .16s cubic-bezier(.2,.8,.3,1),color .22s,opacity .25s;
+}
+.btn::before{content:"";position:absolute;inset:0;z-index:-1;background:var(--hover-fill);transform:scaleY(0);transform-origin:bottom;transition:transform .26s cubic-bezier(.2,.8,.3,1)}
+.btn:not(:disabled):hover,.btn:not(:disabled):focus-visible{transform:translateY(5px);box-shadow:0 0 0 var(--lift);color:var(--hover-ink)}
+.btn:not(:disabled):hover::before,.btn:not(:disabled):focus-visible::before{transform:scaleY(1)}
+.btn:not(:disabled):active{transform:translateY(5px) scale(.985);box-shadow:0 0 0 var(--lift)}
+.btn:disabled{--fill:var(--rule-soft);--ink-on:var(--mute);--lift:var(--rule);cursor:not-allowed}
+.btn svg{width:21px;height:21px;flex:none}
+.btn .lbl{position:relative}
+.btn.ghost{--fill:#fff;--ink-on:var(--ink);--lift:var(--ink);--hover-fill:var(--ink);--hover-ink:var(--paper);border:1px solid var(--ink)}
+.btn.done{--fill:var(--ok);--lift:var(--ink)}
+.btn .spin{width:18px;height:18px;border-radius:50%;border:2px solid rgba(255,255,255,.35);border-top-color:#fff;animation:spin .8s linear infinite;display:none}
+.btn.busy .spin{display:block}.btn.busy .ico{display:none}
+@keyframes spin{to{transform:rotate(360deg)}}
+.actions{margin-top:22px}
+.or{display:flex;align-items:center;gap:12px;margin:22px 0 14px;color:var(--mute);font-size:.84rem}
+.or::before,.or::after{content:"";flex:1;height:1px;background:var(--rule)}
+.alt{display:grid;gap:10px}
+.micro{display:block;margin-top:14px;font-size:.86rem;color:var(--mute);text-align:center}
+
+
+
+.success{text-align:center;padding:10px 0 6px}
+.seal{width:84px;height:84px;margin:0 auto 18px}
+.seal svg{width:100%;height:100%}
+.seal .ring{fill:none;stroke:var(--ok);stroke-width:3;stroke-dasharray:260;stroke-dashoffset:260;animation:draw .7s ease-out forwards}
+.seal .chk{fill:none;stroke:var(--ok);stroke-width:4;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:60;stroke-dashoffset:60;animation:draw .45s ease-out .5s forwards}
+@keyframes draw{to{stroke-dashoffset:0}}
+.success h2{font-size:1.6rem}.success .hint{margin-top:8px}
+footer{padding:20px 22px;color:var(--mute);font-size:.86rem;position:relative;z-index:1;display:flex;flex-wrap:wrap;gap:8px 22px;justify-content:space-between}
+@media(min-width:900px){footer{padding:20px 40px}}
+footer a{text-decoration:none;color:var(--mute)}
+footer a:hover{color:var(--ink)}
+
+@media(max-width:479px){main{padding:20px 14px 48px}.page{padding-left:14px}.margin{left:14px}}
+a:focus-visible,button:focus-visible,.input:focus-visible{outline:2.5px solid var(--red);outline-offset:3px}
+@media(prefers-reduced-motion:reduce){
+  .step.on,.d.pop,.line.shake,.otp.shake,.seal .ring,.seal .chk,.btn .spin{animation:none}
+  .seal .ring,.seal .chk{stroke-dashoffset:0}
+  
+}
+</style>
+</head>
+<body>
+<div class="margin" aria-hidden="true"></div>
+
+<nav>
+  <a class="brand" target="_top" href="/" aria-label="Briklay home">
+    <svg viewBox="0 0 40 40" aria-hidden="true"><path d="M6 34 V20 A14 14 0 0 1 34 20 V34"/></svg>
+    <b>Briklay</b>
+  </a>
+  <span class="nav-note" id="navNote">New here? <a href="#signup" data-go="signup">Sign up</a></span>
+</nav>
+
+<main>
+  <div class="page">
+    <section class="lead" id="lead">
+      <h1 id="leadH"><span class="l">Back to</span><span class="l">your sites.</span></h1>
+      <p class="sub" id="leadP">Attendance, issues, work plans and every rupee, filed from your team's messages while you were away. Log in with the WhatsApp number your team knows.</p>
+      <div class="cover" id="cover" hidden>
+        <div class="cv-head">Your Briklay</div>
+        <div class="cv-row"><span>Firm</span><b id="cvFirm" data-empty="1">—</b></div>
+        <div class="cv-row"><span>Owner</span><b id="cvName" data-empty="1">—</b></div>
+        <div class="cv-row"><span>WhatsApp</span><b id="cvPhone" data-empty="1">+91 —</b></div>
+        <div class="cv-row"><span>Starts</span><b id="cvDate">—</b></div>
+        <div class="cv-row"><span>First site</span><b data-empty="1">next step, with your supervisor’s number</b></div>
+        <div class="cv-row"><span>Plan</span><b>3 months free · then ₹399 per seat</b></div>
+      </div>
+      <ul class="why">
+        <li><b>No password</b><span>A code arrives on your WhatsApp. Six digits, done.</span></li>
+        <li><b>Same number</b><span>The one your supervisors already message. Nothing new to remember.</span></li>
+        <li><b>A seat for each</b><span>Site engineer, accountant, CA. Each sees what their job needs.</span></li>
+      </ul>
+    </section>
+
+    <section class="card" aria-live="polite">
+      <div class="tabs" role="tablist">
+        <button role="tab" id="tabLogin" aria-selected="true" data-go="login">Log in</button>
+        <button role="tab" id="tabSignup" aria-selected="false" data-go="signup">Sign up</button>
+      </div>
+      <div class="body">
+        <div class="steps">
+
+          <!-- LOGIN: phone -->
+          <div class="step on" id="s-login">
+            <h2>Log in with WhatsApp</h2>
+            <p class="hint">No password. A six-digit code comes to your WhatsApp.</p>
+            <div class="field">
+              <label for="ph">WhatsApp number</label>
+              <div class="line" id="phoneL">
+                <span class="pre">+91</span>
+                <input id="ph" type="tel" inputmode="numeric" autocomplete="tel-national" maxlength="11" placeholder="98480 12321" aria-label="Ten digit mobile number">
+                <span class="tick" aria-hidden="true"></span>
+                <i class="rule" aria-hidden="true"></i>
+              </div>
+              <p class="err" id="errL"></p>
+              <div class="remember" id="remember" hidden><span>Written from last time</span><button class="link quiet" id="notYou">Not you?</button></div>
+            </div>
+            <div class="actions">
+              <button class="btn" id="sendL" disabled>
+                <svg class="ico" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5.1-1.3A10 10 0 1 0 12 2zm5.4 14.1c-.2.6-1.2 1.2-1.7 1.2-.4.1-1 .1-1.6-.1-.4-.1-.9-.3-1.5-.6-2.6-1.1-4.3-3.8-4.4-4-.1-.2-1.1-1.4-1.1-2.7s.7-1.9.9-2.2c.2-.2.5-.3.7-.3h.5c.2 0 .4 0 .6.4l.9 2.1c.1.2.1.4 0 .6l-.4.6c-.1.2-.3.4-.1.7.2.3.8 1.3 1.7 2.1 1.2 1 2.1 1.4 2.4 1.5.3.1.5.1.7-.1l1-1.2c.2-.3.4-.2.7-.1l2 1c.3.1.5.2.6.4 0 .1 0 .8-.3 1.7z"/></svg>
+                <span class="spin" aria-hidden="true"></span>
+                <span class="lbl">Send code on WhatsApp</span>
+              </button>
+            </div>
+            <div class="or">or</div>
+            <div class="alt">
+              <button class="btn ghost" id="googleL"><span class="lbl">Continue with Google</span></button>
+              <button class="link quiet" data-step="s-email" style="justify-self:center;margin-top:6px">Use email and password instead</button>
+            </div>
+          </div>
+
+          <div class="step" id="s-otp">
+            <h2>Check your WhatsApp</h2>
+            <p class="hint">A six-digit code is on its way to <b id="sentTo">+91 ·</b>. <button class="link quiet" id="otpBack">Wrong number?</button></p>
+            <div class="field">
+              <label for="otpIn">Six-digit code</label>
+              <div class="otp" id="otpBox">
+                <div class="digits" id="digO" aria-hidden="true"></div>
+                <input id="otpIn" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" aria-label="Six digit code">
+              </div>
+              <p class="err" id="errO"></p>
+            </div>
+            <div class="actions">
+              <button class="btn" id="verify" disabled><span class="spin" aria-hidden="true"></span><span class="lbl">Log in</span></button>
+            </div>
+            <div class="row-between">
+              <span class="quiet" id="resendT">Resend in 30s</span>
+              <button class="link quiet" id="resend" hidden>Resend code</button>
+            </div>
+          </div>
+
+          <!-- LOGIN: email -->
+          <div class="step" id="s-email">
+            <h2>Log in with email</h2>
+            <p class="hint">For accounts set up before WhatsApp login. <button class="link quiet" data-step="s-login" data-back="1">Use my number</button></p>
+            <div class="field">
+              <label for="em">Email</label>
+              <input class="input" id="em" type="email" autocomplete="email" placeholder="you@yourfirm.in">
+            </div>
+            <div class="field">
+              <label for="pw">Password</label>
+              <div class="pw">
+                <input class="input" id="pw" type="password" autocomplete="current-password" placeholder="••••••••">
+                <button type="button" id="showPw">Show</button>
+              </div>
+              <div class="row-between">
+                <span></span>
+                <button class="link quiet" data-step="s-forgot">Forgot password?</button>
+              </div>
+              <p class="err" id="errEm"></p>
+            </div>
+            <div class="actions">
+              <button class="btn" id="emailGo"><span class="spin" aria-hidden="true"></span><span class="lbl">Log in</span></button>
+            </div>
+          </div>
+
+          <!-- LOGIN: forgot -->
+          <div class="step" id="s-forgot">
+            <h2>Reset your password</h2>
+            <p class="hint">We'll email a link. Or skip passwords entirely and <button class="link quiet" data-step="s-login" data-back="1">log in with WhatsApp</button>.</p>
+            <div class="field">
+              <label for="emF">Email</label>
+              <input class="input" id="emF" type="email" autocomplete="email" placeholder="you@yourfirm.in">
+            </div>
+            <div class="actions">
+              <button class="btn" id="resetGo"><span class="spin" aria-hidden="true"></span><span class="lbl">Send reset link</span></button>
+            </div>
+            <div class="row-between"><span></span><button class="link quiet" data-step="s-email" data-back="1">Back</button></div>
+          </div>
+
+          <!-- LOGIN: reset sent -->
+          <div class="step" id="s-reset-sent">
+            <div class="success">
+              <div class="seal"><svg viewBox="0 0 100 100"><circle class="ring" cx="50" cy="50" r="41"/><path class="chk" d="M31 51l12 12 26-28"/></svg></div>
+              <h2 id="sentH">Link sent</h2>
+              <p class="hint" id="sentHint">Check <b id="resetTo">your email</b>. The link works for 30 minutes.</p>
+              <div class="actions"><button class="btn ghost" data-step="s-login" data-back="1"><span class="lbl">Back to log in</span></button></div>
+            </div>
+          </div>
+
+          <!-- SIGNUP: details -->
+          <div class="step" id="s-signup">
+            <h2>Start Briklay for your firm</h2>
+            <p class="hint">Three months free on your live sites. No card, nothing to install.</p>
+            <div class="field">
+              <label for="nm">Your name</label>
+              <div class="line text" id="lineNm"><input id="nm" type="text" autocomplete="name" placeholder="Chandu"><span class="tick" aria-hidden="true"></span><i class="rule" aria-hidden="true"></i></div>
+            </div>
+            <div class="field">
+              <label for="firm">Firm</label>
+              <div class="line text" id="lineFirm"><input id="firm" type="text" autocomplete="organization" placeholder="Briklay Engineering"><span class="tick" aria-hidden="true"></span><i class="rule" aria-hidden="true"></i></div>
+            </div>
+            <div class="field">
+              <label for="phS">WhatsApp number</label>
+              <div class="line" id="phoneS">
+                <span class="pre">+91</span>
+                <input id="phS" type="tel" inputmode="numeric" autocomplete="tel-national" maxlength="11" placeholder="98480 12321" aria-label="Ten digit mobile number">
+                <span class="tick" aria-hidden="true"></span>
+                <i class="rule" aria-hidden="true"></i>
+              </div>
+              <p class="err" id="errS"></p>
+            </div>
+            <div class="actions">
+              <button class="btn" id="sendS" disabled>
+                <svg class="ico" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5.1-1.3A10 10 0 1 0 12 2zm5.4 14.1c-.2.6-1.2 1.2-1.7 1.2-.4.1-1 .1-1.6-.1-.4-.1-.9-.3-1.5-.6-2.6-1.1-4.3-3.8-4.4-4-.1-.2-1.1-1.4-1.1-2.7s.7-1.9.9-2.2c.2-.2.5-.3.7-.3h.5c.2 0 .4 0 .6.4l.9 2.1c.1.2.1.4 0 .6l-.4.6c-.1.2-.3.4-.1.7.2.3.8 1.3 1.7 2.1 1.2 1 2.1 1.4 2.4 1.5.3.1.5.1.7-.1l1-1.2c.2-.3.4-.2.7-.1l2 1c.3.1.5.2.6.4 0 .1 0 .8-.3 1.7z"/></svg>
+                <span class="spin" aria-hidden="true"></span>
+                <span class="lbl">Send code on WhatsApp</span>
+              </button>
+              <span class="micro">By continuing you agree to the <a href="#">terms</a>. Your data stays yours.</span>
+            </div>
+            <div class="or">or</div>
+            <div class="alt">
+              <button class="btn ghost" id="googleS"><span class="lbl">Sign up with Google</span></button>
+              <button class="link quiet" data-step="s-signup-email" style="justify-self:center;margin-top:6px">Sign up with email instead</button>
+            </div>
+          </div>
+
+          </div>
+
+          <!-- SIGNUP: email -->
+          <div class="step" id="s-signup-email">
+            <h2>Start Briklay with email</h2>
+            <p class="hint">You can add your WhatsApp number after. <button class="link quiet" data-step="s-signup" data-back="1">Use my number instead</button></p>
+            <div class="field">
+              <label for="nmE">Your name</label>
+              <div class="line text" id="lineNmE"><input id="nmE" type="text" autocomplete="name" placeholder="Chandu"><span class="tick" aria-hidden="true"></span><i class="rule" aria-hidden="true"></i></div>
+            </div>
+            <div class="field">
+              <label for="firmE">Firm</label>
+              <div class="line text" id="lineFirmE"><input id="firmE" type="text" autocomplete="organization" placeholder="Briklay Engineering"><span class="tick" aria-hidden="true"></span><i class="rule" aria-hidden="true"></i></div>
+            </div>
+            <div class="field">
+              <label for="emS">Email</label>
+              <div class="line text" id="lineEmS"><input id="emS" type="email" autocomplete="email" placeholder="you@yourfirm.in"><span class="tick" aria-hidden="true"></span><i class="rule" aria-hidden="true"></i></div>
+            </div>
+            <div class="field">
+              <label for="pwS">Password</label>
+              <div class="line text pwl" id="linePwS"><input id="pwS" type="password" autocomplete="new-password" placeholder="8 characters or more"><button type="button" class="showpw" id="showPwS">Show</button><span class="tick" aria-hidden="true"></span><i class="rule" aria-hidden="true"></i></div>
+              <p class="err" id="errE"></p>
+            </div>
+            <div class="actions">
+              <button class="btn" id="emailSignup"><span class="spin" aria-hidden="true"></span><span class="lbl">Create my account</span></button>
+              <span class="micro">By continuing you agree to the <a href="#">terms</a>. Your data stays yours.</span>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </section>
+  </div>
+</main>
+
+<footer>
+  <span>Built on live construction sites in Kakinada, India</span>
+  <span><a href="#">Privacy</a> &nbsp;·&nbsp; <a href="#">Terms</a> &nbsp;·&nbsp; <a href="https://wa.me/">Help on WhatsApp</a></span>
+</footer>
+
+
+<script>
+const reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;
+const $=id=>document.getElementById(id);
+let mode='login',cur='s-login',phone='',code='',sentCode='';
+
+/* ---------- real-auth bridge to the app (parent window) ----------
+   The chrome and every animation stay verbatim; each auth action is a request
+   to the parent (React), which runs the actual Supabase call and answers. */
+const INIT=__BRIK_INIT__;                 // {mode} injected by LoginRegister.tsx
+const _pending=new Map();let _seq=0;
+function ask(action,payload){
+  return new Promise(resolve=>{
+    const id=++_seq;_pending.set(id,resolve);
+    parent.postMessage({type:'brik-auth-req',id,action,payload},'*');
+  });
+}
+addEventListener('message',e=>{
+  const d=e.data;if(!d||d.type!=='brik-auth-res')return;
+  const r=_pending.get(d.id);if(r){_pending.delete(d.id);r(d);}
+});
+function shakeBox(id){const w=$(id);if(!w)return;w.classList.remove('shake');void w.offsetWidth;w.classList.add('shake');}
+
+const setHash=h=>{try{history.replaceState(null,'','#'+h)}catch(e){try{location.hash=h}catch(e2){}}};
+/* ---------- steps ---------- */
+function show(id,back){
+  const from=$(cur);from.classList.remove('on','back');
+  const to=$(id);to.classList.toggle('back',!!back);void to.offsetWidth;to.classList.add('on');
+  cur=id;
+  const f=to.querySelector('input:not([type=hidden])');if(f&&!matchMedia('(max-width:900px)').matches)setTimeout(()=>f.focus(),380);
+}
+document.querySelectorAll('[data-step]').forEach(b=>b.addEventListener('click',()=>show(b.dataset.step,b.dataset.back)));
+
+function setMode(m){
+  mode=m;
+  $('tabLogin').setAttribute('aria-selected',m==='login');$('tabSignup').setAttribute('aria-selected',m==='signup');
+  if(m==='login'){
+    $('leadH').innerHTML='<span class="l">Back to</span><span class="l">your sites.</span>';
+    $('leadP').textContent='Attendance, issues, work plans and every rupee, filed from your team\u2019s messages while you were away. Log in with the WhatsApp number your team knows.';
+    $('navNote').innerHTML='New here? <a href="#signup" data-go="signup">Sign up</a>';
+    document.title='Log in · Briklay';show('s-login',true);$('cover').hidden=true;document.querySelector('.lead .why').style.display='';
+  }else{
+    $('leadH').innerHTML='<span class="l">Start with</span><span class="l">one site.</span>';
+    $('leadP').textContent='An AI site engineer and accountant on your team\u2019s WhatsApp from tomorrow morning. Work, attendance, materials, issues and Books, from the messages they already send. Three months free.';
+    $('navNote').innerHTML='Already using Briklay? <a href="#login" data-go="login">Log in</a>';
+    document.title='Sign up · Briklay';show('s-signup');$('cover').hidden=false;document.querySelector('.lead .why').style.display='none';
+  }
+  document.querySelectorAll('[data-go]').forEach(b=>b.onclick=e=>{e.preventDefault();setHash(b.dataset.go);setMode(b.dataset.go)});
+}
+document.querySelectorAll('[data-go]').forEach(b=>b.onclick=e=>{e.preventDefault();setHash(b.dataset.go);setMode(b.dataset.go)});
+if(INIT&&INIT.mode==='signup'){$('s-login').classList.remove('on');cur='s-signup';$('s-signup').classList.add('on');setMode('signup')}
+
+/* ---------- the line ---------- */
+const fmt=v=>'+91 '+v.slice(0,5)+' '+v.slice(5);
+function phoneLine(inputId,wrapId,btnId,errId){
+  const inp=$(inputId),w=$(wrapId),rule=w.querySelector('.rule');
+  const render=()=>{
+    const v=inp.value.replace(/\D/g,'').slice(0,10);
+    const shown=v.length>5?v.slice(0,5)+' '+v.slice(5):v;
+    if(inp.value!==shown)inp.value=shown;
+    rule.style.transform='scaleX('+(v.length/10)+')';
+    const full=v.length===10,was=w.classList.contains('full');
+    w.classList.toggle('full',full);$(btnId).disabled=!full;$(errId).textContent='';
+    if(full&&!was&&!reduced){w.style.transition='transform .18s';w.style.transform='scale(1.01)';setTimeout(()=>w.style.transform='',180)}
+  };
+  inp.addEventListener('input',render);
+  inp.addEventListener('keydown',e=>{if(e.key==='Enter'){const b=$(btnId);if(!b.disabled)b.click()}});
+  return{get value(){return inp.value.replace(/\D/g,'')},reset(){inp.value='';render()}};
+}
+const PL=phoneLine('ph','phoneL','sendL','errL');
+const PS=phoneLine('phS','phoneS','sendS','errS');
+
+/* text lines (signup): rule draws with the first letters, tick when you move on */
+function textLine(inputId,wrapId){
+  const inp=$(inputId),w=$(wrapId),rule=w.querySelector('.rule');
+  const render=()=>{const n=inp.value.trim().length;rule.style.transform='scaleX('+Math.min(1,n/10)+')';w.classList.toggle('full',n>=2&&document.activeElement!==inp)};
+  inp.addEventListener('input',render);inp.addEventListener('blur',render);inp.addEventListener('focus',render);
+  inp.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();const next=[...inp.closest('.step').querySelectorAll('input')];const i=next.indexOf(inp);(next[i+1]||inp).focus()}});
+}
+textLine('nm','lineNm');textLine('firm','lineFirm');
+const cv=(id,val,empty)=>{const el=$(id);const had=el.dataset.empty!=='1';if(val){el.textContent=val;el.dataset.empty='0';if(!had){el.classList.remove('wrote');void el.offsetWidth;el.classList.add('wrote')}}else{el.textContent=empty;el.dataset.empty='1'}};
+$('nm').addEventListener('input',()=>cv('cvName',$('nm').value.trim(),'—'));
+$('firm').addEventListener('input',()=>cv('cvFirm',$('firm').value.trim(),'—'));
+$('phS').addEventListener('input',()=>{const v=PS.value;cv('cvPhone',v.length===10?fmt(v):'','+91 —')});
+textLine('nmE','lineNmE');textLine('firmE','lineFirmE');textLine('emS','lineEmS');textLine('pwS','linePwS');
+['nmE','firmE'].forEach(id=>$(id).addEventListener('input',()=>cv(id==='nmE'?'cvName':'cvFirm',$(id).value.trim(),'—')));
+$('showPwS').addEventListener('click',()=>{const p=$('pwS');const t=p.type==='password';p.type=t?'text':'password';$('showPwS').textContent=t?'Hide':'Show'});
+$('emailSignup').addEventListener('click',async ()=>{
+  const nm=$('nmE').value.trim(),firm=$('firmE').value.trim(),em=$('emS').value.trim(),pw=$('pwS').value;
+  if(!nm){$('nmE').focus();$('errE').textContent='Your name, so the team knows who approves.';return}
+  if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)){$('emS').focus();$('errE').textContent='That email doesn\u2019t look right.';return}
+  if(pw.length<8){$('pwS').focus();$('errE').textContent='Eight characters or more.';return}
+  $('errE').textContent='';const b=$('emailSignup');busy(b,true);
+  const res=await ask('email-signup',{name:nm,firm,email:em,password:pw});
+  busy(b,false);b.disabled=false;
+  if(!res.ok){
+    if(res.kind==='exists')$('errE').textContent='An account with this email already exists \u2014 log in instead.';
+    else $('errE').textContent=res.error||'Could not create the account.';
+    return;
+  }
+  $('sentH').textContent='Check your email';$('sentHint').innerHTML='We\u2019ve sent a confirmation link to <b>'+em+'</b>. Open it, then log in here.';
+  show('s-reset-sent');
+});
+
+/* the register cover writes itself */
+$('cvDate').textContent=new Date().toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'});
+
+/* the line remembers you */
+const REM='briklay.phone';
+try{const r=localStorage.getItem(REM);if(r&&/^[6-9]\d{9}$/.test(r)){$('ph').value=r;$('ph').dispatchEvent(new Event('input'));$('remember').hidden=false}}catch(e){}
+$('notYou').addEventListener('click',()=>{try{localStorage.removeItem(REM)}catch(e){}PL.reset();$('remember').hidden=true;$('ph').focus()});
+
+/* ---------- OTP blanks ---------- */
+function slots(container,input,n,onChange){
+  const box=$(container);box.innerHTML='';
+  for(let i=0;i<n;i++){const d=document.createElement('div');d.className='d';box.appendChild(d)}
+  const ds=[...box.children];const inp=$(input);
+  const render=()=>{
+    const v=inp.value.replace(/\D/g,'').slice(0,n);if(v!==inp.value)inp.value=v;
+    ds.forEach((d,i)=>{
+      const ch=v[i]||'';
+      if(ch&&d.textContent!==ch){d.textContent=ch;d.classList.remove('pop');void d.offsetWidth;d.classList.add('pop')}
+      else if(!ch)d.textContent='';
+      d.classList.toggle('has',!!ch);
+      d.classList.toggle('cur',document.activeElement===inp&&i===Math.min(v.length,n-1)&&v.length<n);
+    });
+    onChange(v);
+  };
+  inp.addEventListener('input',render);inp.addEventListener('focus',render);inp.addEventListener('blur',render);
+  inp.addEventListener('keydown',e=>{if(e.key==='Enter'){const b=inp.closest('.step').querySelector('.btn:not(:disabled)');b&&b.click()}});
+  box.addEventListener('click',()=>inp.focus());
+  return{reset(){inp.value='';render()},inp};
+}
+const OT=slots('digO','otpIn',6,v=>{
+  code=v;$('verify').disabled=v.length!==6;$('errO').textContent='';$('otpBox').classList.remove('ok');
+  if(v.length===6)setTimeout(verify,160); /* the sixth digit submits */
+});
+
+/* ---------- a successful login lets the app take over ----------
+   The real session is already set in the parent by the time we get here; the app's
+   auth listener flips to the dashboard. We only play the page-turn, then tell it. */
+const go=()=>{if(reduced){parent.postMessage({type:'brik-auth-done'},'*');return}document.querySelector('.card').classList.add('turn');$('lead').classList.add('turn');setTimeout(()=>parent.postMessage({type:'brik-auth-done'},'*'),560)};
+function busy(b,on){b.classList.toggle('busy',on);b.disabled=on}
+
+/* ---------- send code ---------- */
+async function sendCode(P,wrapId,btnId,errId){
+  const v=P.value;
+  if(!/^[6-9]\d{9}$/.test(v)){shakeBox(wrapId);$(errId).textContent='That doesn\u2019t look like an Indian mobile number.';return}
+  phone=v;const b=$(btnId);busy(b,true);
+  try{localStorage.setItem(REM,v)}catch(e){}
+  const name=mode==='signup'?$('nm').value.trim():'';
+  const firm=mode==='signup'?$('firm').value.trim():'';
+  const res=await ask('send-otp',{phone:v,mode,name,firm});
+  busy(b,false);b.disabled=false;
+  if(!res.ok){$(errId).textContent=res.error||'Could not send the code. Try again.';shakeBox(wrapId);return}
+  $('sentTo').textContent=fmt(phone);
+  OT.reset();$('otpBox').classList.remove('ok');$('errO').textContent='';
+  show('s-otp');startResend();
+}
+$('sendL').addEventListener('click',()=>sendCode(PL,'phoneL','sendL','errL'));
+$('sendS').addEventListener('click',()=>{
+  if(!$('nm').value.trim()){$('nm').focus();$('errS').textContent='Your name, so the team knows who approves.';return}
+  sendCode(PS,'phoneS','sendS','errS');
+});
+$('otpBack').addEventListener('click',()=>show(mode==='signup'?'s-signup':'s-login',true));
+let rt=null;
+function startResend(){
+  clearInterval(rt);let n=30;const T=$('resendT'),R=$('resend');R.hidden=true;T.hidden=false;
+  T.textContent='Resend in '+n+'s';
+  rt=setInterval(()=>{n--;T.textContent='Resend in '+n+'s';if(n<=0){clearInterval(rt);T.hidden=true;R.hidden=false}},1000);
+}
+$('resend').addEventListener('click',async ()=>{
+  OT.reset();$('errO').textContent='';
+  const name=mode==='signup'?$('nm').value.trim():'';
+  const firm=mode==='signup'?$('firm').value.trim():'';
+  await ask('send-otp',{phone,mode,name,firm});
+  startResend();
+});
+
+/* ---------- verify the WhatsApp code ---------- */
+async function verify(){
+  if(code.length!==6)return;
+  const b=$('verify');busy(b,true);
+  const res=await ask('verify-otp',{phone,token:code});
+  if(!res.ok){
+    busy(b,false);b.disabled=false;
+    $('otpBox').classList.remove('ok');$('otpBox').classList.add('shake');
+    setTimeout(()=>$('otpBox').classList.remove('shake'),400);
+    $('errO').textContent=res.error||'That code didn’t work. Check it and try again.';
+    return;
+  }
+  $('otpBox').classList.add('ok');b.classList.remove('busy');b.disabled=false;b.classList.add('done');b.querySelector('.lbl').textContent='Logged in';
+  setTimeout(go,650);
+}
+$('verify').addEventListener('click',verify);
+
+/* ---------- email / password / google (simulated) ---------- */
+$('showPw').addEventListener('click',()=>{const p=$('pw');const t=p.type==='password';p.type=t?'text':'password';$('showPw').textContent=t?'Hide':'Show'});
+$('emailGo').addEventListener('click',async ()=>{
+  const em=$('em').value.trim(),pw=$('pw').value;$('errEm').textContent='';
+  if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)){$('em').focus();$('errEm').textContent='That email doesn’t look right.';return}
+  if(pw.length<6){$('pw').focus();$('errEm').textContent='Enter your password.';return}
+  const b=$('emailGo');busy(b,true);
+  const res=await ask('email-login',{email:em,password:pw});
+  if(!res.ok){
+    busy(b,false);b.disabled=false;
+    if(res.kind==='unconfirmed'){$('sentH').textContent='Check your email';$('sentHint').innerHTML='Confirm your email at <b>'+em+'</b>, then log in here.';show('s-reset-sent');return}
+    $('errEm').textContent=res.error||'Could not log in.';return;
+  }
+  busy(b,false);b.disabled=false;b.classList.add('done');b.querySelector('.lbl').textContent='Logged in';setTimeout(go,500);
+});
+$('resetGo').addEventListener('click',async ()=>{
+  const em=$('emF').value.trim();
+  if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)){$('emF').focus();return}
+  const b=$('resetGo');busy(b,true);
+  await ask('forgot',{email:em});
+  busy(b,false);b.disabled=false;
+  $('sentH').textContent='Link sent';$('sentHint').innerHTML='Check <b>'+em+'</b>. The link works for 30 minutes.';
+  show('s-reset-sent');
+});
+['googleL','googleS'].forEach(id=>$(id).addEventListener('click',async ()=>{
+  const b=$(id);busy(b,true);
+  const res=await ask('google',{mode});
+  // On success the parent redirects the whole page to Google; nothing runs here.
+  if(res&&!res.ok){busy(b,false);b.disabled=false;const e=(id==='googleS')?$('errS'):$('errL');if(e)e.textContent=res.error||'Google sign-in is unavailable right now.';}
+}));
+</script>
+</body>
+</html>

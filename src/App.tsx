@@ -95,6 +95,9 @@ import CreateWorkspace from './pages/CreateWorkspace';
 // S1-2 Part B: the standalone <Login> screen is retired — every unauthenticated path now
 // resolves to the Landing screen (via LOGIN_ROUTE), so the old surface is unreachable.
 import Landing from './pages/Landing';
+// The register-book login / sign-up screen (loginV1.html in a full-viewport iframe, wired to real
+// Supabase auth). Renders for the /login and /signup routes; '/' keeps the marketing Landing.
+import LoginRegister from './pages/LoginRegister';
 import Privacy from './pages/Privacy';
 import Terms from './pages/Terms';
 import DataDeletion from './pages/DataDeletion';
@@ -439,9 +442,11 @@ function App() {
 
   if (authState.status === 'unauthenticated') {
     const p = location.pathname;
-    // /signup is a public entry too (the team-invite button lands here as /signup?method=phone → the
-    // AuthPanel opens straight into phone signup). Render Landing directly so the query survives.
-    if (p === '/' || p === LOGIN_ROUTE || p === '/signup') return <Landing />;
+    // '/' is the marketing landing; /login and /signup are the register-book auth screen. /signup is a
+    // public entry too (the team-invite button lands here as /signup?method=phone → the sheet opens on
+    // phone sign-up). Render these directly so the query string survives.
+    if (p === '/') return <Landing />;
+    if (p === LOGIN_ROUTE || p === '/signup') return <LoginRegister />;
     // S1-2 Part B: consolidate EVERY other unauthenticated path onto the single login route so an
     // involuntary signout on a deep route (e.g. /ledger) can never surface the retired Login screen —
     // even a forgotten reference or a stale-bundle tab lands on the current login surface.
