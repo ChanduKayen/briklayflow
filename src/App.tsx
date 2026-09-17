@@ -238,7 +238,7 @@ function SplashLoader() {
    * rule and nothing else: the brand moment stays rare enough to still mean something.
    */
   return (
-    <div style={{ height: '100vh', background: '#FAF7F0' }}>
+    <div style={{ height: '100vh', background: '#F7F6F1' }}>
       <RouteRule />
     </div>
   );

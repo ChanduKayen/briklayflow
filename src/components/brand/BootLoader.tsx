@@ -1,11 +1,11 @@
 /**
- * The app opening — a port of the reference loader.
+ * The app opening — the quipu ties itself.
  *
- * The wordmark settles, the period drops, the ledger rule is drawn with the pen travelling on it.
- * The reference times that to a fixed 2.4s and its own comment says "wire to real milestones", so
- * it does: the rule eases toward 80% and crawls while the app is still coming up, and completes
- * the moment it is actually ready — never sitting full while still loading, never stalling at 99%
- * after it has arrived.
+ * Cords drop from the bar, nine knots tie in top to bottom like counts being written down, hold,
+ * then untie for the next round; a slow sway keeps it alive while it waits. (From the loader
+ * reference, briklay-loader-v1.) The animation loops on its own; the boot logic is unchanged — the
+ * overlay holds until the app signals `booted`, then fades out. A 7s cap guarantees it never
+ * covers the app if readiness never arrives.
  */
 import { useEffect, useRef, useState } from 'react';
 import { isBooted, onBooted } from './bootSignal';
@@ -14,109 +14,84 @@ const REDUCED = typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduce
 
 const CSS = `
 .bkboot{
-  --cream:#FAF7F0; --ink:#2A241C; --walnut:#6E5F4C; --rule:#E6DECD; --terra:#C0603F;
-  --serif:'Playfair Display', Georgia, serif;
   position:fixed; inset:0; z-index:9999; display:grid; place-items:center;
-  background:var(--cream); font-family:var(--serif);
-  transition:opacity .6s ease, transform .6s cubic-bezier(.5,0,.2,1);
+  background:#F7F6F1;
+  opacity:0; transition:opacity .5s ease;
 }
-.bkboot.exit{opacity:0; transform:scale(.99); pointer-events:none}
-.bkboot .lockup{position:relative; text-align:center}
-.bkboot .word{font-size:clamp(34px,5vw,44px); font-weight:600; color:var(--ink); letter-spacing:.01em;
-  opacity:0; transform:translateY(6px); filter:blur(2px);
-  transition:opacity .9s ease, transform 1s cubic-bezier(.2,.7,.2,1), filter .9s ease}
-.bkboot.on .word{opacity:1; transform:none; filter:none}
-.bkboot .dot{display:inline-block; color:var(--terra); font-style:normal; opacity:0; transform:translateY(-26px)}
-.bkboot.on .dot{animation:bk-drop .65s cubic-bezier(.3,.9,.35,1.35) .55s forwards}
-@keyframes bk-drop{
-  0%{opacity:0; transform:translateY(-26px)}
-  55%{opacity:1; transform:translateY(2px)}
-  75%{transform:translateY(-2px)}
-  100%{opacity:1; transform:translateY(0)}
-}
-.bkboot.loading .dot{animation:bk-breathe 2.2s ease-in-out 1.3s infinite}
-@keyframes bk-breathe{0%,100%{opacity:1}50%{opacity:.45}}
-.bkboot.done .dot{animation:bk-blink .5s ease; opacity:1}
-@keyframes bk-blink{0%{opacity:1}30%{opacity:.2}100%{opacity:1}}
-.bkboot .ruleline{position:relative; width:min(240px,56vw); height:1px; margin:26px auto 0; background:var(--rule)}
-.bkboot .ruleline .fill{position:absolute; left:0; top:0; height:1px; width:0%; background:var(--walnut)}
-.bkboot .ruleline .pen{position:absolute; top:-2.5px; width:6px; height:6px; border-radius:50%;
-  background:var(--terra); opacity:0; transform:translateX(-3px); transition:opacity .4s}
-.bkboot.loading .pen{opacity:1}
-.bkboot.done .pen{opacity:0}
+.bkboot.on{opacity:1}
+.bkboot.exit{opacity:0; transform:scale(.99); pointer-events:none; transition:opacity .6s ease, transform .6s cubic-bezier(.5,0,.2,1)}
+/* ---------- the quipu loader ---------- */
+.bkboot .qload{--m:#12261F; width:84px; height:84px; display:block; fill:var(--m);
+  transform-origin:50% 8%; animation:qsway 2.8s ease-in-out infinite}
+.bkboot .qload .cord{transform-box:fill-box; transform-origin:top; animation:qcord 2.8s cubic-bezier(.2,.8,.3,1) infinite}
+.bkboot .qload .knot{transform-box:fill-box; transform-origin:center; animation:qknot 2.8s cubic-bezier(.2,.9,.3,1.3) infinite}
+.bkboot .qload .c1{animation-delay:0s}.bkboot .qload .c2{animation-delay:.08s}.bkboot .qload .c3{animation-delay:.16s}.bkboot .qload .c4{animation-delay:.24s}
+.bkboot .qload .k1{animation-delay:.42s}.bkboot .qload .k2{animation-delay:.52s}.bkboot .qload .k3{animation-delay:.62s}.bkboot .qload .k4{animation-delay:.72s}.bkboot .qload .k5{animation-delay:.82s}.bkboot .qload .k6{animation-delay:.92s}.bkboot .qload .k7{animation-delay:1.02s}.bkboot .qload .k8{animation-delay:1.12s}.bkboot .qload .k9{animation-delay:1.22s}
+@keyframes qcord{0%{transform:scaleY(0)}14%{transform:scaleY(1)}78%{transform:scaleY(1)}88%,100%{transform:scaleY(0)}}
+@keyframes qknot{0%{transform:scale(0)}10%{transform:scale(1)}70%{transform:scale(1)}78%,100%{transform:scale(0)}}
+@keyframes qsway{0%,100%{transform:rotate(-1.5deg)}50%{transform:rotate(1.5deg)}}
 @media (prefers-reduced-motion:reduce){
-  .bkboot *{transition-duration:.01ms !important; animation:none !important}
-  .bkboot .word{opacity:1; transform:none; filter:none}
-  .bkboot .dot{opacity:1; transform:none}
+  .bkboot,.bkboot.on{transition:none}
+  .bkboot .qload,.bkboot .qload .cord,.bkboot .qload .knot{animation:none; transform:none}
 }
 `;
 
 export default function BootLoader() {
-  const [phase, setPhase] = useState<'' | 'on' | 'loading' | 'done' | 'exit'>('');
+  const [phase, setPhase] = useState<'' | 'on' | 'exit'>('');
   const [gone, setGone] = useState(false);
-  const fillRef = useRef<HTMLDivElement>(null);
-  const penRef = useRef<HTMLDivElement>(null);
-  const readyRef = useRef(isBooted());
+  const ready = useRef(isBooted());
 
   useEffect(() => {
-    const off = onBooted(() => { readyRef.current = true; });
-    // Never hold the screen hostage. If readiness never arrives — a caught render error, a gate that
-    // never resolves — an overlay stuck at 99% would be covering whatever the app is trying to show.
-    const cap = window.setTimeout(() => { readyRef.current = true; }, 7000);
-    return () => { off(); window.clearTimeout(cap); };
-  }, []);
+    const off = onBooted(() => { ready.current = true; });
+    // Never hold the screen hostage — if readiness never arrives, reveal the app anyway.
+    const cap = window.setTimeout(() => { ready.current = true; }, 7000);
 
-  useEffect(() => {
-    let raf = 0;
-    // Two frames, as the reference does it: the element has to be painted in its initial state for
-    // the settle to be a transition rather than a jump.
+    // Fade in on the next painted frame (so it's a transition, not a jump).
     let start = requestAnimationFrame(() => { start = requestAnimationFrame(() => setPhase('on')); });
-    const t2 = window.setTimeout(() => {
-      setPhase('loading');
-      const t0 = performance.now();
-      // The curve the reference draws — quick to ~80, then a crawl — but the finish line is the
-      // app, not a clock. EXPECT is only how fast the crawl looks while readiness is unknown.
-      const EXPECT = REDUCED ? 200 : 2400;
-      const tick = (t: number) => {
-        const el = t - t0;
-        let p: number;
-        if (readyRef.current) p = 100;
-        else { const x = Math.min(el / EXPECT, 1); p = Math.min(80 * (1 - Math.pow(1 - x, 2.1)) + 19 * x, 99); }
-        if (fillRef.current) fillRef.current.style.width = p + '%';
-        if (penRef.current) penRef.current.style.left = `calc(${p}% - 3px)`;
-        if (p < 100) raf = requestAnimationFrame(tick);
-        else {
-          setPhase('done');
-          window.setTimeout(() => {
-            setPhase('exit');
-            window.setTimeout(() => setGone(true), 650);
-          }, REDUCED ? 80 : 520);
-        }
-      };
-      raf = requestAnimationFrame(tick);
-    }, REDUCED ? 0 : 1150);
-    return () => { cancelAnimationFrame(start); window.clearTimeout(t2); cancelAnimationFrame(raf); };
+
+    // Hold until the app is ready, with a small floor so it doesn't flash on a fast boot.
+    const t0 = performance.now();
+    const MIN = REDUCED ? 0 : 650;
+    let raf = 0;
+    const check = () => {
+      if (ready.current) {
+        const wait = Math.max(0, MIN - (performance.now() - t0));
+        window.setTimeout(() => {
+          setPhase('exit');
+          window.setTimeout(() => setGone(true), REDUCED ? 30 : 640);
+        }, wait);
+        return;
+      }
+      raf = requestAnimationFrame(check);
+    };
+    raf = requestAnimationFrame(check);
+
+    return () => { off(); window.clearTimeout(cap); cancelAnimationFrame(start); cancelAnimationFrame(raf); };
   }, []);
 
   if (gone) return null;
-  // Cumulative, the way the reference builds it up: `on` keeps the wordmark settled and the period
-  // down for the whole run. Swapping the class instead of adding it would let the wordmark fade back
-  // out the moment the rule starts being drawn.
   const cls = ['bkboot'];
-  if (phase) cls.push('on');
-  if (phase === 'loading') cls.push('loading');
-  if (phase === 'done' || phase === 'exit') cls.push('done');
+  if (phase === 'on') cls.push('on');
   if (phase === 'exit') cls.push('exit');
   return (
     <div className={cls.join(' ')} role="status" aria-label="Loading Briklay">
       <style>{CSS}</style>
-      <div className="lockup">
-        <div className="word">Briklay<span className="dot">.</span></div>
-        <div className="ruleline">
-          <div className="fill" ref={fillRef} />
-          <div className="pen" ref={penRef} />
-        </div>
-      </div>
+      <svg className="qload" viewBox="0 0 40 40" aria-hidden="true">
+        <rect className="bar" x="3" y="4" width="34" height="3.6" rx="1.8" />
+        <rect className="cord c1" x="7.9" y="7" width="2.2" height="30" rx="1.1" />
+        <rect className="cord c2" x="15.9" y="7" width="2.2" height="20" rx="1.1" />
+        <rect className="cord c3" x="23.9" y="7" width="2.2" height="27" rx="1.1" />
+        <rect className="cord c4" x="31.9" y="7" width="2.2" height="15" rx="1.1" />
+        <circle className="knot k1" cx="17" cy="13" r="2.1" />
+        <circle className="knot k2" cx="25" cy="14" r="2.7" />
+        <circle className="knot k3" cx="9" cy="15" r="3.0" />
+        <circle className="knot k4" cx="33" cy="17" r="2.5" />
+        <circle className="knot k5" cx="25" cy="21" r="2.0" />
+        <circle className="knot k6" cx="17" cy="22" r="2.9" />
+        <circle className="knot k7" cx="9" cy="25" r="2.2" />
+        <circle className="knot k8" cx="25" cy="29" r="3.1" />
+        <circle className="knot k9" cx="9" cy="33" r="3.2" />
+      </svg>
     </div>
   );
 }
