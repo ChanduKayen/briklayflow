@@ -203,18 +203,6 @@ export function TxComposer({ draft, onDraft, onClose }: {
   };
   const amountOf = (d: TxDraft) => parseInt(d.amt || '0', 10);
 
-  // ── the phone keyboard: the panel rides above it and the bar steps aside ──
-  const [kb, setKb] = useState(0);
-  useEffect(() => {
-    const vv = window.visualViewport;
-    if (!vv) return;
-    const lift = () => { const h = Math.max(0, window.innerHeight - vv.height - vv.offsetTop); setKb(h > 80 ? h - 12 : 0); };
-    vv.addEventListener('resize', lift); vv.addEventListener('scroll', lift);
-    return () => { vv.removeEventListener('resize', lift); vv.removeEventListener('scroll', lift); };
-  }, []);
-  useEffect(() => { document.documentElement.classList.toggle('mnav-kb', open && kb > 0); }, [open, kb]);
-  useEffect(() => () => document.documentElement.classList.remove('mnav-kb'), []);
-
   // ── close: Escape, and a pull on the grab handle ──
   useEffect(() => {
     if (!open) return;
@@ -262,7 +250,7 @@ export function TxComposer({ draft, onDraft, onClose }: {
     <>
       <div className="tx-scrim on" onClick={() => onClose(true)} />
       <section ref={panelRef} className="tx on" role="dialog" aria-modal="true" aria-label="New transaction"
-        style={{ ['--h' as string]: `${height}px`, ['--kb' as string]: `${kb}px` } as React.CSSProperties}>
+        style={{ ['--h' as string]: `${height}px` } as React.CSSProperties}>
         <div className="grab" aria-hidden="true" onTouchStart={dragStart} onTouchMove={dragMove} onTouchEnd={dragEnd} onTouchCancel={dragEnd}><i /></div>
         <div className="tx-head">
           <button type="button" className="ico" aria-label={T.step === 1 ? 'Close' : 'Back'}

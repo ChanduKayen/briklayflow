@@ -84,6 +84,7 @@ const BillDetail = lazy(() => import('./pages/BillDetail'));
 const Logbook = lazy(loadLogbook);
 import { BriklayDesktopNav } from './components/nav/BriklayRail';
 import { MobileNavBar } from './components/nav/MobileNavBar';
+import { useSoftKeyboard } from './lib/useSoftKeyboard';
 import { isSecondaryNavRoute } from './components/nav/navTokens';
 const Orders = lazy(() => import('./pages/Orders'));
 import InviteAccept from './pages/InviteAccept';
@@ -861,7 +862,9 @@ function BottomTabBar({ session, onMoreTap }: { session: Session; onMoreTap: () 
     window.addEventListener('scroll', onScroll, { passive: true });
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
-  const navTucked = navHidden || hideForRoute;
+  // Typing wins the bottom of the screen: the in-project bar tucks away with the keyboard too.
+  const kb = useSoftKeyboard();
+  const navTucked = navHidden || hideForRoute || kb.open;
 
   // Bitter-chocolate shell — the mobile mirror of the desktop rail (same night-binding gradient + edge).
   const shellClass =

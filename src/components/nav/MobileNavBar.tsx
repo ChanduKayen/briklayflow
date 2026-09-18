@@ -25,6 +25,7 @@
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { useSoftKeyboard } from '../../lib/useSoftKeyboard';
 import { navAction, type NavActionState } from './navAction';
 import { TxComposer } from './TxComposer';
 import { TX_CSS, composer, emptyDraft, type TxDraft } from './txDraft';
@@ -131,6 +132,10 @@ export function MobileNavBar({
   const panelRef = useRef<HTMLElement | null>(null);
 
   const hapt = (ms: number | number[] = 6) => { try { navigator.vibrate?.(ms); } catch { /* unsupported */ } };
+
+  // While you are typing, the bar and its action get out of the way — anywhere in the app, whatever
+  // raised the keyboard. The height it reports is what the composer rides above.
+  const kb = useSoftKeyboard();
 
   const n = useMemo(() => counts ?? { pos: poBadge }, [counts, poBadge]);
   const countOf = useCallback((d: Dest) => (d.count ? (n[d.count] ?? 0) : 0), [n]);
@@ -304,7 +309,7 @@ export function MobileNavBar({
   return (
     <>
       <style>{CSS + TX_CSS}</style>
-      <div className="mnav">
+      <div className={`mnav${kb.open ? ' kb' : ''}`} style={{ ['--kb' as string]: `${kb.height}px` } as React.CSSProperties}>
         <TxComposer key={draft ? "on" : "off"} draft={draft} onDraft={setDraft} onClose={closeComposer} />
         {moreMounted && (
           <>
@@ -350,7 +355,7 @@ export function MobileNavBar({
           </>
         )}
 
-      <div className={`mnav-dock${hidden ? ' gone' : ''}`}>
+      <div className={`mnav-dock${hidden || kb.open ? ' gone' : ''}`}>
         {/* the action — off the bar, above its right end, saying what it makes */}
         <button
           ref={fabRef} type="button"
