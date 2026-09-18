@@ -737,7 +737,7 @@ export const isCompanyHead = (code?: string | null): boolean =>
 
 /** The heads a site sends most often — what a picker offers before anything is typed. The other
  *  eleven are one word away. */
-export const COMMON_GEN_HEADS = ['GEN-01', 'GEN-02', 'GEN-05', 'GEN-04', 'GEN-16', 'GEN-99'];
+export const COMMON_GEN_HEADS = ['GEN-01', 'GEN-02', 'GEN-05', 'GEN-04', 'GEN-16', 'GEN-07', 'GEN-99'];
 
 const normHead = (s: string) => (s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 /**

@@ -1203,7 +1203,10 @@ function PopupContents({
   };
 
   // Overhead heads matching what the owner typed, shown BELOW the party matches.
-  const genMatches = payeeSearch.trim() ? searchGenHeads(payeeSearch) : [];
+  // The heads are offered before a letter is typed, as they are on the phone: not every payment has a
+  // payee, and somebody who has never typed "hamali" has no way to learn the list exists. An empty
+  // query answers with the common few (searchGenHeads); typing filters all seventeen.
+  const genMatches = searchGenHeads(payeeSearch);
 
   // Payee search list. TWO different questions, and they were tangled: with NO typed text the ordering
   // question is "who did the AI hear?" (sort by similarity to payee_raw); the moment he types, the question
