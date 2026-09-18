@@ -19,6 +19,7 @@ import { BillRowCard } from './BillRowCard';
 import { NatureChip, natureOf } from './atoms';
 import DragSheet from '../DragSheet';
 import { loadWallets, walletForSender, type WalletBalance } from '../../lib/walletApi';
+import { searchGenHeads } from '../../lib/costCodes';
 
 const CSS = `
 .rvm{--tint:#C4502B;--tint-press:#A8431F;--ink:#1B1713;--ink-2:#87807A;--ink-3:#B5AEA7;
@@ -104,6 +105,20 @@ const CSS = `
 .rvm .dd.create .dn{color:var(--tint);font-weight:600}
 .rvm .dd.create .dt{color:var(--warn)}
 .rvm .ddempty{padding:12px 4px;font-size:13.5px;color:var(--ink-3)}
+.rvm .dd.head .dn{font-weight:500}
+.rvm .dd.head .dt{color:var(--ink-3);font-weight:600}
+/* an overhead has no party — the row says so where the name would carry a face */
+/* a head's name is a phrase, not a name — it takes a second line rather than an ellipsis */
+.rvm .kv .v.headname{white-space:normal;overflow:visible;line-height:1.3;padding:7px 0}
+.rvm .ovh{flex-shrink:0;font-size:11px;font-weight:700;letter-spacing:.02em;color:var(--ink-2);
+  background:var(--bg);border-radius:999px;padding:3px 9px;margin-right:2px}
+/* the edit sheet keeps the picker open under "Paid to" */
+.rvm .pickfield{background:var(--card);border-radius:14px;padding:11px 16px 4px;margin-bottom:10px}
+.rvm .pickfield>label{display:block;font-size:12px;font-weight:600;color:var(--ink-2);margin-bottom:2px}
+.rvm .pickfield .chosen{display:flex;align-items:center;gap:8px;font-size:16.5px;font-weight:500;color:var(--ink);
+  min-height:26px}
+.rvm .pickfield .chosen .dim{color:var(--ink-3)}
+.rvm .pickfield .ddlist{max-height:190px}
 
 .rvm .notice{display:flex;align-items:center;gap:8px;margin-top:12px;
   font-size:13px;line-height:1.45;color:var(--ink-2)}
@@ -276,6 +291,9 @@ export interface Draft {
   description: string;
   /** built in the split sheet; the extractor produces no split of its own */
   split: { payeeId: string | null; payeeName: string; projectId: string; amount: number }[] | null;
+  /** An overhead head (GEN-xx) instead of a party: diesel, hamali, a tea bill. The payee name then
+   *  IS the head's name, and nothing is ever created as a party. */
+  genHead: string | null;
   /** Site cash. null = leave it as it stands — refill if the payee holds a wallet, drawn from the
    *  sender's wallet if theirs holds money. A tap here is the owner overruling that. */
   topUp: boolean | null;
@@ -293,6 +311,71 @@ export interface ReviewMobileProps {
   senderLine: string | null;
   onManageSenders: () => void;
   onOpenWhatsApp: () => void;
+}
+
+/** The names the extractor put forward for an entry — its own guess first, then its near misses. */
+function suggestionsOf(entry: RoughEntry): string[] {
+  const ai = entry.ai_extracted || {};
+  const names: string[] = [];
+  if (ai.suggested_payee?.name) names.push(ai.suggested_payee.name);
+  (ai.payee_closest_match ?? []).forEach(m => { if (m?.name && !names.includes(m.name)) names.push(m.name); });
+  return names;
+}
+
+/** One line of the payee picker: a party, an overhead head, or the name about to be added. */
+interface NameRow { name: string; id: string | null; head?: string; tag?: string; create?: boolean }
+
+/**
+ * Who this money went to — parties first, then the overhead heads underneath.
+ *
+ * Not every payment has a payee. Diesel, hamali, a tea bill, the electricity — those are overheads:
+ * they are filed under a head with NO party, and inventing "Diesel" as a party to hold them is how a
+ * contact list fills with things that are not people. The desktop editor has always offered the heads
+ * in its payee search; this is the same list, in the phone's own picker.
+ */
+function nameRows(q: string, suggestions: string[], stakeholders: StakeholderLite[]): NameRow[] {
+  const t = q.trim(), ql = t.toLowerCase();
+  const hit = (n: string) => n.toLowerCase().includes(ql);
+  const sugNames = suggestions.filter(hit);
+  const rest = stakeholders.filter(s => !sugNames.includes(s.name) && hit(s.name)).slice(0, 4);
+  const heads = searchGenHeads(t);
+  const rows: NameRow[] = [];
+  const exact = [...sugNames, ...rest.map(r => r.name), ...heads.map(h => h.name)].some(n => n.toLowerCase() === ql);
+  if (t && !exact) rows.push({ name: t, id: null, tag: 'new party', create: true });
+  sugNames.forEach(n => rows.push({ name: n, id: stakeholders.find(s => s.name === n)?.stakeholder_id ?? null, tag: 'suggested' }));
+  rest.forEach(s => rows.push({ name: s.name, id: s.stakeholder_id }));
+  heads.forEach(h => rows.push({ name: h.name, id: null, head: h.code, tag: 'overhead' }));
+  return rows;
+}
+
+/** The picker itself: one search box over one list. The card opens it under "To"; the edit sheet
+ *  keeps it open under "Paid to". */
+function NameList({ q, setQ, suggestions, stakeholders, onPick, inputRef }: {
+  q: string; setQ: (v: string) => void;
+  suggestions: string[]; stakeholders: StakeholderLite[];
+  onPick: (r: NameRow) => void;
+  inputRef?: React.RefObject<HTMLInputElement | null>;
+}) {
+  const rows = nameRows(q, suggestions, stakeholders);
+  return (
+    <>
+      <div className="ddsearch">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="M21 21l-4.3-4.3" /></svg>
+        <input ref={inputRef} value={q} onChange={e => setQ(e.target.value)} placeholder="A name, or an expense head" />
+      </div>
+      <div className="ddlist">
+        {rows.length === 0
+          ? <div className="ddempty">No matches — keep typing to add a new name</div>
+          : rows.map((r, i) => (
+            <button type="button" className={`dd${r.create ? ' create' : ''}${r.head ? ' head' : ''}`} key={`${r.head ?? r.id ?? 'new'}-${r.name}-${i}`}
+              onClick={() => onPick(r)}>
+              <div className="dn">{r.create ? `Add “${r.name}”` : r.name}</div>
+              {r.tag && <div className="dt">{r.tag}</div>}
+            </button>
+          ))}
+      </div>
+    </>
+  );
 }
 
 /** One entry's card. Its own open/closed state lives here so a long list stays independent. */
@@ -331,33 +414,20 @@ function Card({
     : !!(senderWallet && senderWallet.balance > 0);
 
   const projectName = draft.projectId ? projects.find(x => x.project_id === draft.projectId)?.name ?? null : null;
-  const isNewParty = !draft.payeeId && !!draft.payeeName?.trim();
+  const isNewParty = !draft.payeeId && !draft.genHead && !!draft.payeeName?.trim();
   const senderName = entry.sender_name || 'Someone';
   const via = entry.source?.startsWith('WHATSAPP') ? 'WhatsApp' : 'Briklay';
   const sentTime = new Date(entry.created_at).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true });
   const message = (entry.transcribed_text || entry.raw_text || '').trim();
   const projectRaw = resolveEntry(entry, stakeholders, projects).projectRaw;
 
-  const suggestions = useMemo(() => {
-    const ai = entry.ai_extracted || {};
-    const names: string[] = [];
-    if (ai.suggested_payee?.name) names.push(ai.suggested_payee.name);
-    (ai.payee_closest_match ?? []).forEach(m => { if (m?.name && !names.includes(m.name)) names.push(m.name); });
-    return names;
-  }, [entry]);
+  const suggestions = useMemo(() => suggestionsOf(entry), [entry]);
 
-  const nameRows = (() => {
-    const q = ddq.trim(), ql = q.toLowerCase();
-    const hit = (n: string) => n.toLowerCase().includes(ql);
-    const sugNames = suggestions.filter(hit);
-    const rest = stakeholders.filter(s => !sugNames.includes(s.name) && hit(s.name)).slice(0, 4);
-    const rows: { name: string; id: string | null; tag?: string; create?: boolean }[] = [];
-    const exact = [...sugNames, ...rest.map(r => r.name)].some(n => n.toLowerCase() === ql);
-    if (q && !exact) rows.push({ name: q, id: null, tag: 'new party', create: true });
-    sugNames.forEach(n => rows.push({ name: n, id: stakeholders.find(s => s.name === n)?.stakeholder_id ?? null, tag: 'suggested' }));
-    rest.forEach(s => rows.push({ name: s.name, id: s.stakeholder_id }));
-    return rows;
-  })();
+  /** What a pick means: an overhead head files party-less; anything else is a party (or a new name). */
+  const pick = (r: NameRow) => {
+    onPatch(r.head ? { payeeName: r.name, payeeId: null, genHead: r.head } : { payeeName: r.name, payeeId: r.id, genHead: null });
+    setSug(null); setDdq('');
+  };
 
   const toggleSug = (which: 'to' | 'site', focus = true) => {
     setSug(cur => {
@@ -413,26 +483,14 @@ function Card({
           <div className="kvs">
             <button type="button" className={`kv tap${sug === 'to' ? ' open' : ''}${flash === 'to' ? ' flash' : ''}`} onClick={() => toggleSug('to')}>
               <div className="k">To</div>
-              <div className={`v${draft.payeeName ? '' : ' dim'}`}>{draft.payeeName || 'Add a name'}</div>
+              <div className={`v${draft.payeeName ? '' : ' dim'}${draft.genHead ? ' headname' : ''}`}>{draft.payeeName || 'Add a name'}</div>
+              {draft.genHead && <span className="ovh">overhead</span>}
               <span className="chev">{CHEV}</span>
             </button>
             <div className={`sug${sug === 'to' ? ' open' : ''}`}>
               <div className="sug-w">
-                <div className="ddsearch">
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="M21 21l-4.3-4.3" /></svg>
-                  <input ref={ddRef} value={ddq} onChange={e => setDdq(e.target.value)} placeholder="Search or type a new name" />
-                </div>
-                <div className="ddlist">
-                  {nameRows.length === 0
-                    ? <div className="ddempty">No matches — keep typing to add a new name</div>
-                    : nameRows.map((r, i) => (
-                      <button type="button" className={`dd${r.create ? ' create' : ''}`} key={`${r.name}-${i}`}
-                        onClick={() => { onPatch({ payeeName: r.name, payeeId: r.id }); setSug(null); setDdq(''); }}>
-                        <div className="dn">{r.create ? `Add “${r.name}”` : r.name}</div>
-                        {r.tag && <div className="dt">{r.tag}</div>}
-                      </button>
-                    ))}
-                </div>
+                <NameList q={ddq} setQ={setDdq} suggestions={suggestions} stakeholders={stakeholders}
+                  onPick={pick} inputRef={ddRef} />
               </div>
             </div>
 
@@ -561,6 +619,7 @@ export default function ReviewMobile(p: ReviewMobileProps) {
   // The payee's wallet, by name — the same match the desktop editor makes, minus any wallet that
   // has been retired.
   const payeeWalletOf = (d: Draft): WalletBalance | null => {
+    if (d.genHead) return null;                       // an overhead is a head, not a person with a wallet
     const norm = (x: string) => (x || '').trim().toLowerCase();
     const nm = norm((d.payeeId ? p.stakeholders.find(x => x.stakeholder_id === d.payeeId)?.name : null) ?? d.payeeName ?? '');
     if (!nm) return null;
@@ -584,13 +643,14 @@ export default function ReviewMobile(p: ReviewMobileProps) {
     const d = drafts[e.id];
     if (d) return d;
     const r = resolveEntry(e, p.stakeholders, projects);
-    return { payeeId: r.payeeId, payeeName: r.payeeName, projectId: r.projectId, amount: r.amount, description: r.description, split: null, topUp: null, funding: null };
+    return { payeeId: r.payeeId, payeeName: r.payeeName, projectId: r.projectId, amount: r.amount, description: r.description, split: null, genHead: null, topUp: null, funding: null };
   };
   // Naming a different payee un-answers the refill question: it was answered about someone else.
   const patch = (e: RoughEntry, d: Partial<Draft>) =>
     setDrafts(s => {
       const was = draftOf(e);
-      const renamed = ('payeeId' in d || 'payeeName' in d) && (d.payeeId !== was.payeeId || d.payeeName !== was.payeeName);
+      const renamed = ('payeeId' in d || 'payeeName' in d || 'genHead' in d)
+        && (d.payeeId !== was.payeeId || d.payeeName !== was.payeeName || d.genHead !== was.genHead);
       return { ...s, [e.id]: { ...was, ...(renamed && !('topUp' in d) ? { topUp: null } : null), ...d } };
     });
 
@@ -629,10 +689,11 @@ export default function ReviewMobile(p: ReviewMobileProps) {
     if (busy) return;
     const w = walletPlan(e, d);
     if (!d.split) {
-      if (!d.payeeId && !d.payeeName?.trim()) { nudge('to'); return; }
+      if (!d.payeeId && !d.genHead && !d.payeeName?.trim()) { nudge('to'); return; }
       // A refill is bank → their wallet. It buys nothing yet, so there is no site to ask for.
       if (!d.projectId && !w.refill) { nudge('site'); return; }
-      if (!d.payeeId) { setActiveId(e.id); setNpName(d.payeeName ?? ''); setSheet('np'); return; }
+      // An overhead files under its head with no party — there is nobody to create.
+      if (!d.payeeId && !d.genHead) { setActiveId(e.id); setNpName(d.payeeName ?? ''); setSheet('np'); return; }
     }
     setBusy(true);
     try {
@@ -641,10 +702,14 @@ export default function ReviewMobile(p: ReviewMobileProps) {
           projectId: s.projectId, amount: s.amount, payeeId: s.payeeId,
           description: autoDesc(d, s.projectId, true),
         }));
-        await fileRoughEntrySplit(e, p.orgId, { payeeId: d.payeeId || '', amount: d.amount, description: d.description, funding: w.funding }, splits);
+        await fileRoughEntrySplit(e, p.orgId, {
+          payeeId: d.payeeId || '', amount: d.amount, description: d.description, funding: w.funding,
+          generalExpense: !!d.genHead, generalExpenseHead: d.genHead || undefined,
+        }, splits);
       } else {
         await fileRoughEntry(e, p.orgId, {
           payeeId: d.payeeId || '', projectId: d.projectId || '', amount: d.amount, description: d.description,
+          generalExpense: !!d.genHead, generalExpenseHead: d.genHead || undefined,
           funding: w.funding, topUpWalletId: w.topUpWalletId,
         });
       }
@@ -690,10 +755,13 @@ export default function ReviewMobile(p: ReviewMobileProps) {
   };
 
   // ── edit sheet ──────────────────────────────────────────────────────────────
-  const [ed, setEd] = useState({ amt: '', payee: '', forr: '', site: '' });
+  const [ed, setEd] = useState({ amt: '', payee: '', payeeId: null as string | null, genHead: null as string | null, forr: '', site: '', q: '' });
   const openEdit = () => {
     if (!activeDraft) return;
-    setEd({ amt: String(activeDraft.amount || ''), payee: activeDraft.payeeName ?? '', forr: activeDraft.description, site: activeDraft.projectId ?? '' });
+    setEd({
+      amt: String(activeDraft.amount || ''), payee: activeDraft.payeeName ?? '', payeeId: activeDraft.payeeId,
+      genHead: activeDraft.genHead, forr: activeDraft.description, site: activeDraft.projectId ?? '', q: '',
+    });
     setSheet('edit');
   };
   const saveEdit = () => {
@@ -702,7 +770,8 @@ export default function ReviewMobile(p: ReviewMobileProps) {
     patch(active, {
       amount: parseInt(ed.amt.replace(/[^\d]/g, ''), 10) || activeDraft.amount,
       payeeName: name || activeDraft.payeeName,
-      payeeId: name && name !== activeDraft.payeeName ? (p.stakeholders.find(s => s.name === name)?.stakeholder_id ?? null) : activeDraft.payeeId,
+      payeeId: ed.payeeId,
+      genHead: ed.genHead,
       description: ed.forr.trim() || activeDraft.description,
       projectId: ed.site || activeDraft.projectId,
       split: ed.site ? null : activeDraft.split,
@@ -844,9 +913,16 @@ export default function ReviewMobile(p: ReviewMobileProps) {
       <DragSheet open={sheet === 'edit'} onDismiss={() => setSheet(null)} className={`sheet${sheet === 'edit' ? ' show' : ''}`} role="dialog" aria-label="Edit details">
         <div className="grab" />
         <h3 style={{ marginBottom: 14 }}>Edit details</h3>
-        <div className="frow">
-          <div className="field"><label>Amount</label><input inputMode="numeric" value={ed.amt} onChange={e => setEd(v => ({ ...v, amt: e.target.value }))} /></div>
-          <div className="field"><label>Paid to</label><input value={ed.payee} onChange={e => setEd(v => ({ ...v, payee: e.target.value }))} /></div>
+        <div className="field"><label>Amount</label><input inputMode="numeric" value={ed.amt} onChange={e => setEd(v => ({ ...v, amt: e.target.value }))} /></div>
+        <div className="pickfield">
+          <label>Paid to</label>
+          <div className="chosen">
+            <span className={ed.payee ? '' : 'dim'}>{ed.payee || 'Nobody yet'}</span>
+            {ed.genHead && <span className="ovh">overhead</span>}
+          </div>
+          <NameList q={ed.q} setQ={(q) => setEd(v => ({ ...v, q }))}
+            suggestions={active ? suggestionsOf(active) : []} stakeholders={p.stakeholders}
+            onPick={(r) => setEd(v => ({ ...v, payee: r.name, payeeId: r.head ? null : r.id, genHead: r.head ?? null, q: '' }))} />
         </div>
         <div className="field"><label>For</label><input value={ed.forr} onChange={e => setEd(v => ({ ...v, forr: e.target.value }))} /></div>
         <div className="sitechips">

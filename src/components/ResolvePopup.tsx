@@ -11,22 +11,7 @@ import { WORKER_TRADE_GROUPS, VENDOR_TRADE_GROUPS, OTHER_TRADE } from '../lib/tr
 import { searchPayees, rankPayeeName, PAYEE_SEARCH_FLOOR } from '../lib/payeeSearch';
 import { addStakeholderAlias } from '../lib/stakeholderMerge';
 import { fileRoughEntry, fileRoughEntrySplit } from './day-book/fileEntry';
-import { GEN_HEADS, getCostCode } from '../lib/costCodes';
-
-// A general expense (an overhead with no party) matches the payee search the same
-// way NewTransaction does: normalise separators, then compacted-substring OR every
-// token in any order — so "hamali", "loading" and "load unload" all find the head.
-const normHead = (s: string) => (s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-function matchGenHeads(query: string): { code: string; name: string }[] {
-  const q = normHead(query);
-  if (!q) return [];
-  const compact = q.replace(/\s+/g, '');
-  const tokens = q.split(' ').filter(Boolean);
-  return GEN_HEADS.filter((h) => {
-    const n = normHead(h.name);
-    return n.replace(/\s+/g, '').includes(compact) || tokens.every((t) => n.includes(t));
-  }).map((h) => ({ code: h.code, name: h.name }));
-}
+import { getCostCode, searchGenHeads } from '../lib/costCodes';
 
 // ── Walnut-ledger palette (mirrors NewTransaction.tsx) ──────────────────────────
 // Warm cream canvas, walnut ink, terracotta accent for money-out, sage for money-in.
@@ -1212,7 +1197,7 @@ function PopupContents({
   };
 
   // Overhead heads matching what the owner typed, shown BELOW the party matches.
-  const genMatches = matchGenHeads(payeeSearch);
+  const genMatches = payeeSearch.trim() ? searchGenHeads(payeeSearch) : [];
 
   // Payee search list. TWO different questions, and they were tangled: with NO typed text the ordering
   // question is "who did the AI hear?" (sort by similarity to payee_raw); the moment he types, the question

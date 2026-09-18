@@ -714,6 +714,28 @@ export const WRK_DIVISIONS = WRK;
 export const GEN_DIVISION = GEN;
 export const GEN_HEADS: CostCodeItem[] = GEN.items;
 export const GEN_FALLBACK = 'GEN-99';
+
+/** The heads a site sends most often — what a picker offers before anything is typed. The other
+ *  eleven are one word away. */
+export const COMMON_GEN_HEADS = ['GEN-01', 'GEN-02', 'GEN-05', 'GEN-04', 'GEN-16', 'GEN-99'];
+
+const normHead = (s: string) => (s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+/**
+ * Overhead heads matching what somebody typed. Separators are normalised, then a head matches if
+ * the query is a compacted substring of it OR every word of the query appears in it in any order —
+ * so "hamali", "loading" and "load unload" all find the same head. An empty query answers with the
+ * common few rather than nothing, so a picker can offer overheads before a letter is typed.
+ */
+export function searchGenHeads(query: string): CostCodeItem[] {
+  const q = normHead(query);
+  if (!q) return COMMON_GEN_HEADS.map(c => GEN_HEADS.find(h => h.code === c)).filter(Boolean) as CostCodeItem[];
+  const compact = q.replace(/\s+/g, '');
+  const tokens = q.split(' ').filter(Boolean);
+  return GEN_HEADS.filter((h) => {
+    const n = normHead(h.name);
+    return n.replace(/\s+/g, '').includes(compact) || tokens.every((t) => n.includes(t));
+  });
+}
 export const isGenCode = (code: string | null | undefined): boolean => !!code && code.startsWith('GEN-');
 
 /** Flat list of every leaf item */
