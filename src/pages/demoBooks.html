@@ -1,0 +1,758 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<meta name="theme-color" content="#FAF8F3">
+<meta name="color-scheme" content="light">
+<title>Briklay · Books</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:wght@500;600&display=swap">
+<style>
+:root{
+  --ground:#FAF8F3; --paper:#FFFFFF; --ink:#2B211A; --ink-2:#5C4F45; --line:#E9E1D6; --line-2:#DCD2C4; --rule:#F0E9DF;
+  --clay:#B5472A; --clay-ink:#8F3419; --clay-wash:#FBEDE6; --clay-edge:#F2CDBD;
+  --sage:#2F5D3A; --sage-wash:#E7F0E6;
+  --serif:'Playfair Display',Georgia,'Times New Roman',serif;
+  --sans:'DM Sans',system-ui,-apple-system,'Segoe UI',sans-serif;
+  --mono:'DM Mono',ui-monospace,Menlo,Consolas,monospace;
+  --ease:cubic-bezier(.22,.8,.24,1);
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--ground);color:var(--ink);font-family:var(--sans);font-size:16px;line-height:1.45;
+  -webkit-font-smoothing:antialiased;-webkit-tap-highlight-color:transparent;overscroll-behavior-y:none;overflow-x:hidden}
+button,input{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--ink);outline-offset:3px;border-radius:6px}
+[hidden]{display:none!important}
+
+.app{max-width:430px;margin:0 auto;min-height:100dvh;display:flex;flex-direction:column}
+.top{display:flex;align-items:center;justify-content:space-between;padding:18px 20px 0}
+.mark{font-size:22px;font-weight:700;letter-spacing:-.02em}
+.mark i{font-style:normal;color:var(--clay)}
+.dest{font-size:13px;font-weight:600;color:var(--ink-2);max-width:55%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+main{flex:1;padding:20px 20px 20px;position:relative}
+.page{display:flex;flex-direction:column;gap:16px}
+.title{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+.title h1{margin:0;font-family:var(--serif);font-weight:600;font-size:28px;line-height:1.15;letter-spacing:-.01em}
+.title span{font-size:13.5px;color:var(--ink-2)}
+.coach{margin:-6px 0 0;color:var(--ink-2);text-wrap:pretty}
+
+/* the day-book card */
+.entry{background:var(--paper);border:1px solid var(--line);border-radius:20px;padding:18px;display:flex;flex-direction:column;gap:12px;
+  box-shadow:0 22px 44px -30px rgba(43,33,26,.4);animation:arrive .6s var(--ease) both}
+.entry-top{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.chip{display:inline-flex;align-items:center;height:28px;padding:0 11px;border-radius:14px;font-size:13px;font-weight:600;background:var(--clay-wash);border:1px solid var(--clay-edge);color:var(--clay-ink)}
+.src{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--ink-2)}
+.hero{display:flex;align-items:baseline;gap:3px}
+.hero .pre{font-size:25px;font-weight:500;color:var(--ink-2)}
+.hero .num{font-family:var(--serif);font-weight:600;font-size:52px;line-height:1.1;letter-spacing:-.01em;font-variant-numeric:lining-nums tabular-nums}
+.hero .unit{font-size:17px;color:var(--ink-2);margin-left:6px}
+.what{font-size:18px;color:#3D322A}
+.what b{font-weight:600}
+.words{display:flex;gap:8px;margin:0;padding:10px 12px;border-radius:12px;background:var(--ground);font-family:var(--mono);font-size:13.5px;line-height:1.45}
+.words svg{flex:none;margin-top:2px}
+.entry-foot{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.wait{white-space:nowrap;display:inline-flex;align-items:center;height:30px;padding:0 10px;border-radius:9px;font-size:13px;font-weight:600;background:var(--clay-wash);border:1px solid var(--clay-edge);color:var(--clay-ink)}
+.fix{white-space:nowrap;min-height:44px;padding:0 2px;border:0;background:none;font-size:14px;font-weight:600;color:var(--clay-ink);text-decoration:underline;text-underline-offset:3px}
+[contenteditable="true"]{outline:none;border-bottom:1.5px dashed var(--clay);padding:0 2px;background:var(--clay-wash)}
+
+/* an issue has no number: the title carries the card, in the same hand */
+.entry.issue .hero{display:none}
+.entry.issue .what{font-family:var(--serif);font-weight:600;font-size:23px;line-height:1.25;color:var(--ink)}
+.entry.issue .what b{font-weight:600}
+.entry.issue .sep:empty{display:none}
+
+/* the real home, after filing */
+.list{background:var(--paper);border:1px solid var(--line);border-radius:18px;overflow:hidden}
+.list-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;padding:13px 16px;border-bottom:1px solid var(--rule)}
+.list-head b{font-size:15px;font-weight:600}
+.list-head span{font-size:13px;color:var(--ink-2)}
+.list-head .num{font-family:var(--mono)}
+.row{display:flex;align-items:center;gap:12px;padding:13px 16px;border-top:1px solid var(--rule)}
+.list-head + .row{border-top:0}
+.landed .row.mine{animation:settleGlow 1.8s ease-out both}
+.row .main{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.row .main b{font-size:16px;font-weight:600}
+.row .main span{font-size:13px;color:var(--ink-2)}
+.row .amt{font-family:var(--mono);font-size:15.5px;font-weight:500;white-space:nowrap}
+.tick{flex:none;width:26px;height:26px;border-radius:13px;background:var(--sage-wash);color:var(--sage);display:grid;place-items:center}
+.tick path{stroke-dasharray:24;stroke-dashoffset:24}
+.landed .tick path{animation:draw .55s .12s ease-out forwards}
+.list-head{position:relative}
+.landed .list-head::after{content:'';position:absolute;left:0;right:0;bottom:-1px;height:1px;background:var(--sage);transform-origin:left;animation:ruleDraw .8s var(--ease) both,ruleFade 1s 1.1s ease-out forwards}
+.dot{flex:none;width:26px;height:26px;border-radius:13px;border:1.5px dashed var(--line-2)}
+.bar2{height:8px;border-radius:4px;background:var(--rule);overflow:hidden;margin-top:6px}
+.bar2 i{display:block;height:100%;border-radius:4px;background:var(--sage)}
+
+/* samples: clearly not his, cleared on setup */
+.samples{transition:opacity .4s}
+.samples.enter{animation:fadeUp .6s var(--ease) both}
+.samples .list-head b{color:var(--ink-2)}
+.sample{animation:resolve .45s var(--ease) both}
+.sample .main b,.sample .amt{color:#7A6C60;font-weight:500}
+.sample .bar2 i{background:#C9BFB1}
+.samples.clear{animation:clearOut .6s var(--ease) forwards}
+.sk{display:flex;align-items:center;gap:12px;padding:15px 16px;border-top:1px solid var(--rule)}
+.list-head + .sk{border-top:0}
+.sk i{display:block;border-radius:6px;background:linear-gradient(90deg,#F0E9DF 25%,#F8F3EB 45%,#F0E9DF 65%);background-size:300% 100%;animation:shimmer 1.3s linear infinite}
+.sk .c{flex:none;width:26px;height:26px;border-radius:13px}
+.sk .t{flex:1;display:flex;flex-direction:column;gap:7px}
+.sk .t i:first-child{width:42%;height:11px}
+.sk .t i:last-child{width:66%;height:9px}
+.sk .e{flex:none;width:64px;height:11px}
+.week{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;padding:4px 16px 16px}
+.row.crew{border-top:0}
+.week div{display:flex;flex-direction:column;align-items:center;gap:6px;font-size:12px;color:var(--ink-2)}
+.week i{width:100%;aspect-ratio:1;border-radius:10px;border:1px solid var(--line);display:grid;place-items:center;font-style:normal;font-family:var(--mono);font-size:15px;font-weight:500;color:#8A7B6E;transition:color .3s}
+.week .load i{border-color:transparent;color:transparent;background:linear-gradient(90deg,#F0E9DF 25%,#F8F3EB 45%,#F0E9DF 65%);background-size:300% 100%;animation:shimmer 1.3s linear infinite}
+.week .now{color:var(--ink);font-weight:700}
+.week .now i{background:var(--sage-wash);border-color:var(--sage);color:var(--sage)}
+.landed .week .now i{animation:pop .6s var(--ease) both}
+.week.cleared div:not(.now) i{color:transparent}
+.legend{padding:4px 16px 14px;font-size:13px;color:var(--ink-2)}
+
+/* the approved card travels into its place in the ledger */
+.traveler{position:fixed;z-index:25;overflow:hidden;background:var(--paper);border:1px solid var(--line);pointer-events:none;will-change:left,top,width,height}
+.traveler *{animation:none!important}
+.traveler .tA{position:absolute;left:0;top:0;padding:18px;display:flex;flex-direction:column;gap:12px}
+.traveler .tB{position:absolute;left:0;top:0}
+
+/* thumb-zone dock */
+.dock{position:sticky;bottom:0;z-index:20;padding:14px 20px calc(16px + env(safe-area-inset-bottom));background:linear-gradient(to top,var(--ground) 74%,rgba(250,248,243,0))}
+.track{position:relative;height:64px;border-radius:32px;background:var(--clay-wash);border:1px solid var(--clay-edge);overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none;transition:background .3s,border-color .3s}
+.track .fill{position:absolute;inset:0 auto 0 0;width:62px;border-radius:32px;background:#F3D3C5}
+.track .label{position:absolute;inset:0;display:grid;place-items:center;padding-left:44px;font-size:17px;font-weight:600;color:var(--clay-ink);pointer-events:none}
+.thumb{position:absolute;left:3px;top:3px;width:56px;height:56px;border-radius:28px;border:0;background:var(--clay);color:#fff;display:grid;place-items:center;touch-action:none;box-shadow:0 6px 14px -6px rgba(43,33,26,.55)}
+.thumb svg{animation:nudge 1.5s ease-in-out infinite}
+.track.done{background:var(--sage);border-color:var(--sage)}
+.track.done .fill{background:var(--sage)}
+.track.done .label{color:#fff;padding-left:0}
+.track.done .thumb{background:#fff;color:var(--sage)}
+.track.done .thumb svg{animation:none}
+.nudge{display:flex;flex-direction:column;gap:10px;padding:16px;border-radius:20px;background:var(--paper);border:1px solid var(--line);box-shadow:0 -14px 40px -22px rgba(43,33,26,.45);animation:rise .7s var(--ease) both}
+.nudge b{font-size:16.5px;font-weight:600}
+.nudge p{margin:-6px 0 2px;font-size:14.5px;color:var(--ink-2);text-wrap:pretty}
+.btn{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;min-height:56px;border-radius:16px;border:0;background:var(--clay);color:#fff;font-size:17px;font-weight:600;text-decoration:none;box-shadow:0 14px 26px -16px rgba(181,71,42,.9)}
+.btn:active{transform:scale(.985)}
+.btn.ghost{background:var(--paper);color:var(--ink);border:1px solid var(--line-2);box-shadow:none}
+.quiet{display:flex;align-items:center;justify-content:center;min-height:44px;width:100%;border:0;background:none;font-size:15px;font-weight:600;color:var(--ink);text-decoration:underline;text-underline-offset:3px}
+
+/* add your supervisor */
+.tel{display:flex;align-items:center;height:54px;border-radius:14px;border:1px solid var(--line-2);background:var(--ground);padding-left:16px;font-size:17px}
+.tel span{color:var(--ink-2);font-family:var(--mono);font-size:16px}
+.tel input{flex:1;min-width:0;height:100%;border:0!important;background:transparent!important;padding:0 16px 0 10px;font-family:var(--mono);font-size:17px;letter-spacing:.02em;outline:none!important}
+.tel:focus-within{outline:2px solid var(--clay);border-color:transparent;background:#fff}
+.hi{display:flex;flex-direction:column;align-items:flex-start;gap:6px;margin:4px 0 14px}
+.hi small{font-size:12.5px;color:var(--ink-2)}
+.hi-bubble{max-width:92%;padding:10px 14px;border-radius:4px 18px 18px 18px;background:var(--ground);border:1px solid var(--line);font-size:15px;line-height:1.45;animation:fadeUp .6s var(--ease) both}
+.hi-state{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--ink-2);transition:color .4s}
+.hi-state svg{opacity:0;transition:opacity .3s}
+.hi-state path{stroke-dasharray:24;stroke-dashoffset:24}
+.hi-state.sent{color:var(--sage)}
+.hi-state.sent svg{opacity:1}
+.hi-state.sent path{animation:draw .55s ease-out forwards}
+.member{display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:14px;border:1px solid var(--line);background:var(--paper);animation:fadeUp .6s var(--ease) both}
+.member .main{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+.member .main b{font-size:15.5px;font-weight:600}
+.member .main span{font-family:var(--mono);font-size:13.5px;color:var(--ink-2)}
+.invited{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 10px;border-radius:13px;background:var(--sage-wash);color:var(--sage);font-size:12.5px;font-weight:600}
+.invited i{width:6px;height:6px;border-radius:3px;background:var(--sage);animation:breathe 2.4s ease-in-out infinite}
+
+/* contact picker lives inside the number field */
+.tel{position:relative;transition:background .5s,border-color .3s}
+.tel.got{animation:gotIt 1.4s ease-out both}
+.tel-pick{flex:none;width:52px;height:100%;border:0;border-left:1px solid var(--line-2);border-radius:0 13px 13px 0;background:transparent;color:var(--clay-ink);display:grid;place-items:center}
+.tel-pick:active{background:var(--clay-wash)}
+.tel input{padding-right:8px!important}
+.picked{display:flex;align-items:center;gap:8px;width:fit-content;max-width:100%;margin-top:2px;padding:4px 4px 4px 4px;border-radius:18px;background:var(--sage-wash);color:var(--sage);animation:fadeUp .5s var(--ease) both}
+.picked .av{flex:none;width:26px;height:26px;border-radius:13px;background:var(--sage);color:#fff;display:grid;place-items:center;font-size:12px;font-weight:700}
+.picked .nm{font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.picked button{flex:none;width:30px;height:30px;border:0;border-radius:15px;background:transparent;color:var(--sage);display:grid;place-items:center}
+.nums{display:flex;flex-wrap:wrap;gap:8px;margin-top:2px;animation:fadeUp .5s var(--ease) both}
+.nums button{min-height:40px;padding:0 14px;border-radius:20px;border:1px solid var(--line-2);background:var(--paper);font-family:var(--mono);font-size:14.5px}
+.nums button[aria-pressed="true"]{border-color:var(--sage);background:var(--sage-wash);color:var(--sage)}
+.hint{font-size:13px;color:var(--ink-2)}
+.hint:empty{display:none}
+
+/* one question, two calm choices; the number only appears if it's needed */
+.ask-team{border:0;margin:0 0 4px;padding:0;display:flex;flex-direction:column;gap:10px;min-width:0}
+.ask-team legend{padding:0;margin-bottom:12px;font-size:16.5px;font-weight:600;color:var(--ink)}
+.choice{position:relative;display:flex;align-items:center;gap:14px;padding:14px 16px;border-radius:16px;border:1px solid var(--line-2);background:var(--paper);cursor:pointer;
+  transition:border-color .3s,background .3s,box-shadow .3s}
+.choice input{position:absolute;opacity:0;pointer-events:none}
+.c-text{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.c-text b{font-size:16px;font-weight:600}
+.c-text span{font-size:13.5px;color:var(--ink-2);text-wrap:pretty}
+.c-ring{flex:none;width:22px;height:22px;border-radius:11px;border:1.5px solid var(--line-2);display:grid;place-items:center;transition:border-color .3s}
+.c-ring::after{content:'';width:10px;height:10px;border-radius:5px;background:var(--clay);transform:scale(0);transition:transform .35s var(--ease)}
+.choice:has(input:checked){border-color:var(--clay);background:var(--clay-wash);box-shadow:0 10px 24px -20px rgba(181,71,42,.8)}
+.choice:has(input:checked) .c-ring{border-color:var(--clay)}
+.choice:has(input:checked) .c-ring::after{transform:scale(1)}
+.choice:has(input:focus-visible){outline:2px solid var(--ink);outline-offset:2px}
+.unfold,.go{display:grid;grid-template-rows:0fr;opacity:0;transition:grid-template-rows .5s var(--ease),opacity .35s}
+.unfold > div,.go > div{overflow:hidden;min-height:0}
+.unfold.open,.go.open{grid-template-rows:1fr;opacity:1}
+.unfold > div{padding:0 2px}
+.go > div{padding-top:12px}
+
+/* handoff into the real app: cream, wordmark only, the ledger rule is the progress line */
+.handoff{position:fixed;inset:0;z-index:80;background:var(--ground);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;animation:fadeIn .35s ease-out both}
+.mark.big{font-size:34px}
+.handoff .rule{width:132px;height:1.5px;border-radius:1px;background:var(--line-2);overflow:hidden}
+.handoff .rule i{display:block;height:100%;width:100%;background:var(--clay);transform-origin:left;animation:ruleDraw 1.15s var(--ease) both}
+.handoff p{margin:0;font-size:14.5px;color:var(--ink-2)}
+.handoff .quiet{width:auto;animation:fadeIn .4s ease-out both}
+
+/* setup sheet */
+.scrim{position:fixed;inset:0;z-index:30;background:rgba(43,33,26,.28);opacity:0;pointer-events:none;transition:opacity .35s}
+.scrim.on{opacity:1;pointer-events:auto}
+.sheet{position:fixed;left:0;right:0;bottom:var(--kb,0px);z-index:40;max-width:430px;margin:0 auto;max-height:92dvh;overflow:auto;background:var(--paper);border-radius:28px 28px 0 0;
+  box-shadow:0 -24px 60px -20px rgba(43,33,26,.4);padding:0 20px calc(20px + env(safe-area-inset-bottom));transform:translateY(105%);transition:transform .55s cubic-bezier(.2,.9,.25,1);visibility:hidden}
+.sheet.on{transform:none;visibility:visible}
+.grab{display:grid;place-items:center;height:28px;touch-action:none;cursor:grab}
+.grab i{width:40px;height:4px;border-radius:2px;background:var(--line-2)}
+.sheet h2{margin:4px 0 6px;font-family:var(--serif);font-weight:600;font-size:25px;line-height:1.2;outline:none}
+.sheet p{margin:0 0 16px;color:var(--ink-2);font-size:15.5px;text-wrap:pretty}
+.field{display:flex;flex-direction:column;gap:6px;margin-bottom:14px}
+.field label{font-size:14px;font-weight:600}
+.field input{height:54px;border-radius:14px;border:1px solid var(--line-2);background:var(--ground);padding:0 16px;font-size:17px}
+.field input::placeholder{color:#8A7B6E}
+.field input:focus{outline:2px solid var(--clay);outline-offset:0;border-color:transparent;background:#fff}
+.err{font-size:13px;color:var(--clay-ink)}
+.verified{display:flex;align-items:center;gap:10px;padding:12px 14px;margin-bottom:16px;border-radius:14px;background:var(--sage-wash);color:var(--sage);font-size:14.5px}
+.verified svg{flex:none}
+.verified b{font-family:var(--mono);font-weight:500;color:var(--ink)}
+.fine{margin:10px 0 0!important;text-align:center;font-size:13.5px!important}
+.ok-badge{width:52px;height:52px;border-radius:26px;background:var(--sage-wash);color:var(--sage);display:grid;place-items:center;margin:8px 0 12px}
+.stack{display:flex;flex-direction:column;gap:10px}
+
+@keyframes arrive{from{opacity:0;transform:translateY(-12px)}to{opacity:1;transform:none}}
+@keyframes rise{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:none}}
+@keyframes settleGlow{0%,25%{background:var(--sage-wash)}100%{background:var(--paper)}}
+@keyframes ruleDraw{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+@keyframes ruleFade{to{opacity:0}}
+@keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+@keyframes resolve{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+@keyframes clearOut{to{opacity:0;transform:scale(.97);max-height:0;margin:0;border-width:0}}
+@keyframes shimmer{from{background-position:100% 0}to{background-position:-100% 0}}
+@keyframes draw{to{stroke-dashoffset:0}}
+@keyframes gotIt{0%,30%{background:var(--sage-wash);border-color:var(--sage)}100%{background:var(--ground);border-color:var(--line-2)}}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+@keyframes breathe{0%,100%{opacity:1}50%{opacity:.3}}
+@keyframes pop{from{transform:scale(.9);opacity:.3}to{transform:none;opacity:1}}
+@keyframes nudge{0%,100%{transform:translateX(0)}50%{transform:translateX(5px)}}
+@media (prefers-reduced-motion:reduce){*{animation-duration:.01ms!important;transition:none!important}.tick path{stroke-dashoffset:0}}
+</style>
+</head>
+<body>
+
+<div class="app">
+  <header class="top">
+    <div class="mark">Briklay<i>.</i></div>
+    <div class="dest" id="dest">Your first entry</div>
+  </header>
+
+  <main>
+    <section class="page" id="pageA" aria-live="polite">
+      <div class="title"><h1>Books</h1><span>1 waiting for you</span></div>
+      <p class="coach" id="coachA"></p>
+      <article class="entry" id="entry" aria-label="Your entry">
+        <div class="entry-top">
+          <span class="chip" id="chip"></span>
+          <span class="src"><svg width="15" height="15" viewBox="0 0 24 24" fill="#178D47" aria-hidden="true"><path d="M12 3a9 9 0 0 0-7.7 13.6L3 21l4.6-1.2A9 9 0 1 0 12 3Z"/></svg><span id="when"></span></span>
+        </div>
+        <div class="hero"><span class="pre" id="heroPre"></span><span class="num" id="heroNum"></span><span class="unit" id="heroUnit"></span></div>
+        <div class="what"><span id="lead"></span><b id="aVal"></b><span id="sep" class="sep"> · </span><span id="bVal"></span></div>
+        <p class="words"><svg width="15" height="15" viewBox="0 0 24 24" fill="#178D47" aria-hidden="true"><path d="M12 3a9 9 0 0 0-7.7 13.6L3 21l4.6-1.2A9 9 0 1 0 12 3Z"/></svg><span id="words"></span></p>
+        <div class="entry-foot"><span class="wait" id="waitChip"></span><button type="button" class="fix" id="fix">Fix a detail</button></div>
+      </article>
+    </section>
+
+    <section class="page" id="pageB" hidden aria-live="polite"></section>
+  </main>
+
+  <div class="dock">
+    <div class="track" id="track">
+      <div class="fill" id="fill"></div>
+      <div class="label" id="trackLabel"></div>
+      <button type="button" class="thumb" id="thumb">
+        <svg id="thumbIcon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 6 6 6-6 6"/><path d="m13 6 6 6-6 6"/></svg>
+      </button>
+    </div>
+    <div class="nudge" id="nudge" hidden>
+      <b id="nudgeTitle">Your entry is in. The rest are samples.</b>
+      <p id="nudgeBody"></p>
+      <button type="button" class="btn" id="openSetup">Make this my site</button>
+    </div>
+  </div>
+</div>
+
+<div class="handoff" id="handoff" role="status" aria-live="polite" hidden>
+  <div class="mark big">Briklay<i>.</i></div>
+  <div class="rule"><i></i></div>
+  <p id="handoffText">Opening your site</p>
+  <a class="quiet" id="handoffLink" target="_blank" rel="noopener" hidden>Tap here if it doesn't open</a>
+</div>
+<div class="scrim" id="scrim"></div>
+<section class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
+  <div class="grab" id="grab" aria-hidden="true"><i></i></div>
+  <form id="setup" novalidate>
+    <h2 id="sheetTitle" tabindex="-1">Two names and it's yours.</h2>
+    <p>Your entry stays. The samples go.</p>
+    <div class="field"><label for="site">Site or project name</label>
+      <input id="site" type="text" autocomplete="organization" autocapitalize="words" enterkeyhint="next" placeholder="ASM Elite"><div class="err" id="siteErr" role="alert"></div></div>
+    <div class="field"><label for="person">Your name</label>
+      <input id="person" type="text" autocomplete="name" autocapitalize="words" enterkeyhint="done" placeholder="So your team knows who approves"><div class="err" id="personErr" role="alert"></div></div>
+    <div class="field"><label for="wa">Your WhatsApp number</label>
+      <div class="tel" id="waBox"><span aria-hidden="true">+91</span><input id="wa" type="tel" inputmode="numeric" autocomplete="tel-national" enterkeyhint="done" maxlength="11" placeholder="98480 12321" aria-describedby="waErr"></div>
+      <div class="err" id="waErr" role="alert"></div></div>
+    <button type="submit" class="btn">Make this my site</button>
+    <p class="fine">A 6-digit code on WhatsApp signs you in. No password, nothing to install.</p>
+    <button type="button" class="quiet" id="notNow">Not now</button>
+  </form>
+
+  <div id="otp" hidden>
+    <div class="ok-badge"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9"/><path d="m9 11 3 3 8-8"/></svg></div>
+    <h2 id="otpTitle" tabindex="-1">Enter your code.</h2>
+    <p>We sent a 6-digit code to <b id="otpNum">your number</b> on WhatsApp.</p>
+    <div class="field"><label for="otpCode">6-digit code</label>
+      <input id="otpCode" type="tel" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="••••••" style="text-align:center;letter-spacing:.5em;font-family:var(--mono);font-size:22px" aria-describedby="otpErr">
+      <div class="err" id="otpErr" role="alert"></div></div>
+    <button type="button" class="btn" id="otpVerify">Verify &amp; open my site</button>
+    <button type="button" class="quiet" id="otpBack">← Change number</button>
+  </div>
+  <div id="ready" hidden>
+    <div class="ok-badge"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></div>
+    <h2 id="readyTitle" tabindex="-1"></h2>
+
+    <form id="supForm" novalidate>
+      <fieldset class="ask-team">
+        <legend>Does someone else send updates from site?</legend>
+        <label class="choice">
+          <input type="radio" name="team" value="yes">
+          <span class="c-text"><b>Yes, my supervisor or engineer</b><span>We'll say hi on WhatsApp. They can start right away.</span></span>
+          <span class="c-ring" aria-hidden="true"></span>
+        </label>
+        <div class="unfold" id="unfold"><div>
+          <div class="field" style="margin:2px 0 4px">
+            <label for="supNum">Their WhatsApp number</label>
+            <div class="tel" id="telBox"><span aria-hidden="true">+91</span><input id="supNum" type="tel" inputmode="numeric" autocomplete="off" enterkeyhint="done" maxlength="11" placeholder="98480 12321" aria-describedby="supErr pickHint">
+              <button type="button" class="tel-pick" id="pick" aria-label="Pick from your contacts">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="3.5" width="14" height="17" rx="2.5"/><circle cx="12" cy="10" r="2.4"/><path d="M8.2 16.2c.7-1.7 2.1-2.6 3.8-2.6s3.1.9 3.8 2.6"/><path d="M3 8h2M3 12h2M3 16h2"/></svg>
+              </button></div>
+            <div class="picked" id="picked" hidden><span class="av" id="pickedAv"></span><span class="nm" id="pickedName"></span><button type="button" id="pickedClear" aria-label="Remove this contact"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
+            <div class="hint" id="pickHint"></div>
+            <div class="nums" id="nums" hidden role="group" aria-label="Which number?"></div>
+            <div class="err" id="supErr" role="alert"></div>
+          </div>
+        </div></div>
+        <label class="choice">
+          <input type="radio" name="team" value="no">
+          <span class="c-text"><b>No, just me for now</b><span>Keep messaging Briklay like you just did. Add people any time.</span></span>
+          <span class="c-ring" aria-hidden="true"></span>
+        </label>
+      </fieldset>
+      <div class="go" id="go"><div>
+        <button type="submit" class="btn" id="goBtn">Open my site</button>
+      </div></div>
+    </form>
+
+    <div id="supDone" hidden>
+      <div class="hi">
+        <small>What they get on WhatsApp</small>
+        <div class="hi-bubble" id="hiBubble"></div>
+        <div class="hi-state" id="hiState"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg><span id="hiText">Sending</span></div>
+      </div>
+      <div class="member" id="member">
+        <span class="dot"></span>
+        <div class="main"><b>Teammate</b><span id="memberNum"></span></div>
+        <span class="invited"><i></i>Invited</span>
+      </div>
+      <p class="fine" style="margin:12px 0 16px!important;text-align:left">They go live the moment they reply. Whatever they send waits for your nod.</p>
+      <div class="stack">
+        <button type="button" class="btn" id="openSite2">Open my site</button>
+        <button type="button" class="quiet" id="addMore">Add another person</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+/* ---------- production wiring ----------
+   The WhatsApp button carries a token: entry type, the user's exact message, parsed fields, sent time,
+   and their already-verified number. TYPES below stands in for that payload.
+   SAMPLES are fixed example rows, always labelled, never mixed into totals, cleared on setup. */
+const WA_NUMBER = '';
+const $ = (s) => document.querySelector(s);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const inr = (n) => Math.round(+n || 0).toLocaleString('en-IN');
+const calm = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const buzz = (p) => { try { navigator.vibrate && navigator.vibrate(p); } catch (e) {} };
+/* production: the entry the builder actually sent on WhatsApp, mapped to this card's
+   shape by the app and injected here. One link = one type. */
+const DEMO = __BRIK_DEMO__;
+const sentAt = new Date(DEMO.ts || (Date.now() - 60000)).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' });
+
+const TYPES = { [DEMO.key]: DEMO.data };
+const DEMO_NAME = DEMO.name || '';
+const SAMPLE_TX = [['Sri Durga Cements', 'Cement, 120 bags', 46800], ['Suresh', 'Mason, weekly payment', 12500], ['Lakshmi Transport', 'Sand, 2 loads', 9000], ['Ramesh', 'Electrician, advance', 5000]];
+const SAMPLE_WORK = [['Brickwork', '1st floor', 85], ['Plumbing lines', 'Ground floor', 40], ['Plastering', '1st floor', 10]];
+const SAMPLE_ISSUES = [['Slab honeycombing near grid C', '2nd floor'], ['Water logging at ramp', 'Basement'], ['Rebar cover short', 'Column P4']];
+const SAMPLE_DAYS = [8, 8, 7, 8, 6, 8, 0];
+const DAYS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+
+let run = 0, T, typeKey, setUp = false, siteName = '', waDigits = '';
+
+function countTo(el, to, post, ms) {
+  if (calm) { el.textContent = inr(to) + post; return; }
+  const t0 = performance.now();
+  const step = (t) => { const k = Math.min(1, (t - t0) / ms), e = 1 - Math.pow(1 - k, 3); el.textContent = inr(to * e) + post; if (k < 1) requestAnimationFrame(step); };
+  requestAnimationFrame(step);
+}
+
+/* ---------- 1. the day book, with his message ---------- */
+function mount(key) {
+  run++; held.forEach((a) => a.cancel()); held = []; document.querySelectorAll('.traveler').forEach((n) => n.remove()); typeKey = key; T = TYPES[key]; setUp = false; siteName = '';
+  document.querySelectorAll('.proto button').forEach((b) => b.setAttribute('aria-pressed', b.dataset.type === key));
+  closeSheet(); resetSlide(); setEditing(false); $('#handoff').hidden = true;
+  $('#setup').hidden = false; $('#ready').hidden = true; $('#otp').hidden = true;
+  $('#site').value = DEMO.site || ''; $('#person').value = DEMO_NAME; $('#wa').value = ''; $('#waErr').textContent = ''; $('#otpCode').value = ''; $('#otpErr').textContent = '';
+  $('#supForm').hidden = false; $('#supDone').hidden = true; $('#supNum').value = ''; $('#supErr').textContent = ''; if (typeof clearPicked === 'function') clearPicked();
+  document.querySelectorAll('input[name="team"]').forEach((r) => { r.checked = false; }); $('#unfold').classList.remove('open'); $('#go').classList.remove('open'); $('#openSetup').onclick = null;
+  $('#dest').textContent = 'Your first entry';
+  $('#chip').textContent = T.chip; $('#when').textContent = sentAt;
+  $('#coachA').textContent = T.coach.replace('{t}', sentAt);
+  $('#heroPre').textContent = T.pre; $('#heroUnit').textContent = T.unit;
+  $('#lead').textContent = T.lead; $('#aVal').textContent = T.a; $('#bVal').textContent = T.b;
+  $('#sep').textContent = (T.a && T.b) ? ' · ' : '';
+  $('#words').textContent = T.words ? '“' + T.words + '”' : '';
+  $('#waitChip').textContent = T.wait;
+  $('#trackLabel').textContent = T.slide; $('#thumb').setAttribute('aria-label', T.slide);
+  const A = $('#pageA'), B = $('#pageB');
+  A.hidden = false; A.className = 'page'; B.hidden = true; B.innerHTML = '';
+  $('#entry').classList.toggle('issue', !!T.noNum);
+  $('#track').hidden = false; $('#nudge').hidden = true;
+  $('#nudgeBody').textContent = 'Name your site and the samples clear out. After that it holds only what your site sends.'; $('#openSetup').textContent = 'Make this my site';
+  const e = $('#entry'); e.style.animation = 'none'; void e.offsetWidth; e.style.animation = '';
+  if (T.noNum) $('#heroNum').textContent = ''; else countTo($('#heroNum'), T.num, T.post, 700);
+  window.scrollTo(0, 0);
+}
+
+let editing = false;
+function setEditing(on) {
+  editing = on;
+  [$('#heroNum'), $('#aVal'), $('#bVal')].forEach((el) => { if (on) el.setAttribute('contenteditable', 'true'); else el.removeAttribute('contenteditable'); });
+  $('#fix').textContent = on ? 'Done' : 'Fix a detail';
+  if (on) $('#aVal').focus();
+}
+$('#fix').addEventListener('click', () => setEditing(!editing));
+
+/* ---------- 2. slide to file (a tap slides it for you) ---------- */
+const track = $('#track'), thumb = $('#thumb'), fill = $('#fill'), label = $('#trackLabel');
+let sx = 0, dragging = false, moved = false, filed = false, viaPointer = false, curX = 0;
+const maxX = () => track.clientWidth - thumb.offsetWidth - 6;
+function place(x, animate) {
+  curX = x;
+  const tr = animate && !calm ? '.42s cubic-bezier(.2,.8,.2,1)' : '0s';
+  thumb.style.transition = 'transform ' + tr; fill.style.transition = 'width ' + tr;
+  thumb.style.transform = 'translateX(' + x + 'px)'; fill.style.width = (x + 62) + 'px';
+  if (!filed) label.style.opacity = Math.max(0, 1 - (x / Math.max(1, maxX())) * 1.6);
+}
+function resetSlide() {
+  filed = false; dragging = false; track.classList.remove('done'); label.style.opacity = 1; place(0, false);
+  $('#thumbIcon').innerHTML = '<path d="m6 6 6 6-6 6"/><path d="m13 6 6 6-6 6"/>';
+}
+thumb.addEventListener('pointerdown', (e) => { if (filed) return; sx = e.clientX - curX; dragging = true; moved = false; try { thumb.setPointerCapture(e.pointerId); } catch (err) {} });
+thumb.addEventListener('pointermove', (e) => {
+  if (!dragging) return;
+  const x = Math.max(0, Math.min(maxX(), e.clientX - sx));
+  if (x > 5) moved = true;
+  place(x, false);
+  if (x >= maxX()) file();
+});
+const release = () => {
+  if (!dragging) return;
+  dragging = false; viaPointer = true;
+  if (!moved) { place(maxX(), true); setTimeout(file, calm ? 0 : 430); return; }
+  if (curX > maxX() * 0.78) { place(maxX(), true); file(); } else place(0, true);
+};
+thumb.addEventListener('pointerup', release);
+thumb.addEventListener('pointercancel', release);
+thumb.addEventListener('click', () => { if (viaPointer) { viaPointer = false; return; } if (filed) return; place(maxX(), true); setTimeout(file, calm ? 0 : 430); });
+
+/* ---------- 3. his entry in its real page; skeletons resolve into labelled samples ---------- */
+const TICK = '<span class="tick"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg></span>';
+const SK = '<div class="sk" aria-hidden="true"><i class="c"></i><span class="t"><i></i><i></i></span><i class="e"></i></div>';
+const vals = () => ({ hero: $('#heroNum').textContent.trim(), a: $('#aVal').textContent.trim(), b: $('#bVal').textContent.trim() });
+
+function pageMarkup() {
+  const v = vals(), head = '<div class="title"><h1>' + T.home + '</h1><span id="siteLabel">' + esc(siteName || 'Today') + '</span></div>';
+  if (typeKey === 'payment') {
+    const hasAmt = /\d/.test(v.hero);
+    const totalSpan = hasAmt ? '<span class="num" id="mineTotal">₹' + (calm ? esc(v.hero) : '0') + ' out</span>' : '<span>logged by you</span>';
+    const amtCell = hasAmt ? '<div class="amt">₹' + esc(v.hero) + '</div>' : '';
+    const sub = [esc(v.b), 'approved by you', esc(sentAt)].filter(Boolean).join(' · ');
+    return head + '<div class="list" id="mineList"><div class="list-head"><b>Yours</b>' + totalSpan + '</div>' +
+      '<div class="row mine">' + TICK + '<div class="main"><b>' + esc(v.a) + '</b><span>' + sub + '</span></div>' + amtCell + '</div></div>' +
+      '<div class="list samples" id="samples" aria-busy="true" hidden><div class="list-head"><b>Sample entries</b><span>cleared when you set up</span></div>' + SK + SK + SK + SK + '</div>';
+  }
+  if (typeKey === 'attendance') {
+    const now = (new Date().getDay() + 6) % 7;
+    return head + '<div class="list" id="mineList"><div class="list-head"><b>This week</b><span>people on site</span></div>' +
+      '<div class="row mine crew">' + TICK + '<div class="main"><b>' + esc(v.a) + '</b><span>' + esc(v.b) + ' today · confirmed by you</span></div><div class="amt">' + esc(v.hero) + '</div></div>' +
+      '<div class="week">' + DAYS.map((d, i) => '<div' + (i === now ? ' class="now"' : '') + '>' + d + '<i>' + (i === now ? esc(v.hero) : '') + '</i></div>').join('') + '</div></div>' +
+      '<div class="list samples" id="samples" aria-busy="true" hidden><div class="list-head"><b>Sample crew</b><span>cleared when you set up</span></div>' + SK + SK + '</div>';
+  }
+  // issue: a logged site problem — the title carries it, no number, no bar
+  const sub = [v.b, 'logged by you', esc(sentAt)].filter(Boolean).join(' · ');
+  return head + '<div class="list" id="mineList"><div class="list-head"><b>Open issues</b><span>1 logged</span></div>' +
+    '<div class="row mine">' + TICK + '<div class="main"><b>' + esc(v.a) + '</b><span>' + sub + '</span></div></div></div>' +
+    '<div class="list samples" id="samples" aria-busy="true" hidden><div class="list-head"><b>Sample issues</b><span>cleared when you set up</span></div>' + SK + SK + SK + '</div>';
+}
+
+async function resolveSamples(me) {
+  const box0 = $('#samples'); if (box0) { box0.hidden = false; box0.classList.add('enter'); }
+  await sleep(calm ? 0 : 800);
+  if (me !== run) return;
+  const box = $('#samples'); if (!box) return;
+  const now = (new Date().getDay() + 6) % 7;
+  const rows = typeKey === 'attendance'
+    ? ['<div class="row sample crew"><span class="dot"></span><div class="main"><b>Venkat shuttering gang</b><span>4 carpenters, 4 helpers</span></div></div>' +
+       '<div class="week sample">' + DAYS.map((d, i) => '<div>' + d + '<i>' + (i <= now && SAMPLE_DAYS[i] ? SAMPLE_DAYS[i] : '') + '</i></div>').join('') + '</div>']
+    : typeKey === 'payment'
+    ? SAMPLE_TX.map((r, i) => '<div class="row sample" style="animation-delay:' + i * 90 + 'ms"><span class="dot"></span><div class="main"><b>' + r[0] + '</b><span>' + r[1] + '</span></div><div class="amt">₹' + inr(r[2]) + '</div></div>')
+    : SAMPLE_ISSUES.map((r, i) => '<div class="row sample" style="animation-delay:' + i * 90 + 'ms"><span class="dot"></span><div class="main"><b>' + r[0] + '</b><span>' + r[1] + '</span></div></div>');
+  box.querySelectorAll('.sk').forEach((n) => n.remove());
+  box.insertAdjacentHTML('beforeend', rows.join('')); box.removeAttribute('aria-busy');
+}
+
+let held = [];
+const EASE = 'cubic-bezier(.22,.8,.24,1)';
+async function file() {
+  if (filed) return;
+  filed = true; dragging = false;
+  const me = run;
+  setEditing(false); buzz(14); place(maxX(), true);
+  track.classList.add('done'); label.textContent = T.done; label.style.opacity = 1;
+  $('#thumbIcon').innerHTML = '<path d="m5 12.5 4.5 4.5L19 7.5"/>';
+  await sleep(calm ? 0 : 560); if (me !== run) return;
+
+  const A = $('#pageA'), B = $('#pageB'), entry = $('#entry'), dock = document.querySelector('.dock');
+  window.scrollTo(0, 0);
+  if (!calm) {
+    /* everything but the card steps back, so the card is the only thing that moves */
+    held = [A.querySelector('.title'), $('#coachA'), dock, $('#dest')].map((el) => el.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 240, easing: 'ease-out', fill: 'forwards' }));
+    await sleep(240); if (me !== run) return;
+  }
+  const r1 = entry.getBoundingClientRect(), cardHTML = entry.innerHTML.replace(/ id="[^"]*"/g, '');
+  A.hidden = true; B.innerHTML = pageMarkup(); B.hidden = false;
+  $('#track').hidden = true; $('#dest').textContent = T.done + ' · ' + sentAt; document.title = 'Briklay · ' + T.home;
+  held.forEach((a) => a.cancel()); held = [];
+  const target = $('#mineList'), total = $('#mineTotal');
+
+  if (!calm) {
+    target.style.visibility = 'hidden';
+    B.querySelector('.title').animate([{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: 480, easing: EASE });
+    $('#dest').animate([{ opacity: 0 }, { opacity: 1 }], { duration: 480, easing: 'ease-out' });
+    const r2 = target.getBoundingClientRect();
+    const tr = document.createElement('div'); tr.className = 'traveler';
+    tr.innerHTML = '<div class="tA" style="width:' + (r1.width - 2) + 'px">' + cardHTML + '</div><div class="tB" style="width:' + (r2.width - 2) + 'px">' + target.innerHTML.replace(/ id="[^"]*"/g, '') + '</div>';
+    document.body.appendChild(tr);
+    const box = (r, rad, sh) => ({ left: r.left + 'px', top: r.top + 'px', width: r.width + 'px', height: r.height + 'px', borderRadius: rad, boxShadow: sh });
+    const D = 680;
+    tr.animate([box(r1, '20px', '0 22px 44px -30px rgba(43,33,26,.4)'), box(r2, '18px', '0 0 0 0 rgba(43,33,26,0)')], { duration: D, easing: EASE, fill: 'forwards' });
+    tr.querySelector('.tA').animate([{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translateY(-6px)', offset: 0.42 }, { opacity: 0, transform: 'translateY(-6px)' }], { duration: D, fill: 'forwards' });
+    tr.querySelector('.tB').animate([{ opacity: 0 }, { opacity: 0, offset: 0.38 }, { opacity: 1 }], { duration: D, easing: 'ease-out', fill: 'forwards' });
+    await sleep(D); if (me !== run) { tr.remove(); return; }
+    target.style.visibility = ''; tr.remove();
+  }
+  /* it has taken its place: rule draws, tick draws, the total counts up. One soft tap. */
+  target.classList.add('landed'); buzz(8);
+  if (total) { const n = parseFloat(vals().hero.replace(/[^\d.]/g, '')) || 0; if (calm) total.textContent = '₹' + inr(n) + ' out'; else {
+    const t0 = performance.now(); const step = (t) => { const k = Math.min(1, (t - t0) / 700), e = 1 - Math.pow(1 - k, 3); total.textContent = '₹' + inr(n * e) + ' out'; if (k < 1) requestAnimationFrame(step); }; requestAnimationFrame(step); } }
+  await sleep(calm ? 0 : (typeKey === 'attendance' ? 250 : 900)); if (me !== run) return;
+  await resolveSamples(me); if (me !== run) return;
+  await sleep(calm ? 0 : 1600); if (me !== run) return;
+  $('#nudgeTitle').textContent = typeKey === 'attendance' ? 'Ramu\'s crew is marked. The rest is a sample.'.replace('Ramu\'s crew', vals().a) : 'Your entry is in. The rest are samples.';
+  $('#nudge').hidden = false;
+}
+
+/* ---------- 5. setup: two names, samples clear, then the supervisor ---------- */
+const sheet = $('#sheet'), scrim = $('#scrim');
+function openSheet() { sheet.classList.add('on'); scrim.classList.add('on'); setTimeout(() => ($('#ready').hidden ? $('#sheetTitle') : $('#readyTitle')).focus({ preventScroll: true }), 50); }
+function closeSheet() { sheet.classList.remove('on'); scrim.classList.remove('on'); sheet.style.transform = ''; }
+$('#openSetup').addEventListener('click', openSheet);
+$('#notNow').addEventListener('click', closeSheet);
+scrim.addEventListener('click', closeSheet);
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && sheet.classList.contains('on')) closeSheet(); });
+(() => {
+  const grab = $('#grab'); let y0 = 0, dy = 0, on = false;
+  grab.addEventListener('pointerdown', (e) => { on = true; y0 = e.clientY; dy = 0; sheet.style.transition = 'none'; try { grab.setPointerCapture(e.pointerId); } catch (err) {} });
+  grab.addEventListener('pointermove', (e) => { if (!on) return; dy = Math.max(0, e.clientY - y0); sheet.style.transform = 'translateY(' + dy + 'px)'; });
+  const end = () => { if (!on) return; on = false; sheet.style.transition = ''; if (dy > 90) closeSheet(); else sheet.style.transform = ''; };
+  grab.addEventListener('pointerup', end); grab.addEventListener('pointercancel', end);
+})();
+if (window.visualViewport) {
+  const vv = window.visualViewport;
+  const lift = () => sheet.style.setProperty('--kb', Math.max(0, window.innerHeight - vv.height - vv.offsetTop) + 'px');
+  vv.addEventListener('resize', lift); vv.addEventListener('scroll', lift);
+}
+$('#site').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('#person').focus(); } });
+$('#person').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('#wa').focus(); } });
+$('#wa').addEventListener('input', () => { $('#wa').value = pretty(digits($('#wa').value)); $('#waErr').textContent = ''; });
+
+$('#setup').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const site = $('#site').value.trim(), person = $('#person').value.trim(), wa = digits($('#wa').value);
+  $('#siteErr').textContent = site ? '' : 'Add a site or project name.';
+  $('#personErr').textContent = person ? '' : 'Add your name so your team knows who approves.';
+  $('#waErr').textContent = /^[6-9]\d{9}$/.test(wa) ? '' : 'Enter your 10-digit WhatsApp number.';
+  if (!site) { $('#site').focus(); return; }
+  if (!person) { $('#person').focus(); return; }
+  if (!/^[6-9]\d{9}$/.test(wa)) { $('#wa').focus(); return; }
+  buzz(14); document.activeElement && document.activeElement.blur();
+  setUp = true; siteName = site; personName = person; waDigits = wa;
+  /* the page behind the sheet becomes his: samples leave, his name goes on the approval */
+  const s = $('#samples'); if (s) { s.classList.add('clear'); setTimeout(() => s.remove(), 650); }
+  const lbl = $('#siteLabel'); if (lbl) lbl.textContent = site;
+  document.querySelectorAll('.row.mine .main span').forEach((el) => { el.textContent = el.textContent.replace('by you', 'by ' + person); });
+  $('#dest').textContent = site;
+  $('#readyTitle').textContent = site + ' is ready.';
+  $('#setup').hidden = true; $('#ready').hidden = false;
+  $('#nudgeTitle').textContent = site + ' is set up.'; $('#nudgeBody').textContent = 'One last thing: does someone else send updates from site?'; $('#openSetup').textContent = 'Continue';
+  $('#readyTitle').focus({ preventScroll: true });
+});
+/* ---------- 6. add your supervisor: one number, Briklay says hi ---------- */
+const supNum = $('#supNum');
+const digits = (v) => v.replace(/\D/g, '').replace(/^(91|0)(?=\d{10})/, '').slice(0, 10);
+const pretty = (d) => d.length > 5 ? d.slice(0, 5) + ' ' + d.slice(5) : d;
+supNum.addEventListener('input', () => { supNum.value = pretty(digits(supNum.value)); $('#supErr').textContent = ''; });
+/* contact picker, inline in the field. Android Chrome supports it; iPhone browsers do not,
+   so in production hide the button there. In this prototype it stays visible and explains itself. */
+let pickedName = '';
+const canPick = 'contacts' in navigator && 'select' in navigator.contacts;
+function setNumber(t) {
+  supNum.value = pretty(digits(t)); $('#supErr').textContent = '';
+  const box = $('#telBox'); box.classList.remove('got'); void box.offsetWidth; box.classList.add('got');
+}
+function clearPicked() { pickedName = ''; $('#picked').hidden = true; $('#nums').hidden = true; $('#nums').innerHTML = ''; $('#pickHint').textContent = ''; }
+$('#pick').addEventListener('click', async () => {
+  $('#pickHint').textContent = '';
+  if (!canPick) { $('#pickHint').textContent = 'This browser can\'t open your contacts. Type or paste the number.'; supNum.focus(); return; }
+  try {
+    const r = await navigator.contacts.select(['name', 'tel'], { multiple: false });
+    const c = r && r[0]; if (!c) return;
+    const tels = [...new Set((c.tel || []).map(digits).filter((d) => d.length === 10))];
+    if (!tels.length) { $('#pickHint').textContent = 'That contact has no mobile number. Pick another or type it.'; return; }
+    clearPicked(); buzz(8);
+    pickedName = ((c.name && c.name[0]) || '').trim();
+    if (pickedName) { $('#pickedName').textContent = pickedName; $('#pickedAv').textContent = pickedName.charAt(0).toUpperCase(); $('#picked').hidden = false; }
+    setNumber(tels[0]);
+    if (tels.length > 1) {
+      const box = $('#nums');
+      box.innerHTML = tels.map((d, i) => '<button type="button" data-d="' + d + '" aria-pressed="' + (i === 0) + '">' + pretty(d) + '</button>').join('');
+      box.hidden = false; $('#pickHint').textContent = 'Which one is on WhatsApp?';
+    }
+  } catch (e) {}
+});
+$('#nums').addEventListener('click', (e) => {
+  const b = e.target.closest('button'); if (!b) return;
+  $('#nums').querySelectorAll('button').forEach((x) => x.setAttribute('aria-pressed', x === b));
+  setNumber(b.dataset.d); buzz(6);
+});
+$('#pickedClear').addEventListener('click', () => { clearPicked(); supNum.value = ''; supNum.focus(); });
+supNum.addEventListener('input', () => { if (pickedName && !$('#nums').hidden) { $('#nums').hidden = true; $('#pickHint').textContent = ''; } });
+
+let personName = '';
+const teamChoice = () => { const c = document.querySelector('input[name="team"]:checked'); return c ? c.value : ''; };
+document.querySelectorAll('input[name="team"]').forEach((r) => r.addEventListener('change', () => {
+  const yes = teamChoice() === 'yes';
+  $('#unfold').classList.toggle('open', yes); $('#go').classList.add('open');
+  $('#goBtn').textContent = yes ? 'Add and say hi' : 'Open my site';
+  $('#supErr').textContent = ''; buzz(6);
+  if (yes) setTimeout(() => supNum.focus({ preventScroll: true }), calm ? 0 : 380);
+}));
+
+/* Open my site (option a): the setup captured the site, the builder's name and the
+   WhatsApp number he messaged from. "Open my site" sends a one-time code to that
+   number and, once verified, the parent app (DemoRecord.tsx) creates the real
+   account + workspace over this bridge and opens the Day Book. No password. */
+let bridgeId = 0; const bridge = new Map();
+window.addEventListener('message', (e) => {
+  const d = e.data; if (!d || d.type !== 'brik-demo-res') return;
+  const cb = bridge.get(d.id); if (cb) { bridge.delete(d.id); cb(d); }
+});
+function ask(action, payload) {
+  return new Promise((resolve) => {
+    const id = ++bridgeId; bridge.set(id, resolve);
+    parent.postMessage({ type: 'brik-demo-req', id, action, payload }, '*');
+    setTimeout(() => { if (bridge.has(id)) { bridge.delete(id); resolve({ ok: false, error: 'Timed out. Try again.' }); } }, 20000);
+  });
+}
+
+let sending = false;
+async function openSite() {
+  if (sending) return; sending = true;
+  const b1 = $('#goBtn'), b2 = $('#openSite2');
+  if (b1) b1.disabled = true; if (b2) b2.disabled = true;
+  buzz(8);
+  const res = await ask('send-otp', { phone: waDigits });
+  sending = false; if (b1) b1.disabled = false; if (b2) b2.disabled = false;
+  if (!res.ok) { $('#supErr').textContent = res.error || 'Could not send the code. Check the number.'; return; }
+  $('#ready').hidden = true; $('#setup').hidden = true; $('#otp').hidden = false;
+  $('#otpNum').textContent = '+91 ' + pretty(waDigits);
+  setTimeout(() => $('#otpCode').focus({ preventScroll: true }), calm ? 0 : 120);
+}
+
+let verifying = false;
+async function verifyCode() {
+  if (verifying) return;
+  const code = $('#otpCode').value.replace(/\D/g, '');
+  if (code.length < 6) { $('#otpErr').textContent = 'Enter the 6-digit code.'; $('#otpCode').focus(); return; }
+  verifying = true; const vbtn = $('#otpVerify'); vbtn.disabled = true; $('#otpErr').textContent = ''; buzz(10);
+  const sup = teamChoice() === 'yes' ? digits(supNum.value) : '';
+  const res = await ask('verify', { phone: waDigits, code, site: siteName, name: personName, supervisor: sup });
+  if (!res.ok) { verifying = false; vbtn.disabled = false; $('#otpErr').textContent = res.error || 'That code didn’t work. Try again.'; try { $('#otpCode').select(); } catch (err) {} return; }
+  buzz(8); closeSheet();
+  $('#handoffText').textContent = 'Opening ' + (siteName || 'your site');
+  $('#handoffLink').hidden = true; $('#handoff').hidden = false;
+  /* the parent navigates the top window into the real app on success. */
+}
+$('#otpVerify').addEventListener('click', verifyCode);
+$('#otpCode').addEventListener('input', () => { $('#otpErr').textContent = ''; if ($('#otpCode').value.replace(/\D/g, '').length === 6) setTimeout(verifyCode, 120); });
+$('#otpBack').addEventListener('click', () => { $('#otp').hidden = true; $('#ready').hidden = false; $('#otpCode').value = ''; setTimeout(() => $('#readyTitle').focus({ preventScroll: true }), 40); });
+$('#openSite2').addEventListener('click', openSite);
+
+$('#supForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if (teamChoice() !== 'yes') { openSite(); return; }
+  const d = digits(supNum.value), me = run;
+  if (!/^[6-9]\d{9}$/.test(d)) { $('#supErr').textContent = 'Enter their 10-digit mobile number.'; supNum.focus(); return; }
+  buzz(10); document.activeElement && document.activeElement.blur();
+  $('#hiBubble').textContent = 'Hi' + (pickedName ? ' ' + pickedName.split(' ')[0] : '') + ', ' + personName + ' added you to ' + siteName + ' on Briklay. Send payments, attendance and work updates here, straight from site.';
+  $('#memberNum').textContent = '+91 ' + pretty(d);
+  $('#member .main b').textContent = pickedName || 'Teammate';
+  $('#hiState').classList.remove('sent'); $('#hiText').textContent = 'Sending';
+  const member = $('#member'); member.style.visibility = 'hidden';
+  const form = $('#supForm');
+  if (!calm) { await form.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 220, easing: 'ease-out' }).finished.catch(() => {}); }
+  form.hidden = true; $('#supDone').hidden = false;
+  await sleep(calm ? 0 : 1100); if (me !== run) return;
+  $('#hiState').classList.add('sent');
+  $('#hiText').textContent = 'Sent ' + new Date().toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' });
+  buzz(8);
+  await sleep(calm ? 0 : 450); if (me !== run) return;
+  member.style.visibility = ''; member.style.animation = 'none'; void member.offsetWidth; member.style.animation = '';
+  $('#nudgeTitle').textContent = 'Teammate invited.'; $('#nudgeBody').textContent = 'They go live the moment they reply on WhatsApp.'; $('#openSetup').textContent = 'View';
+});
+$('#addMore').addEventListener('click', () => { clearPicked(); supNum.value = ''; $('#supDone').hidden = true; $('#supForm').hidden = false; supNum.focus(); });
+
+mount(DEMO.key);
+</script>
+</body>
+</html>
