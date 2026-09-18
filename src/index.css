@@ -147,7 +147,8 @@ html, body {
    the in-project sub-nav (56px, bottom:0) fits inside this clearance too. */
 @media (max-width: 767px) {
   .mobile-main-pb {
-    padding-bottom: calc(58px + env(safe-area-inset-bottom) + 30px) !important;
+    /* the capsule (58) + the action pill riding above it (42 + 10 gap) + air */
+    padding-bottom: calc(58px + env(safe-area-inset-bottom) + 82px) !important;
   }
   /* FAB sits above tab bar */
   .bk-fab {

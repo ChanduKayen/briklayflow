@@ -1,11 +1,17 @@
 /**
- * MobileNavBar — the floating glass navigation capsule (top-level mobile nav).
+ * MobileNavBar — the floating navigation capsule (top-level mobile nav).
  *
- * A pixel-faithful build of the briklay-mobile-nav reference: a pinned "Book" tab, a horizontally
- * scrollable rail of the rest, a warm "site lamp" that tracks the active tab, a "there's more" chevron,
- * a minimize-to-pill on scroll-down, and a CONTEXTUAL FAB (the page decides what it creates; long-press =
- * universal quick-add). The long tail (Insights, Client Billing, Inward Register, Follow-up rules…) lives
- * behind a "Workspace" tab that opens the reference's hub card-grid, so nothing is unreachable on mobile.
+ * FIVE SLOTS THAT NEVER MOVE. The rail used to scroll: seven destinations in a 390px bar with its right
+ * edge masked, so whatever sat at the end was always half-erased ("Payab…") and nothing was ever twice in
+ * the same place. A bottom bar earns its keep through muscle memory, and a scrolling one has none. So:
+ * four destinations by role, then More — which carries the rest of the daily pages above the Workspace
+ * grid, and the badge of any page that spilled into it.
+ *
+ * THE ACTION IS NOT A TAB. It sits above the bar's right end, warm and named — "+ Bill", "+ Entry",
+ * "+ PO" — so the eye reads five things that GO somewhere and one that MAKES something. A page with
+ * nothing of its own to create offers "New", the universal quick-add, which a long press gives anywhere.
+ * While the page is scrolling the pill draws in to a circle and opens again when it stops, so a word
+ * never sits over a row being read.
  *
  * It renders ONLY the top-level nav — inside a project the app keeps its own project sub-nav (see App.tsx).
  * Navigation is URL-driven (react-router), matching the rest of the app. The CSS is scoped under `.mnav`
@@ -57,14 +63,17 @@ const ALL_TABS: Tab[] = [
 // The "Workspace" tab — a hub, not a route. It lights when on any page it holds.
 const WORKSPACE_PATHS = ['/insights', '/billing', '/inward-register', '/tasks', '/follow-up-rules', '/site-desk', '/desk', '/team', '/profile', '/work-orders', '/stakeholders'];
 
-// The contextual FAB: what each tab creates. null = nothing to create (the FAB steps aside).
-// 'book' is special — it opens a Money-out / Money-in menu (see the FAB handler), not a single route.
-const FAB_BY_TAB: Record<string, { label: string; to: string; icon: ReactNode } | null> = {
-  book: { label: 'New entry', to: '/ledger/new', icon: I.plus },
-  bills: { label: 'New bill', to: '/bills?new=1', icon: <><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z" /><path d="M12 8v6M9 11h6" /></> },
-  pos: { label: 'New PO', to: '/purchase-orders/new', icon: <><path d="M5 7h14l-1.5 12h-11z" /><path d="M9 7a3 3 0 0 1 6 0" /><path d="M12 11v5M9.5 13.5h5" /></> },
-  review: null, payables: null, att: null, workspace: null,
+/**
+ * What the action makes, page by page — and the word it wears. A page with nothing of its own falls
+ * through to "New", the universal quick-add, rather than leaving an unexplained circle. 'book' is
+ * special: it opens a Money-out / Money-in chooser instead of one route.
+ */
+const ACT_BY_TAB: Record<string, { label: string; long: string; to: string; icon: ReactNode }> = {
+  book: { label: 'Entry', long: 'New entry', to: '/ledger/new', icon: I.plus },
+  bills: { label: 'Bill', long: 'New bill', to: '/bills?new=1', icon: <><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z" /><path d="M12 8v6M9 11h6" /></> },
+  pos: { label: 'PO', long: 'New PO', to: '/purchase-orders/new', icon: <><path d="M5 7h14l-1.5 12h-11z" /><path d="M9 7a3 3 0 0 1 6 0" /><path d="M12 11v5M9.5 13.5h5" /></> },
 };
+const ACT_ANY = { label: 'New', long: 'Quick add', to: '', icon: I.plus };
 
 const QUICK_ADD = [
   { label: 'New entry', sub: 'Payment, receipt or note', to: '/ledger/new', icon: I.plus },
@@ -80,80 +89,45 @@ const Svg = ({ children, w = 22 }: { children: ReactNode; w?: number }) => (
 export function MobileNavBar({ role, poBadge = 0, hidden = false, onSignOut }: { role: Role; poBadge?: number; hidden?: boolean; onSignOut?: () => void }) {
   const location = useLocation();
   const navigate = useNavigate();
-  const railRef = useRef<HTMLDivElement>(null);
   const barRef = useRef<HTMLDivElement>(null);
-  const detentRef = useRef(-1);   // last dial detent crossed while scrolling the rail (for haptics)
 
-  const [scrolled, setScrolled] = useState(false);
-  const [atEnd, setAtEnd] = useState(false);
+  const [tight, setTight] = useState(false);      // the page is moving → the pill draws in to a circle
   const [sheet, setSheet] = useState<null | 'workspace' | 'quickadd'>(null);
   const [fabMenu, setFabMenu] = useState(false);   // Book's Money-out / Money-in chooser
 
   // A short haptic nudge on every nav tap (as in the reference). No-op where unsupported.
   const hapt = (ms: number | number[] = 6) => { try { navigator.vibrate?.(ms); } catch { /* unsupported */ } };
 
+  // Four by role, then More. For management that is Book · Review · Bills · POs, with Payables and
+  // Attendance a tap away in More; a role that sees fewer pages simply gets fewer slots.
   const visible = useMemo(() => ALL_TABS.filter((t) => t.show(role)), [role]);
-  const pinned = visible[0];
-  const rail = visible.slice(1);
+  const slots = useMemo(() => visible.slice(0, 4), [visible]);
+  const spilled = useMemo(() => visible.slice(4), [visible]);
 
   const path = location.pathname;
   const isTabActive = (t: Tab) => t.activePaths.some((p) => path === p || path.startsWith(p + '/') || path.startsWith(p + '?'));
   const workspaceActive = WORKSPACE_PATHS.some((p) => path === p || path.startsWith(p + '/'));
-  const activeKey = visible.find(isTabActive)?.key ?? (workspaceActive ? 'workspace' : (pinned?.key ?? ''));
-  const fab = FAB_BY_TAB[activeKey] ?? null;
+  const activeKey = visible.find(isTabActive)?.key ?? (workspaceActive ? 'workspace' : (slots[0]?.key ?? ''));
+  // More lights for the Workspace pages AND for any destination that spilled into it.
+  const moreOn = workspaceActive || spilled.some((t) => t.key === activeKey);
+  const act = ACT_BY_TAB[activeKey] ?? ACT_ANY;
+  // The POs badge follows POs: on its own slot when it has one, on More when it does not.
+  const badgeOnMore = poBadge > 0 && !slots.some((t) => t.key === 'pos');
 
   // enable the ink-draw signature (needs pathLength=1 on every drawn segment)
   useEffect(() => {
     barRef.current?.querySelectorAll('.mnav-tab svg *').forEach((el) => el.setAttribute('pathLength', '1'));
   }, []);
 
-  // rail scroll/resize → edge fades + pin shadow + DIAL-DETENT HAPTICS. The glow is a per-tab CSS effect
-  // now (never a JS-positioned element), so there is nothing to reposition — that was the source of the
-  // misplacement. As the rail scrolls, each tab crossing a detent gives a tiny "tick" — like a physical dial.
+  // While the page is moving the pill draws in to a circle — an action with a word in it should not sit
+  // over the rows being read. It opens again a beat after the page stops. (The capsule itself never
+  // minimizes on scroll: that toggle flickered. It hides only for full-screen forms.)
   useEffect(() => {
-    const r = railRef.current; if (!r) return;
-    const TAB_W = 63;
-    const measure = () => {
-      const over = r.scrollWidth > r.clientWidth + 4;
-      setScrolled(r.scrollLeft > 6);
-      setAtEnd(!over || r.scrollLeft + r.clientWidth >= r.scrollWidth - 10);
-      const d = Math.round(r.scrollLeft / TAB_W);
-      if (d !== detentRef.current) { detentRef.current = d; hapt(3); }   // the dial tick
-    };
-    measure();
-    detentRef.current = Math.round(r.scrollLeft / TAB_W);
-    r.addEventListener('scroll', measure, { passive: true });
-    window.addEventListener('resize', measure);
-    return () => { r.removeEventListener('scroll', measure); window.removeEventListener('resize', measure); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible.length]);
-
-  // "There's more" cue — instead of an arrow: once, shortly after load, if the rail overflows and is at the
-  // start, give it a gentle peek-nudge (slide a little, then settle) so it's obvious the row slides. The
-  // edge fade (see .mnav-rail mask) is the persistent hint; this is the one-time reveal.
-  const nudged = useRef(false);
-  useEffect(() => {
-    const r = railRef.current; if (!r) return;
-    const id = window.setTimeout(() => {
-      if (nudged.current || r.scrollWidth <= r.clientWidth + 4 || r.scrollLeft > 6) return;
-      nudged.current = true;
-      r.scrollTo({ left: 40, behavior: 'smooth' });
-      window.setTimeout(() => r.scrollTo({ left: 0, behavior: 'smooth' }), 520);
-    }, 750);
-    return () => window.clearTimeout(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible.length]);
-
-  // active tab changed → recentre it in the rail (the glow is per-tab, so it rides along automatically).
-  useEffect(() => {
-    const bar = barRef.current; if (!bar) return;
-    const on = bar.querySelector('.mnav-tab.on') as HTMLElement | null;
-    if (on && on.closest('.mnav-rail')) on.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeKey]);
-
-  // (The capsule NEVER minimizes on page scroll — that toggle flickered; the bar stays expanded, only
-  //  hiding on full-screen forms.)
+    let t = 0;
+    const onScroll = () => { setTight(true); window.clearTimeout(t); t = window.setTimeout(() => setTight(false), 900); };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => { window.removeEventListener('scroll', onScroll); window.clearTimeout(t); };
+  }, []);
 
   // close the FAB menu on any outside tap
   useEffect(() => {
@@ -174,19 +148,22 @@ export function MobileNavBar({ role, poBadge = 0, hidden = false, onSignOut }: {
   const fabClick = () => {
     if (held.current) return;
     hapt(8);
-    // On the Book page the FAB is the money chooser (Out / In) — like the old ledger FAB.
+    // On the Book page the action is the money chooser (Out / In) — like the old ledger FAB.
     if (activeKey === 'book') { setFabMenu((v) => !v); return; }
-    if (fab) go(fab.to);
+    if (act.to) { go(act.to); return; }
+    setSheet('quickadd');                      // nothing of its own here — offer everything
   };
 
-  const renderTab = (t: Tab, inRail: boolean) => {
+  const badge = (n: number) => <span className="mnav-badge">{n > 9 ? '9+' : n}</span>;
+
+  const renderTab = (t: Tab) => {
     const on = t.key === activeKey;
     return (
-      <button key={t.key} className={`mnav-tab${on ? ' on' : ''}`} data-rail={inRail ? '1' : undefined}
+      <button key={t.key} className={`mnav-tab${on ? ' on' : ''}`}
         onClick={() => go(t.to)} type="button" aria-current={on ? 'page' : undefined}>
-        <span style={{ position: 'relative' }}>
+        <span className="mnav-ic">
           <Svg>{t.icon}</Svg>
-          {t.key === 'pos' && poBadge > 0 && <span className="mnav-badge">{poBadge > 9 ? '9+' : poBadge}</span>}
+          {t.key === 'pos' && poBadge > 0 && badge(poBadge)}
         </span>
         <small>{t.label}</small>
       </button>
@@ -196,24 +173,28 @@ export function MobileNavBar({ role, poBadge = 0, hidden = false, onSignOut }: {
   return (
     <>
       <style>{CSS}</style>
-      <div ref={barRef} className={`mnav-bar${scrolled ? ' scrolled' : ''}${atEnd ? ' atend' : ''}${hidden ? ' gone' : ''}`}>
-        {/* pinned tab */}
-        {pinned && <div className="mnav-pin">{renderTab(pinned, false)}</div>}
-
-        {/* scrollable rail */}
-        <div ref={railRef} className="mnav-rail">
-          {rail.map((t) => renderTab(t, true))}
-          {/* Workspace — the hub for everything else */}
-          <button className={`mnav-tab${activeKey === 'workspace' ? ' on' : ''}`} data-rail="1" type="button" onClick={() => { hapt(6); setSheet('workspace'); }}>
-            <Svg>{I.workspace}</Svg><small>Workspace</small>
-          </button>
-        </div>
-
-        {/* contextual FAB */}
-        <button className={`mnav-fab${fab ? '' : ' hide'}${fabMenu ? ' open' : ''}`} type="button" aria-label={fab?.label ?? 'Create'}
+      <div className={`mnav-stack${hidden ? ' gone' : ''}`}>
+        {/* The action — above the bar's right end, carrying the word for what it makes. */}
+        <button className={`mnav-act${tight ? ' tight' : ''}${fabMenu ? ' open' : ''}`} type="button" aria-label={act.long}
           onPointerDown={(e) => { e.stopPropagation(); fabDown(); }} onPointerUp={fabUp} onPointerLeave={fabUp} onPointerCancel={fabUp} onClick={fabClick}>
-          <Svg w={20}>{fab?.icon ?? I.plus}</Svg>
+          <Svg w={18}>{act.icon}</Svg>
+          <span>{act.label}</span>
         </button>
+
+        {/* Five slots that never move. */}
+        <div ref={barRef} className="mnav-bar">
+          <div className="mnav-slots">
+            {slots.map((t) => renderTab(t))}
+            <button className={`mnav-tab${moreOn ? ' on' : ''}`} type="button" aria-label="More"
+              onClick={() => { hapt(6); setSheet('workspace'); }}>
+              <span className="mnav-ic">
+                <Svg>{I.workspace}</Svg>
+                {badgeOnMore && badge(poBadge)}
+              </span>
+              <small>More</small>
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* Book's Money-out / Money-in chooser — the old ledger FAB, kept (elegant, two options) */}
@@ -237,7 +218,7 @@ export function MobileNavBar({ role, poBadge = 0, hidden = false, onSignOut }: {
         <button type="button" className="mnav-close" aria-label="Close" onClick={() => setSheet(null)}>
           <svg viewBox="0 0 24 24" style={{ width: 16, height: 16, stroke: 'currentColor', fill: 'none', strokeWidth: 2, strokeLinecap: 'round' }}><path d="M6 6l12 12M18 6L6 18" /></svg>
         </button>
-        {sheet === 'workspace' && <WorkspaceHub role={role} onGo={go} onSignOut={onSignOut} />}
+        {sheet === 'workspace' && <WorkspaceHub role={role} onGo={go} onSignOut={onSignOut} spilled={spilled} activeKey={activeKey} />}
         {sheet === 'quickadd' && (
           <>
             <div className="mnav-qtitle">Quick add</div>
@@ -255,7 +236,11 @@ export function MobileNavBar({ role, poBadge = 0, hidden = false, onSignOut }: {
 }
 
 // ── the Workspace hub (the reference's card grid) ──
-function WorkspaceHub({ role, onGo, onSignOut }: { role: Role; onGo: (to: string) => void; onSignOut?: () => void }) {
+function WorkspaceHub({ role, onGo, onSignOut, spilled = [], activeKey = '' }: {
+  role: Role; onGo: (to: string) => void; onSignOut?: () => void;
+  /** Daily destinations with no slot in the bar — they lead here, not buried among the hub cards. */
+  spilled?: Tab[]; activeKey?: string;
+}) {
   const cards = [
     { label: 'Site Desk', sub: 'work plan', to: '/desk/all/plan', icon: I.sitedesk, show: true },
     { label: 'Site Problems', sub: 'issues & snags', to: '/desk/all/problems', icon: I.sitedesk, show: true },
@@ -274,7 +259,21 @@ function WorkspaceHub({ role, onGo, onSignOut }: { role: Role; onGo: (to: string
   ].filter((c) => c.show !== false);
   return (
     <>
-      <div className="mnav-qtitle">Workspace</div>
+      {spilled.length > 0 && (
+        <>
+          <div className="mnav-qtitle">Go to</div>
+          <div className="mnav-hubgrid">
+            {spilled.map((t) => (
+              <button key={t.key} className={`mnav-hcard${t.key === activeKey ? ' on' : ''}`} type="button" onClick={() => onGo(t.to)}>
+                <span className="mnav-hic"><Svg w={16}>{t.icon}</Svg></span>
+                <b>{t.label}</b><span className="mnav-hsub">{t.key === 'payables' ? 'the weekly run' : 'today, site by site'}</span>
+              </button>
+            ))}
+          </div>
+          <div className="mnav-hublab">Workspace</div>
+        </>
+      )}
+      {spilled.length === 0 && <div className="mnav-qtitle">Workspace</div>}
       <div className="mnav-hubgrid">
         {cards.map((c) => (
           <button key={c.label} className="mnav-hcard" type="button" onClick={() => onGo(c.to)}>
@@ -303,32 +302,37 @@ function WorkspaceHub({ role, onGo, onSignOut }: { role: Role; onGo: (to: string
 // ── scoped CSS (the reference, ported verbatim in value) ──
 const CSS = `
 /* Ground matches the desktop sidenav / transaction-page header: the bitter-chocolate "night binding". */
-.mnav-bar{position:fixed; left:14px; right:14px; bottom:calc(14px + env(safe-area-inset-bottom)); max-width:402px; margin:0 auto; z-index:40;
+.mnav-stack{position:fixed; left:14px; right:14px; bottom:calc(14px + env(safe-area-inset-bottom)); max-width:402px; margin:0 auto;
+  z-index:40; display:flex; flex-direction:column; align-items:flex-end; gap:10px; pointer-events:none;
+  transition:transform .28s cubic-bezier(.4,0,.2,1), opacity .28s}
+.mnav-stack.gone{transform:translateY(200%); opacity:0; pointer-events:none}
+@media (min-width:768px){ .mnav-stack{display:none} }
+
+/* the action: warm, named, and plainly not one of the five */
+.mnav-act{pointer-events:auto; display:inline-flex; align-items:center; justify-content:center; gap:8px; height:42px; padding:0 18px 0 15px;
+  border:0; border-radius:999px; background:#C75B2B; color:#FFF7EF; cursor:pointer;
+  font-family:'DM Sans',system-ui,sans-serif; font-size:13.5px; font-weight:700; letter-spacing:.01em;
+  box-shadow:0 12px 26px -12px rgba(199,91,43,.85), inset 0 1px 0 rgba(255,255,255,.18);
+  transition:transform .26s cubic-bezier(.2,.9,.3,1.4), padding .34s cubic-bezier(.22,.8,.24,1), gap .34s cubic-bezier(.22,.8,.24,1), width .34s cubic-bezier(.22,.8,.24,1)}
+.mnav-act span{max-width:120px; overflow:hidden; white-space:nowrap; transition:max-width .34s cubic-bezier(.22,.8,.24,1), opacity .22s ease}
+.mnav-act:active{transform:scale(.94)}
+.mnav-act.tight{padding:0; width:42px; gap:0}                     /* the page is moving: draw in */
+.mnav-act.tight span{max-width:0; opacity:0}
+.mnav-act svg{transition:transform .22s cubic-bezier(.2,.9,.3,1.4)}
+.mnav-act.open svg{transform:rotate(45deg)}
+
+/* Ground matches the desktop sidenav / transaction-page header: the bitter-chocolate "night binding". */
+.mnav-bar{pointer-events:auto; position:relative; width:100%;
   --b-rule:#302014; --b-soft:rgba(245,240,231,.55); --b-clay:#E8935F;
   background:linear-gradient(180deg,#191009,#140D07);
   border:1px solid rgba(245,240,231,.08); border-radius:999px; overflow:hidden;
   box-shadow:0 22px 44px -18px rgba(20,13,7,.72), inset 0 1px 0 rgba(245,240,231,.06);
-  display:flex; align-items:center; padding:6px; transition:padding .3s, transform .28s cubic-bezier(.4,0,.2,1), opacity .28s}
-.mnav-bar.gone{transform:translateY(160%); opacity:0; pointer-events:none}
-@media (min-width:768px){ .mnav-bar{display:none} }
+  display:flex; align-items:center; padding:6px}
 
-.mnav-pin{flex:none; display:flex; padding:0 2px; border-right:1px solid var(--b-rule); position:relative; z-index:1; max-width:80px; overflow:hidden;
-  transition:box-shadow .25s, max-width .32s, opacity .25s, padding .3s}
-.mnav-bar.scrolled .mnav-pin{box-shadow:10px 0 16px -10px rgba(0,0,0,.75)}
-
-.mnav-rail{flex:1; display:flex; overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none; padding:0 14px 0 2px; max-width:999px;
-  transition:max-width .32s, opacity .25s;
-  /* The rail owns horizontal gestures: a sideways swipe here scrolls the rail, NEVER the page, and its
-     scroll never chains out to the body. FREE momentum scroll (no scroll-snap) — a small swipe nudges a
-     little, a flick coasts; snap was centering a tab and, on this short rail, jumped every swipe to the end
-     ("one swipe = complete scroll"). The detent haptic on scroll keeps the physical-dial feel. */
-  touch-action:pan-x; overscroll-behavior:contain;
-  -webkit-mask-image:linear-gradient(to right,#000 0,#000 calc(100% - 30px),transparent);
-  mask-image:linear-gradient(to right,#000 0,#000 calc(100% - 30px),transparent)}
-.mnav-bar.scrolled .mnav-rail{
-  -webkit-mask-image:linear-gradient(to right,transparent 0,#000 22px,#000 calc(100% - 34px),transparent);
-  mask-image:linear-gradient(to right,transparent 0,#000 22px,#000 calc(100% - 34px),transparent)}
-.mnav-rail::-webkit-scrollbar{display:none}
+/* five equal slots — nothing scrolls, nothing is masked, every label whole */
+.mnav-slots{flex:1; display:flex; align-items:stretch; min-width:0}
+.mnav-slots > .mnav-tab{flex:1 1 0; width:auto; min-width:0}
+.mnav-ic{position:relative; display:inline-flex}
 
 .mnav-tab{flex:none; width:63px; border:0; background:none; display:flex; flex-direction:column; align-items:center; gap:4px;
   cursor:pointer; color:var(--b-soft); padding:7px 0 6px; position:relative; transition:color .3s; font-family:'DM Sans',system-ui,sans-serif}
@@ -359,16 +363,8 @@ const CSS = `
 .mnav-tab.on::after{content:''; position:absolute; top:5px; left:50%; width:22px; height:2px; border-radius:99px; transform:translateX(-50%);
   background:var(--b-clay); opacity:.9; box-shadow:0 0 6px rgba(232,147,95,.55); z-index:0}
 
-.mnav-fab{flex:none; width:46px; height:46px; border-radius:50%; border:0; background:#C75B2B; color:#FFF7EF; margin-left:2px;
-  box-shadow:0 8px 18px -8px rgba(199,91,43,.7); cursor:pointer; position:relative; z-index:1; display:grid; place-items:center;
-  transition:transform .3s cubic-bezier(.2,.9,.3,1.4), width .3s, height .3s, opacity .25s, margin .3s}
-.mnav-fab:active{transform:scale(.9)}
-.mnav-fab.hide{width:0; height:0; opacity:0; margin:0; pointer-events:none}
-.mnav-fab svg{transition:transform .22s cubic-bezier(.2,.9,.3,1.4)}
-.mnav-fab.open svg{transform:rotate(45deg)}
-
 /* Book's Money-out / Money-in chooser — floats above the capsule, right-aligned to the FAB */
-.mnav-fabmenu{position:fixed; right:calc(20px + env(safe-area-inset-right)); bottom:calc(84px + env(safe-area-inset-bottom)); z-index:41;
+.mnav-fabmenu{position:fixed; right:calc(20px + env(safe-area-inset-right)); bottom:calc(126px + env(safe-area-inset-bottom)); z-index:41;
   display:flex; flex-direction:column; align-items:flex-end; gap:10px; font-family:'DM Sans',system-ui,sans-serif; animation:mnavpop .18s cubic-bezier(.2,.9,.3,1.4) both}
 @keyframes mnavpop{from{opacity:0; transform:translateY(8px) scale(.96)}to{opacity:1; transform:none}}
 .mnav-mopt{display:inline-flex; align-items:center; gap:10px; padding:9px 8px 9px 14px; border-radius:999px; cursor:pointer;
@@ -390,16 +386,6 @@ const CSS = `
 .mnav-signout b{font-size:14px; font-weight:700}
 .mnav-signout .mnav-hic{background:rgba(178,64,42,.10); border-color:rgba(178,64,42,.18); color:#B2402A; margin:0}
 
-/* minimized: capsule shrinks to the active tab pill */
-.mnav-mini{display:flex; align-items:center; gap:8px; border:0; background:none; color:var(--b-clay); cursor:pointer;
-  font-family:'DM Sans',system-ui,sans-serif; font-size:12px; font-weight:700; padding:0; max-width:0; opacity:0; overflow:hidden;
-  transition:max-width .32s, opacity .25s, padding .3s; white-space:nowrap; position:relative; z-index:1}
-.mnav-bar.min{left:50%; right:auto; transform:translateX(-50%); padding:9px 10px}
-.mnav-bar.min .mnav-mini{max-width:190px; opacity:1; padding:0 10px}
-.mnav-bar.min .mnav-pin, .mnav-bar.min .mnav-rail{max-width:0; opacity:0; padding:0; border:0; pointer-events:none}
-.mnav-bar.min .mnav-fab{width:0; height:0; opacity:0; margin:0; pointer-events:none}
-
-/* sheets */
 .mnav-shade{position:fixed; inset:0; background:rgba(30,24,17,.4); opacity:0; pointer-events:none; transition:opacity .3s; z-index:60}
 .mnav-shade.show{opacity:1; pointer-events:auto}
 .mnav-sheet{position:fixed; left:0; right:0; bottom:0; max-width:430px; margin:0 auto; background:#fff;
@@ -429,5 +415,7 @@ const CSS = `
 .mnav-hcard.wide .mnav-hic{margin:0}
 .mnav-hcard.wide b{font-size:14px}
 .mnav-ch{margin-left:auto; color:#9A8C77}
+.mnav-hcard.on{border-color:rgba(199,91,43,.35); background:rgba(199,91,43,.07)}
+.mnav-hcard.on b{color:#B2402A}
 .mnav-hublab{font-family:'DM Mono',monospace; font-size:9.5px; letter-spacing:.2em; text-transform:uppercase; color:#9A8C77; margin:18px 2px 9px}
 `;
