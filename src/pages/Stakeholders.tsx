@@ -15,6 +15,7 @@ import { isNewLedgerOrg, loadProjectionMap } from '../lib/ledgerRead';
 import { mergeStakeholders } from '../lib/stakeholderMerge';
 import { useSearchScope } from '../components/search/searchScope';
 import SearchBar from '../components/search/SearchBar';
+import { renameWalletHolder } from '../lib/walletApi';
 
 // ── helpers ─────────────────────────────────────────────────────────────────────
 const GSTIN_REGEX = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][A-Z0-9]Z[A-Z0-9]$/;
@@ -330,6 +331,9 @@ export default function Stakeholders({ session }: { session: Session }) {
       if (editingId) {
         const { error } = await supabase.from('stakeholders').update(payload).eq('stakeholder_id', editingId);
         if (error) throw error;
+        // A wallet keeps a copy of its holder's name (every "X's wallet" line reads that copy), so a
+        // rename here has to reach it too.
+        if (orgId) void renameWalletHolder(orgId, editingId, name);
         toast(`Saved — ${name}`);
       } else {
         payload.stakeholder_id = `STK-${Math.floor(1000 + Math.random() * 9000)}`;

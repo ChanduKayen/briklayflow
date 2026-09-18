@@ -1,6 +1,8 @@
 // Aggregator — import every src/lib suite here, then run.
 import './payeeSearch.test'
 import './genHeads.test'
+import './genExpenseLabel.test'
+import './walletHolderName.test'
 import './billPayMath.test'
 import './partyLedger.test'
 import './projectSearch.test'

@@ -31,6 +31,7 @@ import { TrackChip, TRACK_CHIP_CSS } from '../components/txn-ledger/TrackChip';
 import { unlinkTxnOrder } from '../lib/trackingApi';
 import { useOrgId } from '../lib/auth/AuthProvider';
 import WalletRail from '../components/wallets/WalletRail';
+import { loadWallets } from '../lib/walletApi';
 import StakeholderLedgerDrawer from '../components/StakeholderLedgerDrawer';
 import { NewTxnFab } from '../components/NewTxnFab';
 import { NewTxnMenuButton } from '../components/NewTxnMenuButton';
@@ -579,6 +580,12 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
   const [isDragging, setIsDragging] = useState(false);
 
   const [selectedTxnIds, setSelectedTxnIds] = useState<Set<string>>(new Set());
+  // A wallet's holder_name is a snapshot the transaction join carries; the wallet list resolves it to
+  // whatever that person is called NOW (walletApi.currentHolderNames). Same query key as the rail on
+  // this page, so this costs nothing and the rows can't disagree with it.
+  const { data: liveWallets = [] } = useQuery({ queryKey: ['wallets', orgId], queryFn: () => loadWallets(orgId), enabled: !!orgId });
+  const walletNameOf = (id: string | null | undefined, fallback: string | null | undefined) =>
+    (id ? liveWallets.find(w => w.walletId === id)?.holderName : null) || fallback || 'Wallet';
   const [showRecategorize, setShowRecategorize] = useState(false);
   const [showVoidAll, setShowVoidAll] = useState(false);
   const [recatCategory, setRecatCategory] = useState('');
@@ -1598,7 +1605,7 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
                     // chip; a spend keeps its payee but is tinted as site cash. Both get a slight warm tint.
                     const isWTransfer = isWalletTransfer(txn);
                     const isWSpend = isWalletSpend(txn);
-                    const walletHolder = txn.wallets?.holder_name || 'Wallet';
+                    const walletHolder = walletNameOf(txn.wallet_id, txn.wallets?.holder_name);
                     const anchorNode: ReactNode =
                       isWTransfer
                         ? <span className="inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-md" style={{ background: '#EEEAF4', color: '#5E5473', ...font }}><span className="shrink-0 rounded-full" style={{ width: 5, height: 5, background: '#8A7BA6' }} />Wallet transfer</span>

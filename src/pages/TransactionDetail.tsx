@@ -3,7 +3,8 @@ import { useParams, useNavigate, useSearchParams, useLocation } from 'react-rout
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { Loader2 } from 'lucide-react';
-import { isGeneralExpense, generalExpenseLabel } from '../lib/transactions';
+import { isGeneralExpense, generalExpenseLabel, payeeLabel } from '../lib/transactions';
+import { loadWallets } from '../lib/walletApi';
 import type { Session } from '@supabase/supabase-js';
 import { useUserProfile } from '../App';
 import { usePeek } from '../context/PeekContextCore';
@@ -480,6 +481,9 @@ export default function TransactionDetail({ session }: { session: Session }) {
   const orgId = useOrgId();
 
   const { data: profile } = useUserProfile(session.user.id);
+  // Whose wallet a row touched, by the name that person carries now — the joined holder_name on the
+  // transaction is a snapshot from when the wallet was made. Same query key the wallet rail uses.
+  const { data: liveWallets = [] } = useQuery({ queryKey: ['wallets', orgId], queryFn: () => loadWallets(orgId), enabled: !!orgId });
 
   const navigate = useNavigate();
   const [mappingAllocId, setMappingAllocId] = useState<string | null>(null);
@@ -790,7 +794,22 @@ export default function TransactionDetail({ session }: { session: Session }) {
   // ── Redesigned-page derivations ──
   const backTo = navState.backTo || (navState.from === 'project' && navState.projectId ? `/projects/${navState.projectId}/transactions` : '/ledger');
   const backLabel = navState.backLabel || (navState.from === 'project' ? 'Transactions' : 'Ledger');
-  const payeeName: string = txn.stakeholders?.name || (isGeneralExpense(txn) ? ((txn as any).ai_flag_data?.general_payee || generalExpenseLabel(txn)) : 'Unknown');
+  // ── wallet dimension: a transfer (float in / return out) MOVED money to/from a site-cash wallet;
+  //    a wallet spend was funded FROM a wallet. Both link out to the wallet screen (/ledger?wallet=…).
+  const walletId: string | null = txn.wallet_id ?? null;
+  // The row's join carries the snapshot; the wallet list carries the holder's name as it stands now.
+  const walletHolder: string = (txn.wallet_id ? liveWallets.find(w => w.walletId === txn.wallet_id)?.holderName : null)
+    || txn.wallets?.holder_name || 'a wallet';
+  const isWTransfer = !!txn.wallet_dir && !!txn.is_transfer;
+  const isWFloat = isWTransfer && txn.wallet_dir === 'in';
+  const isWSpend = txn.wallet_dir === 'out' && !txn.is_transfer;
+  const openWallet = () => { if (walletId) navigate(`/ledger?wallet=${walletId}`); };
+  // An overhead has no party: what it was filed UNDER is its name here, exactly as the ledger row
+  // reads it (payeeLabel is the one place that decides). The name the site said at capture is kept
+  // as context below — it is who the money was handed to, not who the books owe.
+  const isGenExp = isGeneralExpense(txn);
+  const payeeName: string = isWTransfer ? `${walletHolder}'s wallet` : payeeLabel(txn);
+  const heardName: string | null = isGenExp ? ((txn as { ai_flag_data?: { general_payee?: string } }).ai_flag_data?.general_payee || null) : null;
   const payeeType: string = txn.stakeholders?.type || '';
   const payeeCategory: string = txn.stakeholders?.category || '';
   const isVendor = payeeType === 'Vendor';
@@ -807,14 +826,6 @@ export default function TransactionDetail({ session }: { session: Session }) {
   const anyBillIdAlloc = (allocs || []).some((a: any) => a?.bill_id);
   const billLinked = !!primaryAlloc?.order_type || anyBillIdAlloc || !!txn.bill_doc_url;
   const rupee = (n: number) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');
-  // ── wallet dimension: a transfer (float in / return out) MOVED money to/from a site-cash wallet;
-  //    a wallet spend was funded FROM a wallet. Both link out to the wallet screen (/ledger?wallet=…).
-  const walletId: string | null = txn.wallet_id ?? null;
-  const walletHolder: string = txn.wallets?.holder_name || 'a wallet';
-  const isWTransfer = !!txn.wallet_dir && !!txn.is_transfer;
-  const isWFloat = isWTransfer && txn.wallet_dir === 'in';
-  const isWSpend = txn.wallet_dir === 'out' && !txn.is_transfer;
-  const openWallet = () => { if (walletId) navigate(`/ledger?wallet=${walletId}`); };
   // (vendor bill attach now routes to BillAllocateSheet; the old inline PO picker below is inert)
   void setPickerStep; void setMappingAllocId;
   const openLightbox = (url: string, title: string) => { setLightboxTitle(title); setLightboxUrl(url); };
@@ -845,8 +856,13 @@ export default function TransactionDetail({ session }: { session: Session }) {
 
   // ── the phone screen, built to the transaction-detail reference ────────────
   const renderMobile = () => {
-    const st = primaryAlloc ? allocStatus(primaryAlloc) : { linked: false, k: 'Not linked to work yet', sub: `link ${payeeName}'s ${isVendor ? 'bill' : 'contract'}, and this settles against it` };
-    const canLink = !isVoided && !billLinked;
+    // An overhead has no party, so it has no bill and no contract to settle against. Saying
+    // "not settled" about one — and offering to link its contract — is asking for something that
+    // cannot exist.
+    const st = isGenExp
+      ? { linked: true, k: 'An overhead — nothing to settle', sub: `${generalExpenseLabel(txn)}${heardName ? ` · paid to ${heardName}` : ''}` }
+      : primaryAlloc ? allocStatus(primaryAlloc) : { linked: false, k: 'Not linked to work yet', sub: `link ${payeeName}'s ${isVendor ? 'bill' : 'contract'}, and this settles against it` };
+    const canLink = !isVoided && !billLinked && !isGenExp;
 
     // "Cash · Friday 5 Sept, 5:30 pm"
     const longDate = txnDate
@@ -855,7 +871,8 @@ export default function TransactionDetail({ session }: { session: Session }) {
     const meta = [effective.payment_mode, [longDate, timeStr].filter(Boolean).join(', ')].filter(Boolean).join(' · ');
 
     const details: { label: string; value: string }[] = [];
-    if (effective.category) details.push({ label: 'Category', value: String(effective.category) });
+    if (effective.category) details.push({ label: 'Category', value: isGenExp ? `${generalExpenseLabel(txn)} · ${String(effective.category)}` : String(effective.category) });
+    if (heardName) details.push({ label: 'Paid to', value: heardName });
     if (effective.payment_mode) details.push({ label: 'Method', value: String(effective.payment_mode) });
     if (recordedBy) details.push({ label: 'Recorded by', value: recordedBy });
     // The row is optional in the schema, so read it through a narrow shape rather than widening txn.
@@ -895,7 +912,7 @@ export default function TransactionDetail({ session }: { session: Session }) {
         <TxnDetailMobile
           txnNo={txn.txn_id}
           initials={initials}
-          payeePrefix={isIn ? 'Received from' : 'Paid to'}
+          payeePrefix={isGenExp ? 'Filed under' : isIn ? 'Received from' : 'Paid to'}
           payeeName={payeeName}
           // The party's ledger, carrying where to come back to — this page, not the parties list.
           onParty={txn.stakeholder_id
@@ -936,7 +953,7 @@ export default function TransactionDetail({ session }: { session: Session }) {
           onReplaceProof={isVoided ? null : () => proofInputRef.current?.click()}
           replacing={proofUploadMutation.isPending}
           events={events}
-          showBar={!isVoided && !billLinked}
+          showBar={!isVoided && !billLinked && !isGenExp}
           canEdit={canAmend}
           onEdit={openAmendModal}
           ctaLabel={isVendor ? 'Link to a bill' : 'Link to contract'}
@@ -970,18 +987,19 @@ export default function TransactionDetail({ session }: { session: Session }) {
               {recordedBy && <span>Recorded by <b>{recordedBy}</b></span>}
               <span className="sep" />
               <span className="chip sage" style={isVoided ? { color: 'var(--terra)', background: 'var(--terra-tint)' } : undefined}><i style={isVoided ? { background: 'var(--terra)' } : undefined} />{isVoided ? 'Voided' : (txn.status || 'Active')}</span>
-              {!isVoided && !billLinked && (
+              {!isVoided && !billLinked && !isGenExp && (
                 isVendor
                   ? <span className="chip warn" onClick={() => setAttachBill({ file: null, mode: 'upload' })}><i />No bill attached — attach now</span>
                   : <span className="chip warn" onClick={() => setContractHubOpen(true)}><i />Not linked to a contract — link now</span>
               )}
+              {!isVoided && isGenExp && <span className="chip"><i />Overhead · {generalExpenseLabel(txn)}</span>}
               {txn.ai_flag_status === 'Flagged' && <span className="chip gold"><i />Flagged</span>}
             </div>
           </div>
           <div className={`amount${isIn ? ' in' : ''}`}>
             <small>{isIn ? '↙ Money in' : '↗ Money out'}</small>
             <span className="mono">{isIn ? '+₹' : '−₹'}{(Number(effective.total_amount) || 0).toLocaleString('en-IN')}</span>
-            <div className="dir">{isIn ? `Received from ${payeeName}` : `${payeeName} was paid`}{effective.payment_mode ? ` · ${effective.payment_mode}` : ''}</div>
+            <div className="dir">{isGenExp ? `Filed under ${payeeName}${heardName ? ` · paid to ${heardName}` : ''}` : isIn ? `Received from ${payeeName}` : `${payeeName} was paid`}{effective.payment_mode ? ` · ${effective.payment_mode}` : ''}</div>
           </div>
           <div className="more">
             <button className="kebab" aria-label="More actions" onClick={(e) => { e.stopPropagation(); setMenuOpen((o) => !o); }}>
@@ -1085,10 +1103,12 @@ export default function TransactionDetail({ session }: { session: Session }) {
                             <span className="st ok">✓ Bill attached<small>Uploaded · tap to preview</small></span>
                             <DocThumb stored={txn.bill_doc_url} onImageClick={(u) => openLightbox(u, 'Bill / Invoice')} />
                           </>
+                        ) : isGenExp ? (
+                          <span className="st">Overhead<small>{generalExpenseLabel(txn)} · nothing to settle against</small></span>
                         ) : (
                           <span className="st un">No bill<small>Link a PO bill or upload one</small></span>
                         )}
-                        {!isVoided && (
+                        {!isVoided && !isGenExp && (
                           <span className="pickwrap">
                             {isVendor
                               ? (hasBill

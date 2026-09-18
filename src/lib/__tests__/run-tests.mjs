@@ -17,6 +17,13 @@ await build({
   target: 'node18',
   outfile: out,
   logLevel: 'error',
+  // A suite may import a module that sits beside the Supabase client (walletApi, say). Importing it
+  // must not need a project: these stand in for Vite's env so the client constructs and is never
+  // called — a suite that reaches the network is a suite with a bug in it.
+  define: {
+    'import.meta.env.VITE_SUPABASE_URL': '"http://localhost:54321"',
+    'import.meta.env.VITE_SUPABASE_ANON_KEY': '"test-anon-key"',
+  },
 })
 
 await import(pathToFileURL(out).href)

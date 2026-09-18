@@ -26,6 +26,70 @@ export interface WalletLedgerLine {
   projectId: string | null; debit: number; credit: number;
 }
 
+/**
+ * Whose wallet it is, by the name that person carries NOW.
+ *
+ * `wallets.holder_name` is a snapshot taken when the wallet was made, and every "X's wallet" line in
+ * the app reads it — the rail, the ledger rows (they join wallets(holder_name)), the transaction
+ * page. Rename the person and the wallet went on saying the old name, alone in the app.
+ *
+ * The person is one person in two records: a member who signs in (user_profiles) and a party who
+ * gets paid (stakeholders), bridged by their WhatsApp number in wa_registered_numbers — the same
+ * bridge walletForSender crosses in the other direction. So the party's name is the truth when there
+ * is one, their profile name when there isn't, and the old snapshot only when neither can be read.
+ *
+ * What it finds is also written back, so the joins that read the snapshot — the ledger rows, the
+ * transaction page — tell the truth too, without every one of them having to learn this chain.
+ */
+export function holderNameNow(opts: { stakeholderName?: string | null; profileName?: string | null; snapshot: string }): string {
+  const party = (opts.stakeholderName ?? '').trim();
+  const profile = (opts.profileName ?? '').trim();
+  return party || profile || opts.snapshot;
+}
+
+async function currentHolderNames(orgId: string, rows: { walletId: string; holderUserId: string | null; holderName: string }[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  const userIds = [...new Set(rows.map(r => r.holderUserId).filter(Boolean) as string[])];
+  if (!userIds.length) return out;
+  try {
+    const { data: regs } = await supabase
+      .from('wa_registered_numbers').select('user_id, stakeholder_id').eq('org_id', orgId).in('user_id', userIds);
+    const stkByUser = new Map<string, string>();
+    ((regs ?? []) as { user_id: string | null; stakeholder_id: string | null }[])
+      .forEach(r => { if (r.user_id && r.stakeholder_id && !stkByUser.has(r.user_id)) stkByUser.set(r.user_id, r.stakeholder_id); });
+    const stkIds = [...new Set([...stkByUser.values()])];
+    const nameByStk = new Map<string, string>();
+    if (stkIds.length) {
+      const { data: stks } = await supabase.from('stakeholders').select('stakeholder_id, name').in('stakeholder_id', stkIds);
+      ((stks ?? []) as { stakeholder_id: string; name: string | null }[])
+        .forEach(r => { if (r.name) nameByStk.set(r.stakeholder_id, r.name); });
+    }
+    const { data: profs } = await supabase.from('user_profiles').select('id, name').in('id', userIds);
+    const nameByUser = new Map<string, string>();
+    ((profs ?? []) as { id: string; name: string | null }[])
+      .forEach(r => { if (r.name) nameByUser.set(r.id, r.name); });
+
+    const stale: { walletId: string; name: string }[] = [];
+    rows.forEach(r => {
+      if (!r.holderUserId) return;
+      const stk = stkByUser.get(r.holderUserId);
+      const name = holderNameNow({
+        stakeholderName: stk ? nameByStk.get(stk) : null,
+        profileName: nameByUser.get(r.holderUserId),
+        snapshot: r.holderName,
+      });
+      if (!name) return;
+      out.set(r.walletId, name);
+      if (name !== r.holderName) stale.push({ walletId: r.walletId, name });
+    });
+    // Put the snapshot right for everyone else reading it. Nothing waits on this.
+    stale.forEach(({ walletId, name }) => {
+      void supabase.from('wallets').update({ holder_name: name }).eq('wallet_id', walletId);
+    });
+  } catch { /* the bridge table or the profiles are unreadable here — keep the snapshot */ }
+  return out;
+}
+
 /** Every LIVE wallet in the org with its DERIVED balance (v_wallet_balance). Revoked (inactive)
  *  wallets are hidden here — the rail, spend matching and top-up matching all read this — while their
  *  cash-book history stays intact under v_wallet_ledger_line, keyed by wallet_id. */
@@ -37,10 +101,12 @@ export async function loadWallets(orgId: string): Promise<WalletBalance[]> {
     .eq('active', true)
     .order('holder_name');
   if (error) throw error;
-  return (data ?? []).map((r: any) => ({
-    walletId: r.wallet_id, holderName: r.holder_name, holderUserId: r.holder_user_id, active: r.active,
+  const rows = (data ?? []).map((r: any) => ({
+    walletId: r.wallet_id, holderName: r.holder_name as string, holderUserId: r.holder_user_id as string | null, active: r.active,
     balance: num(r.balance), totalIn: num(r.total_in), totalOut: num(r.total_out), lastActivity: r.last_activity ?? null,
   }));
+  const now = await currentHolderNames(orgId, rows);
+  return rows.map(r => ({ ...r, holderName: now.get(r.walletId) ?? r.holderName }));
 }
 
 /** The signed-in user's OWN wallets with derived balances, via the SECURITY DEFINER my_wallets() RPC.
@@ -75,11 +141,14 @@ export async function loadMyWallet(orgId: string, userId: string): Promise<Walle
     .eq('org_id', orgId).eq('holder_user_id', userId).eq('active', true).maybeSingle();
   if (error) throw error;
   if (!data) return null;
-  return {
-    walletId: (data as any).wallet_id, holderName: (data as any).holder_name, holderUserId: (data as any).holder_user_id,
-    active: (data as any).active, balance: num((data as any).balance), totalIn: num((data as any).total_in),
+  const row = {
+    walletId: (data as any).wallet_id as string, holderName: (data as any).holder_name as string,
+    holderUserId: (data as any).holder_user_id as string | null,
+    active: (data as any).active as boolean, balance: num((data as any).balance), totalIn: num((data as any).total_in),
     totalOut: num((data as any).total_out), lastActivity: (data as any).last_activity ?? null,
   };
+  const now = await currentHolderNames(orgId, [row]);
+  return { ...row, holderName: now.get(row.walletId) ?? row.holderName };
 }
 
 /** Resolve a WhatsApp sender's phone → their wallet (for the capture default). */
@@ -106,6 +175,22 @@ export async function walletForSender(orgId: string, senderNumber: string | null
   const byPhone = await walletByPhone(orgId, senderNumber).catch(() => null);
   if (byPhone) { const all = await loadWallets(orgId); return all.find(w => w.walletId === byPhone.walletId) ?? null; }
   return null;
+}
+
+/**
+ * A party was just renamed. If that party holds a wallet — the bridge is their WhatsApp number in
+ * wa_registered_numbers — the wallet's stored name follows at once, so every "X's wallet" line reads
+ * the new name without waiting for the next load to heal it. Silent by design: a party who holds no
+ * wallet is the ordinary case, not an error.
+ */
+export async function renameWalletHolder(orgId: string, stakeholderId: string, name: string): Promise<void> {
+  try {
+    const { data: regs } = await supabase
+      .from('wa_registered_numbers').select('user_id').eq('org_id', orgId).eq('stakeholder_id', stakeholderId);
+    const ids = ((regs ?? []) as { user_id: string | null }[]).map(r => r.user_id).filter(Boolean) as string[];
+    if (!ids.length) return;
+    await supabase.from('wallets').update({ holder_name: name }).eq('org_id', orgId).in('holder_user_id', ids);
+  } catch { /* the wallet keeps its old name until the next load heals it */ }
 }
 
 export async function createWallet(input: { orgId: string; holderUserId?: string | null; holderName: string; holderPhone?: string | null; note?: string | null }): Promise<Wallet> {
