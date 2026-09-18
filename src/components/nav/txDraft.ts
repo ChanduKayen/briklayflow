@@ -45,6 +45,32 @@ export function words(n: number): string {
 }
 
 
+
+/** The bill panel's state — capture → read → check, and the two endings that are not "saved". */
+export type BillState = {
+  stage: 'capture' | 'reading' | 'check' | 'bad';
+  file: File | null;
+  /** an object URL for a photo; '' for a PDF, which shows the stand-in sheet */
+  img: string;
+  f: { vendor: string; no: string; date: string; amount: string; site: string; siteName: string };
+  vendorId: string;
+  lines: { name: string; spec: string | null; unit: string | null; qty: number; rate: number; amount: number }[];
+  /** what the reader was unsure of — a hollow clay ring, asking to be checked */
+  unsure: string[];
+  openRow: string;
+  dupe: { id: string; billNo: string | null; billDate: string | null; amount: number } | null;
+  /** the user looked at the collision and said these are two different bills */
+  kept: boolean;
+  viewer: boolean;
+  /** fields revealed so far, so each one arrives as it is read rather than all at once */
+  got: string[];
+};
+
+export const emptyBill = (): BillState => ({
+  stage: 'capture', file: null, img: '', vendorId: '', lines: [], unsure: [], openRow: '', dupe: null, kept: false, viewer: false,
+  f: { vendor: '', no: '', date: '', amount: '', site: '', siteName: '' }, got: [],
+});
+
 export const genTxnId = () => `TXN-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}-${Math.random().toString(36).slice(2, 5).toUpperCase()}`;
 export const genStkId = () => `STK-${Math.floor(1000 + Math.random() * 9000)}`;
 

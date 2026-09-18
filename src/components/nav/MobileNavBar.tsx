@@ -28,7 +28,9 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { useSoftKeyboard } from '../../lib/useSoftKeyboard';
 import { navAction, type NavActionState } from './navAction';
 import { TxComposer } from './TxComposer';
-import { TX_CSS, composer, emptyDraft, type TxDraft } from './txDraft';
+import { BillComposer } from './BillComposer';
+import { BILL_CSS } from './billCss';
+import { TX_CSS, composer, emptyBill, emptyDraft, type BillState, type TxDraft } from './txDraft';
 
 // ── icons, exact from the reference (24×24, stroke 1.65, round caps) ──
 const I: Record<string, ReactNode> = {
@@ -226,6 +228,15 @@ export function MobileNavBar({
     if (keep && d && (d.party || d.amt)) navAction.draft('Resume draft', () => setDraft({ ...d }));
   }, []);
 
+  const [billDraft, setBillDraft] = useState<BillState | null>(null);
+  const billRef = useRef(billDraft);
+  useEffect(() => { billRef.current = billDraft; });
+  const closeBill = useCallback((keep: boolean) => {
+    const b = billRef.current;
+    setBillDraft(null);
+    if (keep && b && b.stage === 'check') navAction.draft('Resume bill', () => setBillDraft({ ...b }));
+  }, []);
+
   const openComposer = useCallback((dir: 'out' | 'in' = 'out') => {
     closeMore(); setDraft((d) => d ?? emptyDraft(dir)); navAction.reset();
   }, [closeMore]);
@@ -242,7 +253,7 @@ export function MobileNavBar({
   const [folded, setFolded] = useState(false);
   const [ctaVisible, setCtaVisible] = useState(false);
 
-  const away = !busy && (!act || ctaVisible || moreOn || !!draft);
+  const away = !busy && (!act || ctaVisible || moreOn || !!draft || !!billDraft);
   const awayRef = useRef(away);
   useEffect(() => { awayRef.current = away; });
 
@@ -292,6 +303,7 @@ export function MobileNavBar({
   const go = (to: string) => { hapt(6); closeMore(); navigate(to); window.scrollTo({ top: 0 }); };
   const onTab = (d: Dest) => {
     if (draft) closeComposer(true);                    // going somewhere puts the half-written entry aside
+    if (billDraft) closeBill(true);
     if (d.key === activeKey) { window.scrollTo({ top: 0, behavior: 'smooth' }); return; }   // tap the tab you are on: back to the top
     go(d.to);
   };
@@ -301,6 +313,7 @@ export function MobileNavBar({
     if (!act) return;
     hapt(8);
     if (activeKey === 'book') { openComposer(); return; }
+    if (activeKey === 'bills') { closeMore(); setBillDraft((b) => b ?? emptyBill()); navAction.reset(); return; }
     go(act.to);
   };
 
@@ -308,9 +321,10 @@ export function MobileNavBar({
 
   return (
     <>
-      <style>{CSS + TX_CSS}</style>
+      <style>{CSS + TX_CSS + BILL_CSS}</style>
       <div className={`mnav${kb.open ? ' kb' : ''}`} style={{ ['--kb' as string]: `${kb.height}px` } as React.CSSProperties}>
         <TxComposer key={draft ? "on" : "off"} draft={draft} onDraft={setDraft} onClose={closeComposer} />
+        <BillComposer key={billDraft ? "bon" : "boff"} bill={billDraft} onBill={setBillDraft} onClose={closeBill} />
         {moreMounted && (
           <>
             <div className={`mnav-scrim${moreOn ? ' on' : ''}`} onClick={closeMore} />
@@ -386,7 +400,7 @@ export function MobileNavBar({
           })}
           <button type="button" className={`tab${moreOn ? ' open' : ''}`} data-tab="more"
             aria-haspopup="dialog" aria-expanded={moreOn} aria-current={slot === 'more' ? 'page' : undefined}
-            onClick={() => { if (draft) closeComposer(true); if (moreMounted) closeMore(); else openMore(); }}>
+            onClick={() => { if (draft) closeComposer(true); if (billDraft) closeBill(true); if (moreMounted) closeMore(); else openMore(); }}>
             <Glyph cls="g">{I.grid}</Glyph>
             <i className="x" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 7l10 10M17 7 7 17" /></svg></i>
             {/* the door wears the name of the room you are in */}
