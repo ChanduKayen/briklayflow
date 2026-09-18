@@ -22,6 +22,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { usePullToRefresh, useLiveCount } from '../../lib/usePullToRefresh';
+import PullQuipu from '../brand/PullQuipu';
 import { useOrgId } from '../../lib/auth/AuthProvider';
 import { useSignedDocUrl } from '../../lib/storage';
 import { useSearchScope } from '../search/searchScope';
@@ -138,6 +140,11 @@ export default function BillsMobile() {
   })), [shown, navigate]), setQ);
 
   const open = useMemo(() => bills.filter(b => dueOf(b) > 0.5), [bills]);
+  // Pull the register down to read it again — the quipu ties itself in the space that opens.
+  const { pull: pullY, phase: pullPhase, news: pullNews } = usePullToRefresh({
+    attachTo: rootRef, noun: 'bill', count: useLiveCount(shown.length),
+    onRefresh: () => qc.refetchQueries({ type: 'active' }),
+  });
   const openTotal = useMemo(() => open.reduce((s, b) => s + dueOf(b), 0), [open]);
 
   // The collapsing title — the same 120px the reference uses.
@@ -173,6 +180,7 @@ export default function BillsMobile() {
 
   return (
     <div className="blm-page">
+      <PullQuipu pull={pullY} phase={pullPhase} news={pullNews} label="bills" />
       <div className="blm" ref={rootRef}>
         <style>{BLM_CSS}</style>
 

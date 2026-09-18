@@ -20,6 +20,8 @@ import { NatureChip, natureOf } from './atoms';
 import DragSheet from '../DragSheet';
 import { loadWallets, walletForSender, type WalletBalance } from '../../lib/walletApi';
 import { searchGenHeads, isCompanyHead } from '../../lib/costCodes';
+import { usePullToRefresh, useLiveCount } from '../../lib/usePullToRefresh';
+import PullQuipu from '../brand/PullQuipu';
 
 const CSS = `
 .rvm{--tint:#C4502B;--tint-press:#A8431F;--ink:#1B1713;--ink-2:#87807A;--ink-3:#B5AEA7;
@@ -607,6 +609,9 @@ export default function ReviewMobile(p: ReviewMobileProps) {
   const [acted, setActed] = useState(false);
   const wraps = useRef<Record<string, HTMLDivElement | null>>({});
   const qc = useQueryClient();
+  // Pull the deck down to read the inbox again. The deck is its own scroller (the page doesn't move),
+  // so the gesture listens there.
+  const deckRef = useRef<HTMLDivElement>(null);
 
   const live = useMemo(() => p.entries.filter(e => !gone.includes(e.id)), [p.entries, gone]);
 
@@ -819,9 +824,14 @@ export default function ReviewMobile(p: ReviewMobileProps) {
   };
 
   const anySheet = sheet !== null;
+  const { wrapRef: pullRef, pull: pullY, phase: pullPhase, news: pullNews } = usePullToRefresh({
+    scroller: deckRef, noun: 'entry', count: useLiveCount(live.length),
+    onRefresh: () => qc.refetchQueries({ type: 'active' }),
+  });
 
   return (
-    <div className="rvm">
+    <div className="rvm" ref={pullRef}>
+      <PullQuipu pull={pullY} phase={pullPhase} news={pullNews} label="inbox" />
       <style>{CSS}</style>
 
       <div className="hdr">
@@ -834,7 +844,7 @@ export default function ReviewMobile(p: ReviewMobileProps) {
       </div>
 
       <div className="deckwrap">
-        <div className="deck">
+        <div className="deck" ref={deckRef}>
           {live.map(e => (
             e.ai_extracted?.kind === 'BILL' ? (
               // A captured bill is NOT a payment card — it files into `bills` (never a ₹0 transaction).

@@ -4,6 +4,8 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useSearchScope } from '../components/search/searchScope';
 import SearchBar from '../components/search/SearchBar';
 import { useSettleScroll } from '../lib/settleScroll';
+import { usePullToRefresh, useLiveCount } from '../lib/usePullToRefresh';
+import PullQuipu from '../components/brand/PullQuipu';
 import { useLongPress } from '../lib/useLongPress';
 import PartyFilterChip from '../components/search/PartyFilterChip';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -556,7 +558,7 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
   // spinner beat), so the accountant never has to click "Load more".
   const loadMoreRef = useRef<HTMLDivElement>(null);
   const [loadingMore, setLoadingMore] = useState(false);
-  // Elastic over-pull at either end (Android-style), applied to the page content.
+  // Elastic over-pull at the bottom (Android-style), applied to the page content.
   const elasticRef = useRef<HTMLDivElement>(null);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   // Tapping a party name opens their running ledger in a side drawer (as on Txn Detail).
@@ -1087,6 +1089,17 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
     return (a.created_at || '') < (b.created_at || '') ? 1 : -1;
   });
 
+  // Pull the page down from the top and it reads the books again; what the page uncovers while it
+  // travels is the quipu (PullQuipu), tying itself as far as the finger takes it.
+  const liveCount = useLiveCount(filteredTransactions.length);
+  const { pull: pullY, phase: pullPhase, news: pullNews } = usePullToRefresh({
+    attachTo: elasticRef,
+    enabled: isPhone,
+    noun: 'entry',
+    count: liveCount,
+    onRefresh: () => qc.refetchQueries({ type: 'active' }),
+  });
+
   const dayTotals = new Map<string, { out: number; in: number }>();
   for (const t of sortedTxns) {
     const cur = dayTotals.get(t.date) ?? { out: 0, in: 0 };
@@ -1115,23 +1128,22 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
     return () => { io.disconnect(); clearTimeout(t); };
   }, [hasMore, visibleCount]);
 
-  // Elastic over-pull (touch only): at the very top/bottom, a downward/upward drag
-  // rubber-bands the content with damping, then springs back — the Android feel.
+  // Elastic over-pull at the BOTTOM only (touch): an upward drag past the last row rubber-bands and
+  // springs back. The TOP belongs to the pull-to-refresh above, which travels the same element.
   useEffect(() => {
     const wrap = elasticRef.current;
     if (!wrap || !('ontouchstart' in window)) return;
     const root = (document.scrollingElement || document.documentElement) as HTMLElement;
-    let startY = 0, pull = 0, edge: 0 | 1 | -1 = 0; // -1 top, 1 bottom
+    let startY = 0, pull = 0, edge: 0 | 1 = 0; // 1 = at the bottom (the top is the refresh gesture's)
     const onStart = (e: TouchEvent) => {
       startY = e.touches[0].clientY; pull = 0;
-      const atTop = root.scrollTop <= 0;
       const atBottom = root.scrollTop + window.innerHeight >= root.scrollHeight - 1;
-      edge = atTop ? -1 : atBottom ? 1 : 0;
+      edge = atBottom ? 1 : 0;
     };
     const onMove = (e: TouchEvent) => {
       if (!edge) return;
       const dy = e.touches[0].clientY - startY;
-      if ((edge === -1 && dy > 0) || (edge === 1 && dy < 0)) {
+      if (edge === 1 && dy < 0) {
         pull = Math.sign(dy) * Math.min(Math.abs(dy) * 0.4, 72); // damped, capped
         wrap.style.transition = 'none';
         wrap.style.transform = `translateY(${pull}px)`;
@@ -1254,6 +1266,7 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
   // ── Render ───────────────────────────────────────────────────────────────────
   return (
     <div ref={elasticRef} className="min-h-screen" style={{ background: V.page, ...font, overscrollBehaviorY: 'contain' }}>
+      <PullQuipu pull={pullY} phase={pullPhase} news={pullNews} label="Day Book" />
       <style>{TRACK_CHIP_CSS}</style>
       {importOpen && (
         <Suspense fallback={<div className="fixed inset-0 z-[1000]" style={{ background: 'rgba(30,26,21,0.55)' }} />}>
