@@ -236,6 +236,7 @@ export const composer = {
  */
 let takeBar: ((node: React.ReactNode) => void) | null = null;
 export const navTakeover = {
+  /** The bar alone binds. A page that calls this takes the bar out of its own hands — don't. */
   bind(f: (node: React.ReactNode) => void) { takeBar = f; return () => { if (takeBar === f) takeBar = null; }; },
   offer(node: React.ReactNode) { takeBar?.(node); },
   release() { takeBar?.(null); },

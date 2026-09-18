@@ -15,6 +15,8 @@ export type Entry = {
   amt: number; dir: 'in' | 'out';
   src: 'direct' | 'wallet' | 'topup';
   party: boolean; clip: boolean; linked: boolean; wallet: string; walletId: string; via: string; cat: string;
+  /** the paper this entry carries, as stored — signed only when it is looked at */
+  bill: string; proof: string;
   voided: boolean; status: string | null; allocs: number;
 };
 
@@ -40,6 +42,7 @@ export function toEntry(t: LedgerRaw): Entry {
     amt: Number(t.total_amount) || 0, dir: deriveDirection(t),
     src: isWalletTransfer(t) ? 'topup' : isWalletSpend(t) ? 'wallet' : 'direct',
     party: !!t.stakeholder_id, clip: !!t.bill_doc_url || !!t.proof_document_url, linked: !isNotLinked(t),
+    bill: String(t.bill_doc_url ?? ''), proof: String(t.proof_document_url ?? ''),
     wallet: (t.wallets as { holder_name?: string } | null)?.holder_name ?? '', walletId: String(t.wallet_id ?? ''),
     via: String(t.payment_mode ?? ''), cat: t.category ? (costCodeLabel(String(t.category)) || String(t.category)) : '',
     voided: t.status === 'Voided', status: (t.status as string | null) ?? null, allocs: allocs.length,

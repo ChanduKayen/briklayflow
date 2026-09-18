@@ -110,6 +110,53 @@ export const LMX_CSS = `
 .lmx .wtag{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 8px 0 6px;border:0;border-radius:11px;background:#F3EEE5;font-size:12px;font-weight:600;color:var(--ink-2)}
 .lmx .wtag svg{width:13px;height:13px}
 .lmx .bal{flex:none;font-family:var(--mono);font-size:12px;color:var(--ink-3)}
+
+/* THE PAPER AN ENTRY CARRIES. Not a clip you cannot press — the sheet itself, folded corner and all,
+   with a second sheet behind it when there are two. Small enough to ignore, plain enough to press. */
+.lmx .clipx{flex:none;position:relative;width:28px;height:28px;margin:-4px -2px;display:grid;place-items:center;cursor:pointer}
+.lmx .clipx:active{transform:scale(.9)}
+.lmx .sheet{position:absolute;width:17px;height:21px;border-radius:3px 0 3px 3px;background:var(--paper);box-shadow:inset 0 0 0 1px var(--line-2);
+  transition:transform .2s var(--ease)}
+.lmx .sheet::after{content:'';position:absolute;top:0;right:0;width:7px;height:7px;background:var(--ground);
+  border-left:1px solid var(--line-2);border-bottom:1px solid var(--line-2);border-bottom-left-radius:2px}
+/* two faint rules: enough for the eye to read "a page" at 17px */
+.lmx .sheet::before{content:'';position:absolute;left:3px;right:3px;top:11px;height:1px;background:var(--line-2);
+  box-shadow:0 3px 0 0 var(--line-2)}
+.lmx .sheet.back{transform:translate(-3px,-2px) rotate(-6deg);background:#F7F2EA}
+.lmx .sheet.back::before,.lmx .sheet.back::after{display:none}
+.lmx .clipx:active .sheet.back{transform:translate(-4px,-3px) rotate(-9deg)}
+.lmx .row.sel .sheet{box-shadow:inset 0 0 0 1px rgba(181,71,42,.35)}
+.lmx .row.sel .sheet::after{background:var(--clay-wash)}
+
+/* THE PEEK. The paper, on the night ground, the only thing on screen. */
+.lmx-peek{position:fixed;inset:0;z-index:80;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:22px 16px;
+  background:rgba(12,9,7,.94);font-family:'DM Sans',system-ui,sans-serif;color:rgb(250,248,243);opacity:0;transition:opacity .22s ease}
+.lmx-peek.on{opacity:1}
+.lmx-peek .pk-x{position:absolute;top:calc(14px + env(safe-area-inset-top));right:14px;width:44px;height:44px;border:0;border-radius:22px;
+  background:rgba(250,248,243,.12);color:rgb(250,248,243);display:grid;place-items:center}
+.lmx-peek .pk-x svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round}
+.lmx-peek .pk-paper{position:relative;flex:0 1 auto;width:min(100% - 40px,340px);max-height:62vh;aspect-ratio:3/4;border-radius:14px;background:#F4EFE6;overflow:hidden;
+  box-shadow:0 30px 60px -20px rgba(0,0,0,.8);display:grid;place-items:center;transition:transform .3s cubic-bezier(.22,.8,.24,1),opacity .3s ease;touch-action:none}
+.lmx-peek .pk-paper img,.lmx-peek .pk-paper object{width:100%;height:100%;object-fit:contain;border:0}
+.lmx-peek .pk-wait{display:flex;gap:6px}
+.lmx-peek .pk-wait i{width:7px;height:7px;border-radius:50%;background:#2B211A;opacity:.25;animation:pkWait 1.1s ease-in-out infinite}
+.lmx-peek .pk-wait i:nth-child(2){animation-delay:.14s}
+.lmx-peek .pk-wait i:nth-child(3){animation-delay:.28s}
+@keyframes pkWait{0%,100%{opacity:.18;transform:translateY(0)}50%{opacity:.5;transform:translateY(-3px)}}
+.lmx-peek .pk-gone{padding:0 24px;text-align:center;font-size:14.5px;line-height:1.5;color:#5C4F45}
+.lmx-peek .pk-foot{flex:none;width:min(100%,360px);display:flex;flex-direction:column;align-items:center;gap:10px}
+.lmx-peek .pk-seg{display:flex;padding:3px;border-radius:16px;background:rgba(250,248,243,.08)}
+.lmx-peek .pk-seg button{height:32px;padding:0 16px;border:0;border-radius:13px;background:none;color:rgba(250,248,243,.7);font:inherit;font-size:13.5px;font-weight:600;
+  transition:background .25s,color .25s}
+.lmx-peek .pk-seg button[aria-pressed="true"]{background:rgb(250,248,243);color:#15100C}
+.lmx-peek .pk-cap{display:flex;flex-direction:column;align-items:center;gap:2px;text-align:center}
+.lmx-peek .pk-cap .what{font-size:14.5px;color:rgba(250,248,243,.9);max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lmx-peek .pk-cap .what b{font-weight:600}
+.lmx-peek .pk-cap .when{font-family:'DM Mono',ui-monospace,monospace;font-size:12.5px;color:rgba(250,248,243,.5)}
+.lmx-peek .pk-acts{display:flex;gap:8px;width:100%}
+.lmx-peek .pk-acts button,.lmx-peek .pk-acts a{flex:1;height:48px;border:0;border-radius:16px;background:rgba(250,248,243,.1);color:rgb(250,248,243);
+  font:inherit;font-size:14.5px;font-weight:600;display:grid;place-items:center;text-decoration:none}
+.lmx-peek .pk-acts a{background:rgb(250,248,243);color:#15100C}
 .lmx .close{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;padding:13px 18px 15px;border-top:1px solid var(--rule)}
 .lmx .close em{font-family:var(--serif);font-style:italic;font-size:15.5px;color:var(--ink-2)}
 .lmx .close b{font-family:var(--mono);font-weight:500;font-size:15px;padding:0 0 5px 28px;border-bottom:3px double var(--ink)}

@@ -25,15 +25,20 @@ import { useSnackbar } from '../Snackbar';
 import { navTakeover } from '../nav/txDraft';
 import type { WalletBalance } from '../../lib/walletApi';
 import { LMX_CSS } from './lmxCss';
+import { DocPeek, type Paper } from './DocPeek';
 import { toEntry, type Entry, type LedgerRaw } from './toEntry';
 
 const inr = (n: number) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');
 const initials = (n: string) => n.replace(/[^A-Za-z ]/g, ' ').trim().split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase();
 const shortSite = (s: string) => s.replace(' Residence', '').replace(' Apartments', '');
+/** The paper an entry carries, bill first — it is the one that explains the money. */
+const papersOf = (e: Entry): Paper[] => [
+  ...(e.bill ? [{ kind: 'Bill' as const, url: e.bill }] : []),
+  ...(e.proof ? [{ kind: 'Proof' as const, url: e.proof }] : []),
+];
 const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'June', 'July', 'Aug', 'Sept', 'Oct', 'Nov', 'Dec'];
 
 const WALLET_ICON = <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 7.5a2 2 0 0 1 2-2h10v3" /><path d="M4.5 7.5v9a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-6a2 2 0 0 0-2-2h-13" /><path d="M15.6 13.5h.01" /></svg>;
-const CLIP = <svg viewBox="0 0 24 24" aria-label="Has a bill or proof"><path d="m20 11.5-7.8 7.8a5 5 0 0 1-7-7l8.2-8.3a3.3 3.3 0 0 1 4.7 4.7l-8.2 8.2a1.7 1.7 0 0 1-2.4-2.4l7.5-7.5" /></svg>;
 const TICK = <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5" /></svg>;
 const CHEVR = <svg className="c" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>;
 const CROSS = <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>;
@@ -72,6 +77,7 @@ export function LedgerMobile({ rows, wallets, categories, sites, loading, refetc
   const [compact, setCompact] = useState(false);
   const [tuck, setTuck] = useState(false);
   const [toast, setToast] = useState<{ text: string; undo?: () => void } | null>(null);
+  const [peek, setPeek] = useState<Entry | null>(null);
   const qRef = useRef<HTMLInputElement | null>(null);
 
   const buzz = (ms: number | number[] = 6) => { try { navigator.vibrate?.(ms); } catch { /* unsupported */ } };
@@ -259,7 +265,8 @@ export function LedgerMobile({ rows, wallets, categories, sites, loading, refetc
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sel, selectedAll, say]);
-  useEffect(() => navTakeover.bind(() => {}), []);
+  // Only the bar binds the takeover; a page offers. (Binding here once clobbered the bar's own
+  // handler whenever the page mounted after it — which is always, since the bar outlives the page.)
   useEffect(() => { navTakeover.offer(selecting ? acts : null); }, [selecting, acts]);
   useEffect(() => () => navTakeover.release(), []);
   useEffect(() => {
@@ -294,7 +301,8 @@ export function LedgerMobile({ rows, wallets, categories, sites, loading, refetc
         onPointerUp={cancelPress} onPointerCancel={cancelPress} onPointerLeave={cancelPress}
         onClick={(ev) => {
           if (press.current.fired) { press.current.fired = false; return; }
-          if ((ev.target as HTMLElement).closest('.wtag') && !selecting) { openWallet(e.wallet); return; }
+          if (!selecting && (ev.target as HTMLElement).closest('.clipx')) { buzz(5); setPeek(e); return; }
+          if (!selecting && (ev.target as HTMLElement).closest('.wtag')) { openWallet(e.wallet); return; }
           if (selecting) { toggle(e.id); buzz(4); return; }
           setPanel({ kind: 'entry', e });
         }}>
@@ -304,7 +312,12 @@ export function LedgerMobile({ rows, wallets, categories, sites, loading, refetc
           <span className="t2">
             <span className="meta">{meta}</span>
             <span className="tags">
-              {e.clip && CLIP}
+              {e.clip && (
+                <span className="clipx" role="button" tabIndex={-1} aria-label={`See the ${papersOf(e)[0].kind.toLowerCase()}`}>
+                  {papersOf(e).length > 1 && <i className="sheet back" />}
+                  <i className="sheet" />
+                </span>
+              )}
               {ledger
                 ? <span className="bal">left {inr(leftAfter[e.id] ?? 0)}</span>
                 : e.src === 'wallet' && e.wallet ? <span className="wtag" role="button" tabIndex={-1}>{WALLET_ICON}{e.wallet}</span> : null}
@@ -464,10 +477,13 @@ export function LedgerMobile({ rows, wallets, categories, sites, loading, refetc
         {toast?.undo && <button type="button" onClick={() => { const u = toast.undo!; setToast(null); buzz(5); u(); }}>Undo</button>}
       </div>
 
+      {peek && <DocPeek papers={papersOf(peek)} title={peek.name} sub={`${peek.day} · ${inr(peek.amt)}`}
+        onClose={() => setPeek(null)} onOpenEntry={() => onOpenEntry(peek.id)} />}
+
       {panel && <div className="lmx-scrim on" onClick={() => setPanel(null)} />}
       {panel && <PanelView
         panel={panel} close={() => setPanel(null)} wallets={wallets} sites={sites} categories={categories} F={F} setF={setF}
-        shown={visible.length} openWallet={openWallet} onOpenEntry={onOpenEntry} onImport={onImport}
+        shown={visible.length} openWallet={openWallet} onOpenEntry={onOpenEntry} onPeek={setPeek} onImport={onImport}
         onExportShown={() => { csv(visible, 'transactions'); say('Downloaded what is shown'); }}
         onSelect={() => { setPanel(null); enterSelect(); say('Tap entries to select them'); }}
         onCategory={doCategory} onSite={doSite} n={sel.size}
@@ -477,10 +493,10 @@ export function LedgerMobile({ rows, wallets, categories, sites, loading, refetc
 }
 
 // ── the panels: the bar opens, as everywhere ──────────────────────────────────
-function PanelView({ panel, close, wallets, sites, categories, F, setF, shown, openWallet, onOpenEntry, onImport, onExportShown, onSelect, onCategory, onSite, n }: {
+function PanelView({ panel, close, wallets, sites, categories, F, setF, shown, openWallet, onOpenEntry, onPeek, onImport, onExportShown, onSelect, onCategory, onSite, n }: {
   panel: NonNullable<Panel>; close: () => void; wallets: WalletBalance[]; sites: { id: string; name: string }[]; categories: [string, string][];
   F: { site: string; clip: boolean; min: number }; setF: (f: { site: string; clip: boolean; min: number }) => void;
-  shown: number; openWallet: (n: string) => void; onOpenEntry: (id: string) => void; onImport: () => void;
+  shown: number; openWallet: (n: string) => void; onOpenEntry: (id: string) => void; onPeek: (e: Entry) => void; onImport: () => void;
   onExportShown: () => void; onSelect: () => void; onCategory: (code: string) => void; onSite: (id: string) => void; n: number;
 }) {
   const [on, setOn] = useState(false);
@@ -505,7 +521,7 @@ function PanelView({ panel, close, wallets, sites, categories, F, setF, shown, o
         {e.wa && <p className="quote">WhatsApp: “{e.wa}”</p>}
         <div className="p-acts">
           <button type="button" className="sec" onClick={() => { close(); onOpenEntry(e.id); }}>Open</button>
-          <button type="button" className="pri" onClick={() => { close(); onOpenEntry(e.id); }}>{e.src !== 'topup' && !e.linked ? 'Link a bill' : e.clip ? 'See attachment' : 'Add proof'}</button>
+          <button type="button" className="pri" onClick={() => { if (e.clip) { close(); onPeek(e); return; } close(); onOpenEntry(e.id); }}>{e.clip ? 'See the paper' : e.src !== 'topup' && !e.linked ? 'Link a bill' : 'Add proof'}</button>
         </div>
       </>
     );
