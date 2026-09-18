@@ -9,6 +9,7 @@ import { supabase } from '../../lib/supabase';
 import type { RoughEntry } from '../../types';
 import { createBill, saveBillAllocations } from '../../lib/billsApi';
 import { walletForSender } from '../../lib/walletApi';
+import { isCompanyHead } from '../../lib/costCodes';
 
 function genTxnId() {
   return `TXN-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}-${Math.random().toString(36).slice(2, 5).toUpperCase()}`;
@@ -120,9 +121,15 @@ export interface ResolvedFields {
  * `payeeId` and `projectId` must be REAL rows — see resolveIds() in ReviewCard. They arrive from the
  * AI as strings in a jsonb blob, and a string that looks like a key is not a key.
  */
+/** A company overhead — the office rent, the bank's charges, the GST payment, the auditor's fee — is
+ *  paid by the firm and belongs to no job, so a site is allowed on it but never demanded. */
+export const isCompanyOverhead = (r: Pick<ResolvedFields, 'generalExpense' | 'generalExpenseHead'>): boolean =>
+  !!r.generalExpense && isCompanyHead(r.generalExpenseHead);
+
 export function isResolved(r: ResolvedFields): boolean {
   const payeeOk = r.generalExpense ? true : Boolean(r.payeeId);
-  return payeeOk && Boolean(r.projectId) && r.amount > 0;
+  const siteOk = Boolean(r.projectId) || isCompanyOverhead(r);
+  return payeeOk && siteOk && r.amount > 0;
 }
 
 /**
@@ -137,7 +144,7 @@ export function gapsOf(r: ResolvedFields): Gap[] {
   const out: Gap[] = [];
   if (!(r.amount > 0)) out.push('amount');
   if (!r.generalExpense && !r.payeeId) out.push('payee');
-  if (!r.projectId) out.push('project');
+  if (!r.projectId && !isCompanyOverhead(r)) out.push('project');
   return out;
 }
 
@@ -192,7 +199,10 @@ export async function fileRoughEntry(entry: RoughEntry, orgId: string, resolved:
     org_id: orgId,
     ...walletFields,
   };
-  const allocations = isTopUp ? [] : [{
+  // A float touches no project; nor does a company overhead with no site named — the money is real
+  // and in the books, but there is no job to charge it to.
+  const noSite = isCompanyOverhead(resolved) && !resolved.projectId;
+  const allocations = (isTopUp || noSite) ? [] : [{
     project_id: resolved.projectId, order_type: null, order_ref: null,
     milestone_id: null, allocated_amount: resolved.amount,
   }];

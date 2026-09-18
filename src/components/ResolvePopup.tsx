@@ -11,7 +11,7 @@ import { WORKER_TRADE_GROUPS, VENDOR_TRADE_GROUPS, OTHER_TRADE } from '../lib/tr
 import { searchPayees, rankPayeeName, PAYEE_SEARCH_FLOOR } from '../lib/payeeSearch';
 import { addStakeholderAlias } from '../lib/stakeholderMerge';
 import { fileRoughEntry, fileRoughEntrySplit } from './day-book/fileEntry';
-import { getCostCode, searchGenHeads } from '../lib/costCodes';
+import { getCostCode, searchGenHeads, isCompanyHead } from '../lib/costCodes';
 
 // ── Walnut-ledger palette (mirrors NewTransaction.tsx) ──────────────────────────
 // Warm cream canvas, walnut ink, terracotta accent for money-out, sage for money-in.
@@ -768,7 +768,11 @@ export function ResolvePopup({ entry, onClose, onUpdated, only }: Props) {
   // A wallet REFILL is a float (bank → the payee's wallet) — it has no site, so the project requirement is
   // dropped entirely in that case.
   const topUpNow = topUp && !!payeeWallet;
-  const projectOk = topUpNow || !!projectId;
+  // A company overhead — the office rent, the bank's charges, the GST payment, the auditor's fee — is
+  // paid by the firm, not by a job. A site may still be named (a licence fee for one building), but
+  // it is no longer demanded, and with none named the payment files with no allocation at all.
+  const companyNow = isGeneral && isCompanyHead(genHead);
+  const projectOk = topUpNow || companyNow || !!projectId;
   // A payee counts only once it is CONFIRMED / selected. An AI suggestion (confirm-band B) PRE-SETS
   // payeeId to the guess so it can be shown — but that is a proposal, not a choice. Gating on this
   // (not merely !!payeeId) stops the unconfirmed AI guess from being filed: the owner must confirm it
@@ -781,9 +785,9 @@ export function ResolvePopup({ entry, onClose, onUpdated, only }: Props) {
   const missingPayee = !payeeId && !isGeneral;
   const missingAmount = !amount || Number(amount) <= 0;
   const missingDescription = !description.trim();
-  const missingProject = !projectId && !topUpNow;
+  const missingProject = !projectId && !topUpNow && !companyNow;
   const payeeUnmatched = !payeeId && !isGeneral && !!(ai.payee_unmatched || ai.payee_name || ai.payee_raw);
-  const projectUnmatched = !projectId && !topUpNow && !!ai.project_unmatched;
+  const projectUnmatched = !projectId && !topUpNow && !companyNow && !!ai.project_unmatched;
 
   // ── Auto-focus / auto-advance (copied from NewTransaction) ──────────────────
   // Focus SYNCHRONOUSLY inside the tap so the cursor/keyboard activates on mobile.
@@ -973,7 +977,7 @@ export function ResolvePopup({ entry, onClose, onUpdated, only }: Props) {
     projectId, setProjectId, projectRef, projects,
     mode, setMode,
     isWhatsApp,
-    missingPayee, missingAmount, missingDescription, missingProject,
+    missingPayee, missingAmount, missingDescription, missingProject, companyNow,
     payeeUnmatched, projectUnmatched,
     mandatoryFilled: canFile, posting,
     splitApi: { mode: splitMode, enable: enableSplit, splits, setSplits, total: splitTotal, remaining: splitRemaining, stakeholders, isGeneral, autoSplit, autoSplitting, canAutoSplit },
@@ -1072,6 +1076,8 @@ interface ContentProps {
   mode: 'Cash' | 'NEFT' | 'UPI' | 'Cheque'; setMode: (v: 'Cash' | 'NEFT' | 'UPI' | 'Cheque') => void;
   isWhatsApp: boolean;
   missingPayee: boolean; missingAmount: boolean; missingDescription: boolean; missingProject: boolean;
+  /** the head this is filed under is one the FIRM pays — a site is allowed, never demanded */
+  companyNow: boolean;
   payeeUnmatched: boolean; projectUnmatched: boolean;
   mandatoryFilled: boolean; posting: boolean;
   showDismissConfirm: boolean; setShowDismissConfirm: (v: boolean) => void;
@@ -1102,7 +1108,7 @@ function PopupContents({
   splitApi,
   mode, setMode,
   isWhatsApp,
-  missingPayee, missingAmount, missingProject,
+  missingPayee, missingAmount, missingProject, companyNow,
   payeeUnmatched, projectUnmatched,
   posting,
   showDismissConfirm, setShowDismissConfirm,
@@ -1753,7 +1759,7 @@ function PopupContents({
         {/* 4. Project (single) OR split among sites */}
         {show('project') && (
         <div>
-          <FieldQuestion text={splitApi.mode ? (splitApi.isGeneral ? 'Split this across sites' : 'Split into separate transactions') : 'Which project is this for?'} missing={!splitApi.mode && missingProject && !projectUnmatched} />
+          <FieldQuestion text={splitApi.mode ? (splitApi.isGeneral ? 'Split this across sites' : 'Split into separate transactions') : companyNow ? 'Which project is this for? — optional, the firm pays this one' : 'Which project is this for?'} missing={!splitApi.mode && missingProject && !projectUnmatched} />
 
           {!splitApi.mode ? (
             <>
@@ -1764,7 +1770,7 @@ function PopupContents({
                 className="w-full text-[13px] px-2.5 py-2 rounded-lg outline-none transition-colors appearance-none"
                 style={fieldStyle(missingProject && !projectUnmatched ? 'missing' : projectId ? 'filled' : projectUnmatched ? 'missing' : 'idle')}
               >
-                <option value="">Select project…</option>
+                <option value="">{companyNow ? 'Company · no site' : 'Select project…'}</option>
                 {projects.map((p) => (
                   <option key={p.project_id} value={p.project_id}>{p.name}</option>
                 ))}
@@ -1790,7 +1796,10 @@ function PopupContents({
                 </div>
               )}
 
-              {isWhatsApp && !projectId && !projectUnmatched && (
+              {companyNow && !projectId && (
+                <div className="mt-1.5"><span className="text-[11px]" style={{ color: VOICE.system }}>A company cost — it files against no site. Name one only if this really belongs to a job.</span></div>
+              )}
+              {isWhatsApp && !projectId && !projectUnmatched && !companyNow && (
                 <div className="mt-1.5"><span className="inline-flex items-center gap-1 text-[11px]" style={{ color: VOICE.accentDeep }}><span className="w-1.5 h-1.5 rounded-full" style={{ background: VOICE.accentSoft }} /> Pick a project</span></div>
               )}
             </>

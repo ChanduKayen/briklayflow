@@ -3,7 +3,7 @@ import { useParams, useNavigate, useSearchParams, useLocation } from 'react-rout
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { Loader2 } from 'lucide-react';
-import { isGeneralExpense, generalExpenseLabel, payeeLabel } from '../lib/transactions';
+import { isGeneralExpense, generalExpenseLabel, payeeLabel, isCompanyOverhead } from '../lib/transactions';
 import { loadWallets } from '../lib/walletApi';
 import type { Session } from '@supabase/supabase-js';
 import { useUserProfile } from '../App';
@@ -808,6 +808,9 @@ export default function TransactionDetail({ session }: { session: Session }) {
   // reads it (payeeLabel is the one place that decides). The name the site said at capture is kept
   // as context below — it is who the money was handed to, not who the books owe.
   const isGenExp = isGeneralExpense(txn);
+  // A company overhead is deliberately unallocated — saying "Unassigned · no allocation yet" about
+  // the office rent reads as an omission when it is the answer.
+  const isCompanyExp = isCompanyOverhead(txn);
   const payeeName: string = isWTransfer ? `${walletHolder}'s wallet` : payeeLabel(txn);
   const heardName: string | null = isGenExp ? ((txn as { ai_flag_data?: { general_payee?: string } }).ai_flag_data?.general_payee || null) : null;
   const payeeType: string = txn.stakeholders?.type || '';
@@ -921,7 +924,7 @@ export default function TransactionDetail({ session }: { session: Session }) {
           amount={`${isIn ? '+' : '−'}₹${(Number(effective.total_amount) || 0).toLocaleString('en-IN')}`}
           voided={isVoided}
           meta={meta}
-          siteChip={primaryAlloc?.projects?.name || null}
+          siteChip={primaryAlloc?.projects?.name || (isCompanyExp ? 'Company' : null)}
           onSiteChip={primaryAlloc?.project_id ? () => navigate(`/projects/${primaryAlloc.project_id}`) : null}
           sites={allAllocs.length
             ? allAllocs.map((a) => ({
@@ -929,7 +932,11 @@ export default function TransactionDetail({ session }: { session: Session }) {
                 sub: allAllocs.length > 1 ? 'Share of this payment' : 'Full amount, one site',
                 amount: rupee(Number(a.allocated_amount)),
               }))
-            : [{ name: 'Unassigned', sub: 'No allocation yet', amount: rupee(Number(effective.total_amount) || 0) }]}
+            : [{
+                name: isCompanyExp ? 'Company' : 'Unassigned',
+                sub: isCompanyExp ? 'The firm pays this one — it belongs to no site' : 'No allocation yet',
+                amount: rupee(Number(effective.total_amount) || 0),
+              }]}
           wallet={walletId && (isWTransfer || isWSpend) ? {
             title: isWFloat ? `Money moved into ${walletHolder}'s wallet` : isWSpend ? `Paid from ${walletHolder}'s wallet` : `Cash returned from ${walletHolder}'s wallet`,
             sub: isWFloat ? 'Site advance — company money until spent' : isWSpend ? 'Site cash — drew down their wallet' : 'Returned to the office',

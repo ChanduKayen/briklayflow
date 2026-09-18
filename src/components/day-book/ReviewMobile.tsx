@@ -19,7 +19,7 @@ import { BillRowCard } from './BillRowCard';
 import { NatureChip, natureOf } from './atoms';
 import DragSheet from '../DragSheet';
 import { loadWallets, walletForSender, type WalletBalance } from '../../lib/walletApi';
-import { searchGenHeads } from '../../lib/costCodes';
+import { searchGenHeads, isCompanyHead } from '../../lib/costCodes';
 
 const CSS = `
 .rvm{--tint:#C4502B;--tint-press:#A8431F;--ink:#1B1713;--ink-2:#87807A;--ink-3:#B5AEA7;
@@ -408,6 +408,9 @@ function Card({
   // A refill is the default when the payee holds a wallet — paying a supervisor is nearly always
   // site cash for him, not money he keeps. The tick unmakes it.
   const refill = !!payeeWallet && (draft.topUp ?? true) && !draft.split;
+  // The office rent, the bank's charges, the GST payment: the firm pays them, no job does. The site
+  // row stays — a licence fee for one building belongs to that building — but it stops being asked for.
+  const company = isCompanyHead(draft.genHead);
   // And a spend sent by a wallet-holder draws that wallet, so long as it has money in it.
   const fromWallet = draft.funding === 'wallet' ? true
     : draft.funding === 'bank' ? false
@@ -496,7 +499,7 @@ function Card({
 
             {!refill && <button type="button" className={`kv tap${sug === 'site' ? ' open' : ''}${flash === 'site' ? ' flash' : ''}`} onClick={() => toggleSug('site')}>
               <div className="k">Site</div>
-              <div className={`v${projectName ? '' : ' dim'}`}>{projectName || projectRaw || 'Pick a site'}</div>
+              <div className={`v${projectName ? '' : ' dim'}`}>{projectName || (company ? 'Company · no site' : projectRaw || 'Pick a site')}</div>
               <span className="chev">{CHEV}</span>
             </button>}
             <div className={`sug${sug === 'site' && !refill ? ' open' : ''}`}>
@@ -690,8 +693,9 @@ export default function ReviewMobile(p: ReviewMobileProps) {
     const w = walletPlan(e, d);
     if (!d.split) {
       if (!d.payeeId && !d.genHead && !d.payeeName?.trim()) { nudge('to'); return; }
-      // A refill is bank → their wallet. It buys nothing yet, so there is no site to ask for.
-      if (!d.projectId && !w.refill) { nudge('site'); return; }
+      // A refill is bank → their wallet. It buys nothing yet, so there is no site to ask for — and
+      // a company overhead has no job to charge, so it isn't asked either.
+      if (!d.projectId && !w.refill && !isCompanyHead(d.genHead)) { nudge('site'); return; }
       // An overhead files under its head with no party — there is nobody to create.
       if (!d.payeeId && !d.genHead) { setActiveId(e.id); setNpName(d.payeeName ?? ''); setSheet('np'); return; }
     }

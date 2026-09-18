@@ -16,7 +16,7 @@ import { CostCodePicker } from '../components/CostCodePicker';
 import { GenHeadPicker } from '../components/GenHeadPicker';
 import { DirLabel } from '../components/NewTxnFab';
 import PhoneInput from '../components/PhoneInput';
-import { getCostCode, costCodeLabel, ALL_COST_CODES, GEN_HEADS, GEN_FALLBACK } from '../lib/costCodes';
+import { getCostCode, costCodeLabel, ALL_COST_CODES, GEN_HEADS, GEN_FALLBACK, isCompanyHead } from '../lib/costCodes';
 import { autoCloseWOIfFullyPaid } from '../lib/woAutoClose';
 import { readVendorBill, findPOsByBill, type BillPOMatch } from '../lib/vendorTrackingApi';
 import { BillAllocateSheet } from '../components/txn-ledger/BillAllocateSheet';
@@ -703,6 +703,10 @@ export default function NewTransaction({ session: _session }: { session: Session
   useEffect(() => { setTopUp(!!payeeWallet); }, [stkId, payeeWallet]);
   // A refill is a float (bank → the payee's wallet) — no site, so the project requirement is dropped.
   const isTopUpNow = topUp && !!payeeWallet;
+  // The same goes for a company overhead — the office rent, the bank's charges, the GST payment, the
+  // auditor's fee. The firm pays those, no job does: a site may be named, but it is not demanded, and
+  // with none named the payment files with no allocation at all.
+  const isCompanyNow = txnType === 'expense' && isCompanyHead(category);
 
   useEffect(() => {
     if (stakeholders && stakeholders.length > 0 && recentPayees.length === 0) {
@@ -993,7 +997,9 @@ export default function NewTransaction({ session: _session }: { session: Session
         org_id: orgId,
         ...walletFields,
       };
-      const mapped = isTopUp ? [] : effectiveAllocs.map((a) => {
+      // No allocation for a float — nor for a company overhead nobody placed on a site.
+      const companyNoSite = isCompanyHead(effectiveCategory) && effectiveAllocs.every((a) => !a.project_id);
+      const mapped = (isTopUp || companyNoSite) ? [] : effectiveAllocs.map((a) => {
         if (isClientReceipt) {
           return { project_id: a.project_id, order_type: null, order_ref: null, milestone_id: null, allocated_amount: a.allocated_amount };
         }
@@ -1235,7 +1241,7 @@ export default function NewTransaction({ session: _session }: { session: Session
     const firstMissing: HTMLElement | null = (() => {
       if (txnType !== 'expense' && !stkId) return payeeRef.current;
       if (!totalAmt || totalAmt <= 0) return document.getElementById('txn-amount-input');
-      if (!isTopUpNow && effectiveAllocs.some((a) => !a.project_id)) return document.getElementById('txn-project-0');
+      if (!isTopUpNow && !isCompanyNow && effectiveAllocs.some((a) => !a.project_id)) return document.getElementById('txn-project-0');
       if (txnType !== 'client_receipt' && !remarks.trim()) return document.getElementById('txn-remarks');
       return null;
     })();
@@ -1256,7 +1262,7 @@ export default function NewTransaction({ session: _session }: { session: Session
     // General expenses carry no payee — only amount/remarks/project are mandatory.
     const payeeRequired = txnType !== 'expense';
     if ((payeeRequired && !stkId) || !totalAmt || totalAmt <= 0 || !remarks.trim() || isOver) return;
-    if (!isTopUpNow && effectiveAllocs.some((a) => !a.project_id)) return;
+    if (!isTopUpNow && !isCompanyNow && effectiveAllocs.some((a) => !a.project_id)) return;
     if (splitMode && remaining !== 0) return;   // splits must sum EXACTLY to the total
 
     // Bug 6: WO linked at header level but has phases — user must select a specific phase
@@ -1306,7 +1312,7 @@ export default function NewTransaction({ session: _session }: { session: Session
   const missingPayee = saveAttempted && !stkId && txnType !== 'expense';
   const missingAmount = saveAttempted && totalAmt <= 0;
   const missingRemarks = saveAttempted && !remarks.trim() && txnType !== 'client_receipt';
-  const missingProject = saveAttempted && !isTopUpNow && effectiveAllocs.some((a) => !a.project_id);
+  const missingProject = saveAttempted && !isTopUpNow && !isCompanyNow && effectiveAllocs.some((a) => !a.project_id);
 
   // Smart CTA: the next still-empty MANDATORY field, in form order. While a gap remains the
   // primary button names it ("Enter the amount" → jumps & focuses it); once none remain it
@@ -1315,7 +1321,7 @@ export default function NewTransaction({ session: _session }: { session: Session
     if (!totalAmt || totalAmt <= 0) return { label: 'Enter the amount', el: () => document.getElementById('txn-amount-input') };
     if (txnType !== 'expense' && !stkId) return { label: txnType === 'client_receipt' ? 'Who is paying?' : 'Add the payee', el: () => payeeRef.current };
     if (txnType !== 'client_receipt' && !remarks.trim()) return { label: 'Add a remark', el: () => document.getElementById('txn-remarks') };
-    if (!isTopUpNow && effectiveAllocs.some((a) => !a.project_id)) return { label: 'Choose a project', el: () => document.getElementById('txn-project-0') };
+    if (!isTopUpNow && !isCompanyNow && effectiveAllocs.some((a) => !a.project_id)) return { label: 'Choose a project', el: () => document.getElementById('txn-project-0') };
     return null;
   })();
   // Focus SYNCHRONOUSLY inside the tap so the cursor/keyboard activates on mobile (a deferred
@@ -1352,7 +1358,7 @@ export default function NewTransaction({ session: _session }: { session: Session
       amount: !totalAmt || totalAmt <= 0,
       payee: txnType !== 'expense' && !stkId,
       remark: txnType !== 'client_receipt' && !remarks.trim(),
-      project: !isTopUpNow && effectiveAllocs.some((a) => !a.project_id),
+      project: !isTopUpNow && !isCompanyNow && effectiveAllocs.some((a) => !a.project_id),
     };
     for (const k of ['amount', 'payee', 'remark', 'project'] as const) {
       if (k !== justFilled && empty[k]) { bringIntoFrame(fieldEl(k)); return; }

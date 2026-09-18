@@ -5,7 +5,7 @@
  * TRANSACTIONS_IMPLEMENTATION_BRIEF.md.
  */
 
-import { getCostCode } from './costCodes';
+import { getCostCode, isCompanyHead } from './costCodes';
 
 export type TxnDirection = 'in' | 'out';
 
@@ -81,6 +81,16 @@ export function generalExpenseLabel(txn: any): string {
   const code = String(txn?.category ?? '').toUpperCase();
   if (!code || code === 'GEN-99') return 'General expense';
   return getCostCode(code)?.item.name ?? 'General expense';
+}
+
+/**
+ * A general expense filed under a head the FIRM pays — the office rent, the bank's charges, the GST
+ * payment, the auditor's fee (COMPANY_GEN_HEADS). It belongs to no job, so it carries no allocation
+ * unless somebody deliberately named a site, and it reads as "Company" wherever a site would go.
+ */
+export function isCompanyOverhead(txn: unknown): boolean {
+  const t = txn as { category?: string | null } | null;
+  return isGeneralExpense(txn) && isCompanyHead(t?.category);
 }
 
 /**

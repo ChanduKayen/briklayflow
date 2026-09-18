@@ -715,6 +715,26 @@ export const GEN_DIVISION = GEN;
 export const GEN_HEADS: CostCodeItem[] = GEN.items;
 export const GEN_FALLBACK = 'GEN-99';
 
+/**
+ * The overheads that belong to the COMPANY, not to any one job.
+ *
+ * Every other head is site work — hamali, PPE, site utilities, machinery hire, diesel — and a
+ * payment for those is a cost of the job it was spent on, so the site is demanded before it files.
+ * These four are not: the office rent, the bank's charges, the GST payment, the auditor's fee. They
+ * are paid by the firm, and pinning them to whichever site happens to be open would put the office
+ * rent into a client's project cost.
+ *
+ * A site is still ALLOWED on them — a licence fee for one building, the architect on one project —
+ * it is simply no longer demanded. With none named, the payment files with no allocation at all (the
+ * same shape as a wallet float: real money, in the books, touching no project) and reads as
+ * "Company".
+ */
+export const COMPANY_GEN_HEADS = ['GEN-07', 'GEN-08', 'GEN-09', 'GEN-13'];
+
+/** True for a head that the firm pays, not a job — see COMPANY_GEN_HEADS. */
+export const isCompanyHead = (code?: string | null): boolean =>
+  !!code && COMPANY_GEN_HEADS.includes(String(code).trim().toUpperCase());
+
 /** The heads a site sends most often — what a picker offers before anything is typed. The other
  *  eleven are one word away. */
 export const COMMON_GEN_HEADS = ['GEN-01', 'GEN-02', 'GEN-05', 'GEN-04', 'GEN-16', 'GEN-99'];

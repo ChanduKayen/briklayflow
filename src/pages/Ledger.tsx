@@ -23,7 +23,7 @@ import { WhatsAppGlyph } from '../components/day-book/atoms';
 import { StartOnWhatsAppButton } from '../components/day-book/StartOnWhatsApp';
 import { ImageLightbox } from '../components/ImageLightbox';
 import { useQueryGate } from '../components/QueryGate';
-import { deriveDirection, cashDirection, isNotLinked, resolveAnchor, isGeneralExpense, generalExpenseLabel, payeeLabel, isWalletTransfer, isWalletSpend, type TxnAnchor, type TxnDirection } from '../lib/transactions';
+import { deriveDirection, cashDirection, isNotLinked, resolveAnchor, isGeneralExpense, generalExpenseLabel, payeeLabel, isWalletTransfer, isWalletSpend, type TxnAnchor, type TxnDirection, isCompanyOverhead } from '../lib/transactions';
 import { V, font, serif, nums, terraGrad } from '../components/txn-ledger/ledgerTokens';
 import { useCursorLamp } from '../components/nav/useCursorLamp';
 import { DirMedallion, Amount, AnchorChip, FilterChip } from '../components/txn-ledger/LedgerAtoms';
@@ -1569,7 +1569,10 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
                       : isNotLinked(txn) ? null : resolveAnchor(txn, primaryAlloc);
                     const genExp = isGeneralExpense(txn);
                     const genLabel = genExp ? generalExpenseLabel(txn) : '';
-                    const projName = (txn.txn_allocations || [])[0]?.projects?.name || null;
+                    // A company overhead (office rent, bank charges, the GST payment, the auditor)
+                    // carries no allocation by design — it is the firm's cost, not a job's.
+                    const projName = (txn.txn_allocations || [])[0]?.projects?.name
+                      || (isCompanyOverhead(txn) ? 'Company' : null);
                     const trade = txn.stakeholders?.category || null;
                     // Context = the payee's discipline/trade + what the money was for
                     // (description) — not the "Worker/Vendor" type label. A general expense

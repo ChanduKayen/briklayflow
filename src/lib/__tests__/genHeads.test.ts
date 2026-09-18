@@ -57,3 +57,70 @@ suite('general-expense heads — the payee picker\'s other half', () => {
     expect(names('').includes('Miscellaneous / uncategorised')).toBe(true);
   });
 });
+
+// ── which overheads belong to no job ───────────────────────────────────────────────────────────
+//
+// "Find a few overheads that don't require a site — office expense etc."
+//
+// Every other head is site work: hamali, PPE, site utilities, machinery hire, diesel, the watchman.
+// A payment for those is a cost of the job it was spent on, so the site is asked for before it files.
+// These four are the firm's own: the office rent, the bank's charges, the GST payment, the auditor's
+// fee. Demanding a site for them means pinning the office rent to whichever job happens to be open —
+// a client's project cost carrying the head office.
+//
+// A site is still ALLOWED (a licence fee for one building, the architect on one project). It is the
+// demand that goes, and with no site named the payment files with no allocation at all.
+
+import { COMPANY_GEN_HEADS, isCompanyHead } from '../costCodes'
+import { gapsOf, isResolved } from '../../components/day-book/fileEntry'
+
+const overhead = (head: string, projectId = '') =>
+  ({ payeeId: '', projectId, amount: 300, description: 'rent', generalExpense: true, generalExpenseHead: head });
+
+suite('a company overhead needs no site', () => {
+  test('the four that the firm pays', () => {
+    expect(isCompanyHead('GEN-07')).toBe(true)   // Office & administration
+    expect(isCompanyHead('GEN-08')).toBe(true)   // Professional & consultant fees
+    expect(isCompanyHead('GEN-09')).toBe(true)   // Government, taxes & statutory
+    expect(isCompanyHead('GEN-13')).toBe(true)   // Bank & finance charges
+    expect(COMPANY_GEN_HEADS.length).toBe(4)
+  })
+
+  test('site work is not among them — it is always a job\'s cost', () => {
+    ;['GEN-01', 'GEN-02', 'GEN-03', 'GEN-04', 'GEN-05', 'GEN-06', 'GEN-10', 'GEN-11', 'GEN-12', 'GEN-14', 'GEN-15', 'GEN-16', 'GEN-99']
+      .forEach((c) => expect(isCompanyHead(c)).toBe(false))
+  })
+
+  test('a code is read as written — case and stray spaces included', () => {
+    expect(isCompanyHead('gen-07')).toBe(true)
+    expect(isCompanyHead(' GEN-13 ')).toBe(true)
+    expect(isCompanyHead(null)).toBe(false)
+    expect(isCompanyHead('')).toBe(false)
+    expect(isCompanyHead('MAT-04')).toBe(false)
+  })
+
+  test('THE POINT: with no site it is still ready to file', () => {
+    expect(isResolved(overhead('GEN-07'))).toBe(true)
+    expect(gapsOf(overhead('GEN-07'))).toEqual([])
+  })
+
+  test('a site-work head with no site is not — that money belongs to a job', () => {
+    expect(isResolved(overhead('GEN-16'))).toBe(false)
+    expect(gapsOf(overhead('GEN-16'))).toEqual(['project'])
+  })
+
+  test('naming a site anyway is allowed, not overruled', () => {
+    expect(isResolved(overhead('GEN-09', 'PRJ-1'))).toBe(true)
+    expect(gapsOf(overhead('GEN-09', 'PRJ-1'))).toEqual([])
+  })
+
+  test('a party payment is untouched — it still needs its site and its payee', () => {
+    expect(gapsOf({ payeeId: '', projectId: '', amount: 300, description: '', generalExpense: false }))
+      .toEqual(['payee', 'project'])
+    expect(isResolved({ payeeId: 'S1', projectId: 'PRJ-1', amount: 300, description: '', generalExpense: false })).toBe(true)
+  })
+
+  test('an amount is still an amount — no head waives that', () => {
+    expect(gapsOf({ ...overhead('GEN-07'), amount: 0 })).toEqual(['amount'])
+  })
+})
