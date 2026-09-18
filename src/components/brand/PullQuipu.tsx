@@ -1,89 +1,126 @@
 /**
- * The space behind the page — where the quipu ties itself.
+ * The space behind the page — the strings, and the knots that run home along them.
  *
- * Pull a page down and what shows through is not more paper: it is the dark under-side of the book,
- * and hanging from the page's own bottom edge, the quipu. Cords drop as far as your finger takes
- * them (this is the rubber band, drawn), knots tie as the pull deepens, and the last knot lands
- * exactly where letting go starts to mean something. While the books are being read the whole thing
- * sways — the motion the app opens with (BootLoader). Then the page closes over it and the cords
- * withdraw.
+ * Pull a page down and what shows through is the dark underside of the book, strung across its full
+ * width like a quipu laid open: four cords, pinned at both edges, with the knots bunched at the left
+ * where nothing has been counted yet.
  *
- * It is the same motif, the same curves and the same green as the boot screen, because it is the
- * same act: a count being written down. Nothing here spins.
+ * Pull further and the strings STRETCH — each one sags deeper under the weight of the pull, and the
+ * cords draw apart as the space grows. That sag is the rubber band, drawn: the resistance you feel is
+ * the resistance you see.
  *
- * The strip is painted UNDER the page (fixed, low z-index) rather than inside it, so a page needs no
- * layout of its own to make room — it simply travels, and this is what was always underneath.
+ * Let go past the threshold and they are set loose. The strings snap back toward true, the knots run
+ * out along them — each a beat behind the last — and settle into their places. Then the cords take up
+ * a slow rhythm, each on its own phase, the way plucked strings keep sounding: that is the read
+ * happening. When it lands the strings still, and what was found is written quietly underneath.
+ *
+ * Nothing spins. The motif, the green and the knot curve are the app's own (BootLoader).
  */
 import { createPortal } from 'react-dom';
 import { PULL_THRESHOLD, type PullPhase } from '../../lib/usePullToRefresh';
 
 const CSS = `
 .pq{position:fixed;top:0;left:0;right:0;z-index:4;overflow:hidden;pointer-events:none;
-  background:radial-gradient(120% 140% at 50% 0%, #16302700 0%, #0E1F1900 60%),
-             linear-gradient(180deg,#12261F 0%,#0D1A15 100%);
-  display:flex;align-items:flex-end;justify-content:center;gap:12px;padding-bottom:6px}
-/* the pool of light the thumb pulls the cords into */
-.pq::before{content:'';position:absolute;inset:0;pointer-events:none;
-  background:radial-gradient(150px 90px at var(--px,50%) 100%, rgba(245,240,231,.10), rgba(245,240,231,.03) 55%, transparent 76%)}
-.pq .q{position:relative;display:block;flex:none;fill:#F1EDE2;opacity:.92}
-.pq.sway .q{animation:pqsway 2.6s ease-in-out infinite;transform-origin:50% 0%}
-@keyframes pqsway{0%,100%{transform:rotate(-2deg)}50%{transform:rotate(2deg)}}
-.pq .knot{transform-box:fill-box;transform-origin:center;transition:transform .22s cubic-bezier(.2,.9,.3,1.3),opacity .22s ease}
-.pq .knot.off{transform:scale(0);opacity:0}
-.pq .say{position:relative;font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;
-  color:rgba(241,237,226,.66);white-space:nowrap;padding-bottom:3px;transition:color .2s ease}
-.pq.armed .say,.pq.done .say{color:rgba(241,237,226,.94)}
-.pq.failed .say{color:#E5A488}
-@media (prefers-reduced-motion:reduce){.pq.sway .q{animation:none}.pq .knot{transition:none}}
+  background:linear-gradient(180deg,#12261F 0%,#0C1A15 100%)}
+/* the pool of light the strings hang in */
+.pq::before{content:'';position:absolute;inset:0;
+  background:radial-gradient(130% 120% at 50% 0%, rgba(241,237,226,.09), rgba(241,237,226,.02) 52%, transparent 78%)}
+.pq .strings{position:absolute;inset:0 16px}
+/* one cord: an svg curve stretched across the width, its stroke kept hairline */
+.pq .str{position:absolute;left:0;right:0;height:1px;transform-origin:left top}
+.pq .str svg{position:absolute;left:0;top:0;width:100%;overflow:visible}
+.pq .str path{fill:none;stroke:rgba(241,237,226,.5);stroke-width:1.15;stroke-linecap:round}
+.pq .str.lit path{stroke:rgba(241,237,226,.82)}
+.pq .knot{position:absolute;top:0;width:5.2px;height:5.2px;margin:-2.6px 0 0 -2.6px;border-radius:50%;
+  background:#F1EDE2;box-shadow:0 0 0 2.5px rgba(18,38,31,.55);
+  transition:left .58s cubic-bezier(.2,.9,.3,1.25), transform .58s cubic-bezier(.2,.9,.3,1.25), opacity .3s ease}
+/* the rhythm while the books are read — each cord on its own phase, none quite the same */
+.pq.refreshing .str{animation:pqstring var(--dur,1s) cubic-bezier(.45,0,.55,1) var(--del,0s) infinite}
+@keyframes pqstring{0%,100%{transform:scaleY(1)}50%{transform:scaleY(.34)}}
+.pq .say{position:absolute;left:0;right:0;bottom:7px;text-align:center;font-size:11px;letter-spacing:.09em;
+  text-transform:uppercase;color:rgba(241,237,226,.55);white-space:nowrap;transition:color .25s ease,opacity .35s ease}
+.pq.armed .say{color:rgba(241,237,226,.88)}
+.pq.done .say,.pq.failed .say{color:rgba(241,237,226,.95);font-size:11.5px}
+.pq.failed .say{color:#E8AD92}
+@media (prefers-reduced-motion:reduce){
+  .pq.refreshing .str{animation:none}
+  .pq .knot{transition:none}
+}
 `;
 
-/** Nine knots, as the boot loader ties them — each with the pull at which it lands. */
-const KNOTS: { cx: number; cy: number; r: number; at: number }[] = [
-  { cx: 17, cy: 13, r: 2.1, at: 0.22 },
-  { cx: 25, cy: 14, r: 2.7, at: 0.30 },
-  { cx: 9, cy: 15, r: 3.0, at: 0.38 },
-  { cx: 33, cy: 17, r: 2.5, at: 0.46 },
-  { cx: 25, cy: 21, r: 2.0, at: 0.55 },
-  { cx: 17, cy: 22, r: 2.9, at: 0.64 },
-  { cx: 9, cy: 25, r: 2.2, at: 0.73 },
-  { cx: 25, cy: 29, r: 3.1, at: 0.84 },
-  { cx: 9, cy: 33, r: 3.2, at: 0.96 },
+/** Four cords, and where each one's knots come to rest along it (0 → 1 across the width). */
+const STRINGS: { at: number; knots: number[]; dur: string; delay: string }[] = [
+  { at: 0.30, knots: [0.22, 0.46, 0.63], dur: '0.92s', delay: '0s' },
+  { at: 0.50, knots: [0.34, 0.71], dur: '1.06s', delay: '0.11s' },
+  { at: 0.70, knots: [0.19, 0.52, 0.78], dur: '0.98s', delay: '0.22s' },
+  { at: 0.88, knots: [0.41], dur: '1.14s', delay: '0.33s' },
 ];
-/** The four cords and how long each may grow (the loader's lengths). */
-const CORDS = [{ x: 7.9, len: 30 }, { x: 15.9, len: 20 }, { x: 23.9, len: 27 }, { x: 31.9, len: 15 }];
+/** Where a knot waits before it is set loose — bunched at the near end, barely apart. */
+const WAITING = 0.035;
+/** How deep a cord sags at a full pull, before the release takes it back toward true. */
+const SAG_MAX = 26;
+
+/** A quadratic pinned at both ends dips 2·t·(1−t)·sag at t — the same curve the path draws. */
+const dipAt = (t: number, sag: number) => 2 * t * (1 - t) * sag;
 
 export function PullQuipu({ pull, phase, news, label }: {
   pull: number; phase: PullPhase; news: string | null;
-  /** Which register this is — shown while resting: "Day Book", "Payables". */
+  /** Which register this is — named while it rests: "Day Book", "bills". */
   label?: string;
 }) {
   if (pull <= 0 && phase === 'idle') return null;
-  // How far through the gesture we are: 0 at rest, 1 at the point of release.
+
+  const loose = phase === 'refreshing' || phase === 'done' || phase === 'failed';
   const t = Math.max(0, Math.min(1, pull / PULL_THRESHOLD));
-  const open = Math.max(pull, phase === 'refreshing' ? PULL_THRESHOLD : 0);
-  const settled = phase === 'done' || phase === 'failed';
-  const tied = phase === 'refreshing' || phase === 'done' || phase === 'failed' ? 1 : t;
+  const band = Math.max(pull, phase === 'refreshing' ? PULL_THRESHOLD + 10 : 0);
+  // Stretched under the pull; let go and the cords come back toward true, holding a shallow curve.
+  const sag = loose ? 5 : SAG_MAX * t;
+  // The line at the foot keeps its own air — a cord never crosses a word.
+  const foot = 23;
+  const topPad = 7;
+  const room = Math.max(0, band - foot - topPad);
+  // A shallow band has no room for four cords — one carries the moment, and the words keep their line.
+  const shown = room < 6 ? [] : room < 20 ? STRINGS.slice(3) : room < 34 ? STRINGS.slice(2) : STRINGS;
 
   const say = phase === 'refreshing' ? 'Reading the books…'
     : phase === 'done' || phase === 'failed' ? (news ?? '')
-    : phase === 'armed' ? 'Let go — it writes it down'
+    : phase === 'armed' ? 'Let go — the knots run home'
     : label ? `Pull to read the ${label} again` : 'Pull to read again';
 
   return createPortal(
-    <div className={`pq ${phase}${phase === 'refreshing' ? ' sway' : ''}`}
-      style={{ height: Math.round(open) + (phase === 'refreshing' ? 8 : 0), transition: settled || phase === 'refreshing' ? 'height .42s cubic-bezier(.16,1,.3,1)' : 'none' }} aria-hidden="true">
+    <div className={`pq ${phase}`} aria-hidden="true"
+      style={{ height: Math.round(band), transition: loose ? 'height .46s cubic-bezier(.16,1,.3,1)' : 'none' }}>
       <style>{CSS}</style>
-      <svg className="q" width={Math.round(26 + 12 * t)} height={Math.round(26 + 12 * t)} viewBox="0 0 40 40">
-        {/* the bar is the page's own edge, so the cords simply hang from the top of the box */}
-        {CORDS.map((c, i) => {
-          // Each cord pays out with the pull, the longer ones a touch ahead of the short.
-          const grow = Math.max(0, Math.min(1, t * (1.15 - i * 0.06)));
-          return <rect key={c.x} className="cord" x={c.x} y={2} width={2.2} rx={1.1} height={Math.max(0.6, c.len * grow)} />;
+      <div className="strings">
+        {shown.map((s, i) => {
+          // The cords draw apart as the space opens; the lowest hangs nearest the page's own edge.
+          const y = Math.min(Math.round(topPad + room * s.at), Math.max(4, band - foot - 3));
+          // A cord hanging lower has less room beneath it, so it carries a shallower curve — and no
+          // curve ever reaches the line at the foot.
+          const head = Math.max(2, (band - foot) - y);
+          const mySag = Math.min(sag * (1 - 0.16 * i), head * 1.6);
+          return (
+            <div key={i} className={`str${phase === 'armed' || loose ? ' lit' : ''}`}
+              style={{ top: y, ['--dur' as string]: s.dur, ['--del' as string]: s.delay }}>
+              <svg viewBox={`0 0 100 ${Math.max(1, mySag)}`} height={Math.max(1, mySag)} preserveAspectRatio="none">
+                <path d={`M0 0 Q50 ${mySag * 2} 100 0`} vectorEffect="non-scaling-stroke" />
+              </svg>
+              {s.knots.map((k, j) => {
+                const at = loose ? k : WAITING + j * 0.012;
+                return (
+                  <i key={j} className="knot"
+                    style={{
+                      left: `${at * 100}%`,
+                      transform: `translateY(${dipAt(at, mySag)}px)`,
+                      transitionDelay: loose ? `${i * 70 + j * 90}ms` : '0ms',
+                      opacity: t > 0.12 || loose ? 1 : 0,
+                    }} />
+                );
+              })}
+            </div>
+          );
         })}
-        {KNOTS.map((k, i) => (
-          <circle key={i} className={`knot${tied >= k.at ? '' : ' off'}`} cx={k.cx} cy={k.cy} r={k.r} />
-        ))}
-      </svg>
+      </div>
       <span className="say">{say}</span>
     </div>,
     document.body,

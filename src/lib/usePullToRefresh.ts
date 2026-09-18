@@ -62,8 +62,21 @@ export interface PullOptions {
 const reduced = () =>
   typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-/** A sheet, a dialog or a lightbox is open over the page — the page is not the thing being touched. */
-const coveredUp = () => !!document.querySelector('[role="dialog"], .rvm .sheet.show, .bkboot');
+/**
+ * Is something actually covering the page?
+ *
+ * Not "is a dialog in the DOM" — the sheets stay mounted and are parked off-screen with a transform,
+ * so asking that way made every page with a sheet in its tree (the review deck, the bills register,
+ * the muster) believe it was covered, and the gesture never started. Ask where the thing IS.
+ */
+const coveredUp = () => {
+  const els = document.querySelectorAll<HTMLElement>('[role="dialog"], .bkboot, .scrim.show, .rvm .sheet.show');
+  for (const el of els) {
+    const r = el.getBoundingClientRect();
+    if (r.height > 8 && r.top < window.innerHeight - 8 && r.bottom > 8) return true;
+  }
+  return false;
+};
 
 /**
  * A live count for the news line: how many rows the page is showing right now, readable from inside
