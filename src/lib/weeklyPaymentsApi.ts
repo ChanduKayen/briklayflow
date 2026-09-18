@@ -199,22 +199,23 @@ export async function loadWeeklyPayments(monday: Date): Promise<WeeklyPayments> 
  *  Payments made before that stamp existed carry no key and cannot be matched. */
 /** What a row has already been paid on this run, and by which transactions — the ids are what an
  *  undo reverses, so they come back with the amount rather than being hunted for afterwards. */
-export interface RunPaid { amount: number; txnIds: string[] }
+export interface RunPaid { amount: number; txnIds: string[]; /** how it actually went out — the phone's paid row wears it */ mode: string | null }
 export async function loadWeeklyPaid(monday: Date): Promise<Record<string, RunPaid>> {
   const key = mondayOf(monday).toISOString().slice(0, 10);
   const { data, error } = await supabase
     .from('transactions')
-    .select('txn_id, total_amount, status, ai_flag_data')
+    .select('txn_id, total_amount, status, payment_mode, ai_flag_data')
     .eq('ai_flag_data->>weekly_run', key);
   if (error) return {};
   const out: Record<string, RunPaid> = {};
-  for (const t of (data ?? []) as { txn_id: string; total_amount: number; status: string | null; ai_flag_data: { row_key?: string } | null }[]) {
+  for (const t of (data ?? []) as { txn_id: string; total_amount: number; status: string | null; payment_mode: string | null; ai_flag_data: { row_key?: string } | null }[]) {
     if (t.status === 'Voided') continue;                   // a voided payment leaves the row owing again
     const rk = t.ai_flag_data?.row_key;
     if (!rk) continue;
-    const e = out[rk] ?? (out[rk] = { amount: 0, txnIds: [] });
+    const e = out[rk] ?? (out[rk] = { amount: 0, txnIds: [], mode: null });
     e.amount += Number(t.total_amount || 0);
     e.txnIds.push(t.txn_id);
+    e.mode = e.mode ?? t.payment_mode ?? null;
   }
   return out;
 }
@@ -361,6 +362,8 @@ export async function recordWeeklyPayment(
   orgId: string, row: PayRow,
   amount: number, mode: string, reason: string,
   monday: Date, note = '',
+  /** the phone's pay slip can carry the screenshot, and a payment made earlier in the week its own date */
+  opts?: { proofUrl?: string | null; date?: string },
 ): Promise<string> {
   const txnId = `TXN-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
   const category = row.kind === 'contract' ? 'Running Bill' : row.kind === 'vendor' ? 'Purchase Payment' : row.kind === 'recurring' ? 'Recurring' : 'Wages';
@@ -389,8 +392,9 @@ export async function recordWeeklyPayment(
   const { data, error } = await supabase.rpc('insert_transaction_with_allocations', {
     p_txn: {
       txn_id: txnId, org_id: orgId, stakeholder_id: row.stakeholderId,
-      date: new Date().toISOString().split('T')[0], total_amount: amount,
+      date: opts?.date || new Date().toISOString().split('T')[0], total_amount: amount,
       payment_mode: mode, category, remarks, ai_flag_status: 'Clean',
+      proof_document_url: opts?.proofUrl ?? null,
       // Stamp the run and the row this settles. A wage figure comes from the attendance
       // register, which knows nothing about payments, so without this the row comes back at
       // its full amount on the next load and asks to be paid again.

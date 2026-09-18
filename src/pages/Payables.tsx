@@ -36,6 +36,9 @@ import {
   type PayRow, type PaySection, type RunPaid,
 } from '../lib/weeklyPaymentsApi';
 import { PYR_CSS } from '../components/payables/pyrCss';
+import { PayablesMobile } from '../components/payables/PayablesMobile';
+import { loadApprovals } from '../lib/paymentApprovals';
+import { composer } from '../components/nav/txDraft';
 import { isNewLedgerOrg } from '../lib/ledgerRead';
 import { addAdjustment } from '../lib/partyLedgerApi';
 import { PendingCertifications } from '../components/attendance/PendingCertifications';
@@ -387,11 +390,35 @@ export default function Payables({ session }: { session: Session }) {
   const rowsAll = sections.flatMap(s2 => s2.rows);
   const paidCount = rowsAll.filter(r => paidOf(r) != null).length;
 
+  // The middle stage of the run — approved, waiting to be paid. Only the phone's pipeline reads it
+  // today; the desktop run's one-step Pay is unchanged.
+  const { data: approvals = {}, refetch: refetchApprovals } = useQuery({
+    queryKey: ['payment_approvals', monday.toISOString().slice(0, 10)],
+    queryFn: () => loadApprovals(monday),
+  });
+
+  const phone = useIsMobile(720);
   // Pull the run down to read it again — on a phone, where there is no other way to ask.
   const { wrapRef: pullRef, view: pullView } = usePullToRefresh({
-    enabled: useIsMobile(720), noun: 'row', count: useLiveCount(rowsAll.length),
-    onRefresh: async () => { await Promise.all([refetch(), refetchPaid(), refetchRec()]); },
+    enabled: phone, noun: 'row', count: useLiveCount(rowsAll.length),
+    onRefresh: async () => { await Promise.all([refetch(), refetchPaid(), refetchRec(), refetchApprovals()]); },
   });
+
+  // ── the phone has its own page: the run as a pipeline, approve → pay → paid ──
+  if (phone) {
+    return (
+      <div ref={pullRef}>
+        {pullView}
+        <PayablesMobile
+          rows={rowsAll} paid={serverPaid} approvals={approvals} monday={monday} setMonday={setMonday}
+          readOnly={readOnly} newLedger={!!newLedger} orgId={orgId} loading={isLoading}
+          who={{ id: null, name: (profile as { full_name?: string } | undefined)?.full_name ?? null }}
+          onDone={() => { refetch(); refetchPaid(); refetchApprovals(); }}
+          onCompose={() => (composer.available ? composer.open('out') : navigate('/ledger/new', { state: { direction: 'out' } }))}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="pyr-page" ref={pullRef}>
