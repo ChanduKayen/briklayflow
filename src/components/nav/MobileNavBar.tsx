@@ -30,7 +30,7 @@ import { navAction, type NavActionState } from './navAction';
 import { TxComposer } from './TxComposer';
 import { BillComposer } from './BillComposer';
 import { BILL_CSS } from './billCss';
-import { TX_CSS, composer, emptyBill, emptyDraft, type BillState, type TxDraft } from './txDraft';
+import { TX_CSS, composer, emptyBill, emptyDraft, navTakeover, type BillState, type TxDraft } from './txDraft';
 
 // ── icons, exact from the reference (24×24, stroke 1.65, round caps) ──
 const I: Record<string, ReactNode> = {
@@ -217,6 +217,11 @@ export function MobileNavBar({
     if (drag.current.dy > 70) closeMore();
   };
 
+  // A page may take the bar for its own actions (Transactions' select mode). The tabs step down,
+  // the actions step up, in the same capsule.
+  const [lent, setLent] = useState<ReactNode>(null);
+  useEffect(() => navTakeover.bind(setLent), []);
+
   // ── the composer ── the bar opens for a new transaction, exactly as it does for More
   const [draft, setDraft] = useState<TxDraft | null>(null);
   const draftRef = useRef(draft);
@@ -253,7 +258,7 @@ export function MobileNavBar({
   const [folded, setFolded] = useState(false);
   const [ctaVisible, setCtaVisible] = useState(false);
 
-  const away = !busy && (!act || ctaVisible || moreOn || !!draft || !!billDraft);
+  const away = !!lent || (!busy && (!act || ctaVisible || moreOn || !!draft || !!billDraft));
   const awayRef = useRef(away);
   useEffect(() => { awayRef.current = away; });
 
@@ -388,7 +393,8 @@ export function MobileNavBar({
         <span className="measure" ref={measureRef} aria-hidden="true" />
         <div className="live" role="status" aria-live="polite">{busy ? label : ''}</div>
 
-        <nav className="nav" ref={navRef} aria-label="Sections" style={{ gridTemplateColumns: `repeat(${bar.length + 1}, 1fr)` }}>
+        <nav className={`nav${lent ? ' lent' : ''}`} ref={navRef} aria-label="Sections">
+          <div className="set tabs" style={{ gridTemplateColumns: `repeat(${bar.length + 1}, 1fr)` }}>
           {bar.map((d) => {
             const c = countOf(d);
             return (
@@ -408,6 +414,8 @@ export function MobileNavBar({
             {moreCount > 0 && <i className="count" aria-label={`${moreCount} waiting inside`}>{moreCount}</i>}
           </button>
           <i className="here" aria-hidden="true" style={{ transform: `translateX(${dotX}px)`, transition: dotReady ? undefined : 'none', opacity: slot ? 1 : 0 }} />
+          </div>
+          {lent && <div className="set acts" role="toolbar" aria-label="With the selected entries">{lent}</div>}
         </nav>
       </div>
       </div>
@@ -431,9 +439,17 @@ const CSS = `
    THE BAR.  Navigation only. Nothing sits on it, nothing hides a tab.
    ===================================================================== */
 .mnav .nav{pointer-events:auto;z-index:20;position:absolute;left:var(--nav-gap);right:var(--nav-gap);bottom:calc(var(--nav-gap) + env(safe-area-inset-bottom));
-  max-width:406px;margin:0 auto;height:var(--nav-h);
-  display:grid;padding:0 6px;border-radius:32px;background:var(--night);
+  max-width:406px;margin:0 auto;height:var(--nav-h);overflow:hidden;
+  border-radius:32px;background:var(--night);
   box-shadow:0 18px 36px -14px rgba(21,16,12,.55),0 2px 0 0 rgba(var(--cream),.05) inset}
+/* two sets in one capsule: the tabs, and whatever a page has lent it */
+.mnav .nav .set{position:absolute;inset:0;display:grid;padding:0 6px;transition:opacity .28s ease,transform .42s var(--ease)}
+.mnav .nav .acts{grid-auto-flow:column;grid-auto-columns:1fr;opacity:0;transform:translateY(14px);pointer-events:none}
+.mnav .nav.lent .tabs{opacity:0;transform:translateY(-14px);pointer-events:none}
+.mnav .nav.lent .acts{opacity:1;transform:none;pointer-events:auto}
+/* a lent action wears the tab's shape, at full strength */
+.mnav .nav .acts .tab{color:rgb(var(--cream));padding-bottom:0}
+.mnav .nav .acts .tab[disabled]{opacity:.35}
 .mnav .tab{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;min-width:0;padding:0 0 7px;
   border:0;background:none;color:rgba(var(--cream),.52);font:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent;
   transition:color .3s ease,transform .18s ease}

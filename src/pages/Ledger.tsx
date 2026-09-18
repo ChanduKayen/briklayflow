@@ -19,6 +19,8 @@ import { getCostCode, GEN_HEADS, costCodeLabel, MAT_DIVISIONS, WRK_DIVISIONS } f
 import { searchPayees } from '../lib/payeeSearch';
 import { Plus, Download, Paperclip, Check, ArrowRight, ChevronRight, X, SlidersHorizontal } from 'lucide-react';
 import { useIsMobile } from '../lib/useIsMobile';
+import { LedgerMobile } from '../components/txn-ledger/LedgerMobile';
+import { composer } from '../components/nav/txDraft';
 import BottomSheet from '../components/BottomSheet';
 import { WhatsAppGlyph } from '../components/day-book/atoms';
 import { StartOnWhatsAppButton } from '../components/day-book/StartOnWhatsApp';
@@ -1223,6 +1225,12 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
   };
 
   const uniqueProjects = Array.from(new Set((ledger || []).flatMap((t) => (t.txn_allocations || []).map((a: TxnAlloc) => a.projects?.name).filter(Boolean)))) as string[];
+  // The same sites, with their ids — the phone filters and moves by id, never by a name that repeats.
+  const mobileSites = Array.from(
+    new Map((ledger || []).flatMap((t) => (t.txn_allocations || []) as TxnAlloc[])
+      .filter((a) => a.project_id && a.projects?.name)
+      .map((a) => [String(a.project_id), { id: String(a.project_id), name: String(a.projects!.name) }])).values(),
+  ).sort((a, b) => a.name.localeCompare(b.name));
   const uniqueTypes = ['Worker Payment', 'Material Purchase', 'General Expense', 'Client Receipt'];
 
   // ── Filter chip + dropdown (reference look, multi-select body) ───────────────
@@ -1261,6 +1269,36 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
     { k: 'last_month', label: 'Last month' }, { k: 'quarter', label: 'This quarter' }, { k: 'fy', label: 'Financial year' }, { k: 'all', label: 'All time' },
     { k: 'custom', label: 'Custom range…' },
   ];
+
+  // ── The phone has its own page ───────────────────────────────────────────────
+  // Transactions as the reference draws it for a phone: one header that answers "how much went out,
+  // lately", two-line rows, a wallet that opens as its own ledger, and a long-press that turns the
+  // nav bar into the action bar. The desktop table below is untouched.
+  if (isPhone) {
+    return (
+      <div ref={elasticRef} style={{ overscrollBehaviorY: 'contain' }}>
+        {pullView}
+        {importOpen && (
+          <Suspense fallback={<div className="fixed inset-0 z-[1000]" style={{ background: 'rgba(30,26,21,0.55)' }} />}>
+            <ImportTransactions session={session} onClose={closeImport} />
+          </Suspense>
+        )}
+        <LedgerMobile
+          rows={(ledger ?? []) as unknown as Parameters<typeof LedgerMobile>[0]['rows']}
+          wallets={liveWallets}
+          categories={[...MAT_DIVISIONS, ...WRK_DIVISIONS, ...GEN_HEADS].map((d) => [d.code, d.name] as [string, string])}
+          sites={mobileSites}
+          loading={isLoading}
+          refetch={() => { refetch(); qc.invalidateQueries({ queryKey: ['wallets', orgId] }); }}
+          onOpenEntry={(id) => navigate(`/ledger/${id}`)}
+          onCompose={() => (composer.available ? composer.open('out') : navigate('/ledger/new', { state: { direction: 'out' } }))}
+          onImport={() => setImportOpen(true)}
+          onSettle={() => navigate('/mywallet')}
+          session={session}
+        />
+      </div>
+    );
+  }
 
   // ── Render ───────────────────────────────────────────────────────────────────
   return (

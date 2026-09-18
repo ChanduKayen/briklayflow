@@ -1,3 +1,5 @@
+import type React from 'react';
+
 /**
  * The composer's draft — the sentence so far — plus the small pure helpers and the scoped CSS that
  * dress it. Kept beside TxComposer rather than inside it so the panel file exports a component only.
@@ -225,4 +227,16 @@ export const composer = {
   bind(f: (dir: 'out' | 'in') => void) { openPanel = f; return () => { if (openPanel === f) openPanel = null; }; },
   get available() { return !!openPanel; },
   open(dir: 'out' | 'in' = 'out') { openPanel?.(dir); },
+};
+
+/**
+ * The bar, lent to a page. In select mode the Transactions page's actions take the bar's place —
+ * the tabs step down, the actions step up, in the same capsule. Nothing floats over the rows you
+ * are choosing. A page offers its toolbar; the bar owns the capsule and the crossfade.
+ */
+let takeBar: ((node: React.ReactNode) => void) | null = null;
+export const navTakeover = {
+  bind(f: (node: React.ReactNode) => void) { takeBar = f; return () => { if (takeBar === f) takeBar = null; }; },
+  offer(node: React.ReactNode) { takeBar?.(node); },
+  release() { takeBar?.(null); },
 };
