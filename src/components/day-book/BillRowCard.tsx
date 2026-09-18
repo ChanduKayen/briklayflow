@@ -67,6 +67,7 @@ export function BillRowCard({
   const [busy, setBusy] = useState(false);
   const [sug, setSug] = useState<null | 'vendor' | 'site'>(null);
   const [ddq, setDdq] = useState('');
+  const [ddTyping, setDdTyping] = useState(false);   // the field has the real cursor (and the keyboard)
   const [flash, setFlash] = useState<null | 'vendor' | 'site'>(null);
   const [msgOpen, setMsgOpen] = useState(false);
   const [lightbox, setLightbox] = useState<string | null>(null);   // the bill doc, full-screen
@@ -99,13 +100,9 @@ export function BillRowCard({
     return rows;
   }, [ddq, stakeholders]);
 
-  const toggleSug = (which: 'vendor' | 'site', focus = true) => {
-    setSug((cur) => {
-      const opening = cur !== which;
-      if (which === 'vendor' && opening && focus) setTimeout(() => ddRef.current?.focus(), 380);
-      return opening ? which : null;
-    });
-  };
+  // The same rule the payee picker follows: opening a picker arms its search box, it does not take
+  // the keyboard. A tap on the field is what asks for typing.
+  const toggleSug = (which: 'vendor' | 'site') => setSug((cur) => (cur === which ? null : which));
 
   const nudge = (which: 'vendor' | 'site') => {
     cardRef.current?.animate(
@@ -114,7 +111,7 @@ export function BillRowCard({
     );
     setFlash(null);
     requestAnimationFrame(() => setFlash(which));
-    if (sug !== which) toggleSug(which, false);
+    if (sug !== which) toggleSug(which);
   };
 
   async function pickCreateVendor(name: string) {
@@ -171,9 +168,11 @@ export function BillRowCard({
         </button>
         <div className={`sug${sug === 'vendor' ? ' open' : ''}`}>
           <div className="sug-w">
-            <div className="ddsearch">
+            <div className={`ddsearch${sug === 'vendor' && !ddTyping && !ddq ? ' armed' : ''}`} onClick={() => ddRef.current?.focus()}>
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="M21 21l-4.3-4.3" /></svg>
-              <input ref={ddRef} value={ddq} onChange={(e) => setDdq(e.target.value)} placeholder="Search or type a new vendor" />
+              {sug === 'vendor' && !ddTyping && !ddq && <span className="caret" aria-hidden="true" />}
+              <input ref={ddRef} value={ddq} onChange={(e) => setDdq(e.target.value)} placeholder="Search or type a new vendor"
+                onFocus={() => setDdTyping(true)} onBlur={() => setDdTyping(false)} />
             </div>
             <div className="ddlist">
               {vendorRows.length === 0

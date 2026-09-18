@@ -94,6 +94,13 @@ const CSS = `
 .rvm .ddsearch svg{color:var(--ink-3);flex-shrink:0}
 .rvm .ddsearch input{flex:1;border:0;background:none;font:inherit;font-size:16px;outline:none;color:var(--ink)}
 .rvm .ddsearch input::placeholder{color:var(--ink-3)}
+/* An opened picker is ready for typing without TAKING the keyboard: the field wears the focus ring
+   and a caret of its own, and the real cursor (and the keyboard with it) arrives on a tap. */
+.rvm .ddsearch.armed{box-shadow:inset 0 0 0 1.5px rgba(196,80,43,.35)}
+.rvm .ddsearch .caret{width:1.5px;height:19px;flex-shrink:0;background:var(--tint);border-radius:1px;
+  margin-right:-3px;animation:rvmcaret 1.06s steps(1) infinite}
+@keyframes rvmcaret{0%,49%{opacity:1}50%,100%{opacity:0}}
+@media (prefers-reduced-motion:reduce){.rvm .ddsearch .caret{animation:none;opacity:.7}}
 .rvm .ddlist{padding-bottom:8px;max-height:238px;overflow-y:auto}
 .rvm .dd{display:flex;align-items:center;gap:10px;min-height:46px;padding:6px 4px;cursor:pointer;
   position:relative;transition:background .15s;border-radius:10px;width:100%;border:0;background:none;
@@ -350,18 +357,24 @@ function nameRows(q: string, suggestions: string[], stakeholders: StakeholderLit
 
 /** The picker itself: one search box over one list. The card opens it under "To"; the edit sheet
  *  keeps it open under "Paid to". */
-function NameList({ q, setQ, suggestions, stakeholders, onPick, inputRef }: {
+function NameList({ q, setQ, suggestions, stakeholders, onPick, inputRef, armed }: {
   q: string; setQ: (v: string) => void;
   suggestions: string[]; stakeholders: StakeholderLite[];
   onPick: (r: NameRow) => void;
   inputRef?: React.RefObject<HTMLInputElement | null>;
+  /** The picker was just opened: wear the cursor, but leave the keyboard alone until it is tapped. */
+  armed?: boolean;
 }) {
   const rows = nameRows(q, suggestions, stakeholders);
+  const [typing, setTyping] = useState(false);
+  const waiting = !!armed && !typing && !q;
   return (
     <>
-      <div className="ddsearch">
+      <div className={`ddsearch${waiting ? ' armed' : ''}`} onClick={() => inputRef?.current?.focus()}>
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="M21 21l-4.3-4.3" /></svg>
-        <input ref={inputRef} value={q} onChange={e => setQ(e.target.value)} placeholder="A name, or an expense head" />
+        {waiting && <span className="caret" aria-hidden="true" />}
+        <input ref={inputRef} value={q} onChange={e => setQ(e.target.value)} placeholder="A name, or an expense head"
+          onFocus={() => setTyping(true)} onBlur={() => setTyping(false)} />
       </div>
       <div className="ddlist">
         {rows.length === 0
@@ -432,13 +445,10 @@ function Card({
     setSug(null); setDdq('');
   };
 
-  const toggleSug = (which: 'to' | 'site', focus = true) => {
-    setSug(cur => {
-      const opening = cur !== which;
-      if (which === 'to' && opening && focus) setTimeout(() => ddRef.current?.focus(), 380);
-      return opening ? which : null;
-    });
-  };
+  // Opening a picker used to focus its search box, which on a phone throws the keyboard up over the
+  // list you came to read. The field arms itself instead — the ring and a caret of its own — and the
+  // keyboard waits until the field is actually tapped.
+  const toggleSug = (which: 'to' | 'site') => setSug(cur => (cur === which ? null : which));
 
   /** The gentle speed bump, driven from the parent's file attempt. */
   const nudge = (which: 'to' | 'site') => {
@@ -448,7 +458,7 @@ function Card({
     );
     setFlash(null);
     requestAnimationFrame(() => setFlash(which));
-    if (sug !== which) toggleSug(which, false);
+    if (sug !== which) toggleSug(which);
   };
 
   return (
@@ -493,7 +503,7 @@ function Card({
             <div className={`sug${sug === 'to' ? ' open' : ''}`}>
               <div className="sug-w">
                 <NameList q={ddq} setQ={setDdq} suggestions={suggestions} stakeholders={stakeholders}
-                  onPick={pick} inputRef={ddRef} />
+                  onPick={pick} inputRef={ddRef} armed={sug === 'to'} />
               </div>
             </div>
 
