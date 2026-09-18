@@ -88,7 +88,7 @@ export function NewTxnMenuButton({ children, className, style }: { children: Rea
   };
 
   return (
-    <span ref={wrapRef} className="relative inline-flex" onMouseEnter={openNow} onMouseLeave={closeSoon}>
+    <span ref={wrapRef} data-page-cta className="relative inline-flex" onMouseEnter={openNow} onMouseLeave={closeSoon}>
       {/* Click OPENS the options (same menu hover shows) — never toggles the just-hovered menu shut. */}
       <button type="button" onClick={() => setOpen(true)} className={className} style={style}>
         {children}

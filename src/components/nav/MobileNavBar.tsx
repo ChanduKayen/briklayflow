@@ -1,421 +1,491 @@
 /**
- * MobileNavBar — the floating navigation capsule (top-level mobile nav).
+ * MobileNavBar — the bar, the More panel and the action, ported from the reference prototype
+ * (claude.ai/artifact/NWiS9bYDvcRRDWMQo4K4Ps) value for value.
  *
- * FIVE SLOTS THAT NEVER MOVE. The rail used to scroll: seven destinations in a 390px bar with its right
- * edge masked, so whatever sat at the end was always half-erased ("Payab…") and nothing was ever twice in
- * the same place. A bottom bar earns its keep through muscle memory, and a scrolling one has none. So:
- * four destinations by role, then More — which carries the rest of the daily pages above the Workspace
- * grid, and the badge of any page that spilled into it.
+ * THE BAR. Navigation only. Nothing sits on it, nothing hides a tab. Five slots, never moving:
+ *   here      = cream icon + cream label + the dot, which slides to wherever you are
+ *   elsewhere = the same icon and label at 52%
+ *   waiting   = a small clay count on the icon (the real number, not "9+")
  *
- * THE ACTION IS NOT A TAB. It sits above the bar's right end, warm and named — "+ Bill", "+ Entry",
- * "+ PO" — so the eye reads five things that GO somewhere and one that MAKES something. A page with
- * nothing of its own to create offers "New", the universal quick-add, which a long press gives anywhere.
- * While the page is scrolling the pill draws in to a circle and opens again when it stops, so a word
- * never sits over a row being read.
+ * MORE. Four places you live in, and one door to everything else. The panel is the bar's own colour
+ * and rises out of it, so it reads as the bar opening, not a new screen. Sections are grouped the way
+ * a builder thinks: money, site, setup. If the page you are on lives in here, the dot sits under More,
+ * the door wears the name of the room, and inside the panel the dot sits beside that page.
  *
- * It renders ONLY the top-level nav — inside a project the app keeps its own project sub-nav (see App.tsx).
- * Navigation is URL-driven (react-router), matching the rest of the app. The CSS is scoped under `.mnav`
- * so the reference's exact values live here without leaking into the app.
+ * THE ACTION. One per page, off the bar, and it says what it does: + Transaction · + Bill · + PO ·
+ * + Contract · + Party · + Invoice. A page with nothing to create (Review, Payables, Attendance,
+ * Settings) has no button at all — it leaves. Scrolling down folds it to the "+"; scrolling up (or the
+ * top) unfolds it. Where the page already has the same button in view (the Transactions header) it
+ * stays away until that button scrolls off. Its states — working · done · failed · offline · draft —
+ * are the same clay capsule and are driven from outside through `navAction` (see below).
+ *
+ * It renders ONLY the top-level nav — inside a project the app keeps its own project sub-nav (App.tsx).
+ * Navigation is URL-driven (react-router). The CSS is scoped under `.mnav` so the reference's exact
+ * values live here without leaking into the app.
  */
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { navAction, type NavActionState } from './navAction';
 
-// ── icons (inline, exact from the reference so the glyphs match pixel-for-pixel) ──
-const I = {
-  book: <><path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z" /><path d="M5 4v13" /><path d="M9.5 9h6M9.5 12.5h6" /></>,
-  review: <><path d="M4 13l4 .01c.7 2 2 3 4 3s3.3-1 4-3l4-.01" /><path d="M4 13V6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v7" /><path d="M4 13v5a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5" /></>,
-  payables: <><rect x="3.5" y="6" width="17" height="13" rx="2.5" /><path d="M3.5 10h17" /><path d="M7 15h4" /></>,
-  bills: <><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z" /><path d="M9.5 8.5h5M9.5 12h5" /></>,
-  pos: <><path d="M5 7h14l-1.5 12h-11z" /><path d="M9 7a3 3 0 0 1 6 0" /></>,
-  att: <><rect x="4" y="5" width="16" height="16" rx="2.5" /><path d="M8 3v4M16 3v4" /><path d="M8.5 14l2.2 2.2 4.8-4.8" /></>,
-  contracts: <><path d="M7 3h7l4 4v14H7z" /><path d="M14 3v4h4" /><path d="M10.5 13h6M10.5 16.5h4" /></>,
-  sitedesk: <><path d="M4 20V9l8-5 8 5v11" /><path d="M9 20v-6h6v6" /></>,
-  parties: <><circle cx="9" cy="8" r="3" /><path d="M3.6 19c.7-3 2.7-4.6 5.4-4.6s4.7 1.6 5.4 4.6" /><circle cx="16.8" cy="9" r="2.4" /><path d="M15.6 14.7c2.3.3 3.9 1.7 4.5 4.3" /></>,
-  team: <><path d="M12 3l7 2.8v5.2c0 4.4-2.9 7.4-7 9-4.1-1.6-7-4.6-7-9V5.8z" /><circle cx="12" cy="10" r="2.2" /><path d="M8.8 16c.6-1.8 1.8-2.7 3.2-2.7s2.6.9 3.2 2.7" /></>,
-  profile: <><circle cx="12" cy="8" r="3.5" /><path d="M5 20c.9-3.6 3.5-5.4 7-5.4s6.1 1.8 7 5.4" /></>,
-  workspace: <><rect x="4" y="4" width="7" height="7" rx="1.5" /><rect x="13" y="4" width="7" height="7" rx="1.5" /><rect x="4" y="13" width="7" height="7" rx="1.5" /><rect x="13" y="13" width="7" height="7" rx="1.5" /></>,
-  insights: <><path d="M4 19V5" /><path d="M4 19h16" /><path d="M8 15l3-4 3 2 5-6" /></>,
-  billing: <><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z" /><path d="M9.5 8.5h5M9.5 12h5" /></>,
-  inward: <><rect x="4" y="4" width="7" height="7" rx="1.5" /><rect x="13" y="4" width="7" height="7" rx="1.5" /><rect x="4" y="13" width="7" height="7" rx="1.5" /><rect x="13" y="13" width="7" height="7" rx="1.5" /></>,
+// ── icons, exact from the reference (24×24, stroke 1.65, round caps) ──
+const I: Record<string, ReactNode> = {
+  book: <><path d="M6 3.5h10a2 2 0 0 1 2 2v15H8a2 2 0 0 1-2-2v-15Z" /><path d="M6 18.5a2 2 0 0 1 2-2h10" /><path d="M9.5 7.5h5M9.5 10.5h3" /></>,
+  review: <><path d="M4 13.5 6.2 5.6a1.5 1.5 0 0 1 1.5-1.1h8.6a1.5 1.5 0 0 1 1.5 1.1L20 13.5V18a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18v-4.5Z" /><path d="M4 13.5h4.2l1.2 2.5h5.2l1.2-2.5H20" /></>,
+  bills: <><path d="M6.5 3.5h11v17l-2.75-1.6L12 20.5l-2.75-1.6L6.5 20.5v-17Z" /><path d="M9.5 8h5M9.5 11.5h5" /></>,
+  pos: <><path d="M6 8.5h12l-.9 10.2a1.5 1.5 0 0 1-1.5 1.3H8.4a1.5 1.5 0 0 1-1.5-1.3L6 8.5Z" /><path d="M9 8.5V7a3 3 0 0 1 6 0v1.5" /></>,
+  grid: <><circle cx="7.5" cy="7.5" r="1.6" /><circle cx="16.5" cy="7.5" r="1.6" /><circle cx="7.5" cy="16.5" r="1.6" /><circle cx="16.5" cy="16.5" r="1.6" /></>,
+  pay: <><path d="M4.5 7.5a2 2 0 0 1 2-2h10v3" /><path d="M4.5 7.5v9a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-6a2 2 0 0 0-2-2h-13" /><path d="M15.6 13.5h.01" /></>,
+  contracts: <><path d="M7 3.5h7l4 4v13H7v-17Z" /><path d="M14 3.5v4h4" /><path d="M10 13h5M10 16.5h3" /></>,
+  parties: <><circle cx="9" cy="9" r="3" /><path d="M3.5 19a5.5 5.5 0 0 1 11 0" /><path d="M16 6.3a3 3 0 0 1 0 5.4M17.5 14.2a5.5 5.5 0 0 1 3 4.8" /></>,
+  attendance: <><rect x="3.5" y="5" width="17" height="15" rx="2.5" /><path d="M3.5 10h17M8 3v4M16 3v4" /><path d="m9 15 2 2 4-4" /></>,
+  work: <><path d="M4 20.5h16" /><path d="M6 20.5V9l6-4.5L18 9v11.5" /><path d="M10 20.5v-6h4v6" /></>,
+  problems: <><path d="M12 4 3.5 19h17L12 4Z" /><path d="M12 10v4.5M12 17.2h.01" /></>,
+  team: <><circle cx="12" cy="8.5" r="3.2" /><path d="M5.5 19.5a6.5 6.5 0 0 1 13 0" /></>,
+  tally: <><path d="M4 12a8 8 0 0 1 13.7-5.7L20 8.5" /><path d="M20 4v4.5h-4.5" /><path d="M20 12a8 8 0 0 1-13.7 5.7L4 15.5" /><path d="M4 20v-4.5h4.5" /></>,
+  settings: <><path d="M5 7h9M18 7h1M5 12h2M11 12h8M5 17h7M16 17h3" /><circle cx="16" cy="7" r="2" /><circle cx="9" cy="12" r="2" /><circle cx="14" cy="17" r="2" /></>,
+  insights: <><path d="M4 19.5V4.5" /><path d="M4 19.5h16" /><path d="m8 15.5 3.5-4.5 3 2 5-6" /></>,
+  billing: <><rect x="3" y="6.5" width="18" height="11" rx="2.5" /><circle cx="12" cy="12" r="2.4" /><path d="M6.4 12h.01M17.6 12h.01" /></>,
+  clients: <><path d="M4 20.5V6.8l7-3.3v17" /><path d="M11 9.8h8.5v10.7" /><path d="M20.5 20.5H3.5" /><path d="M7.2 9.5h.01M7.2 13h.01M7.2 16.5h.01M15 13.5h.01M15 16.8h.01" /></>,
+  inward: <><path d="M3.5 9.5 12 5l8.5 4.5V17L12 21.5 3.5 17V9.5Z" /><path d="M3.5 9.5 12 14l8.5-4.5M12 14v7.5" /></>,
   clock: <><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 2" /></>,
-  firm: <><circle cx="12" cy="8" r="3.5" /><path d="M5 20c.9-3.6 3.5-5.4 7-5.4s6.1 1.8 7 5.4" /></>,
-  chevron: <path d="M9 5l7 7-7 7" />,
-  plus: <path d="M12 5v14M5 12h14" />,
+  out: <><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3" /><path d="M10 17l-5-5 5-5" /><path d="M15 12H5" /></>,
 };
 
 type Role = string;
-type Tab = {
+type Dest = {
   key: string; label: string; to: string; icon: ReactNode;
-  activePaths: string[];        // pathname prefixes that light this tab
+  /** pathname prefixes that light this destination */
+  at: string[];
   show: (r: Role) => boolean;
+  /** which live count sits on it, if any */
+  count?: string;
 };
+const all = () => true;
+const notSupervisor = (r: Role) => r !== 'supervisor';
+const admin = (r: Role) => r === 'principal' || r === 'management';
 
-const ALL_TABS: Tab[] = [
-  { key: 'book', label: 'Book', to: '/ledger', icon: I.book, activePaths: ['/ledger'], show: (r) => r !== 'supervisor' },
-  { key: 'review', label: 'Review', to: '/logbook', icon: I.review, activePaths: ['/logbook'], show: () => true },
-  { key: 'bills', label: 'Bills', to: '/bills', icon: I.bills, activePaths: ['/bills'], show: (r) => r !== 'supervisor' },
-  { key: 'pos', label: 'POs', to: '/purchase-orders', icon: I.pos, activePaths: ['/purchase-orders', '/orders'], show: (r) => r !== 'supervisor' && r !== 'accountant' },
-  { key: 'payables', label: 'Payables', to: '/payables', icon: I.payables, activePaths: ['/payables'], show: (r) => r !== 'supervisor' },
-  { key: 'att', label: 'Attendance', to: '/attendance', icon: I.att, activePaths: ['/attendance'], show: () => true },
-  // Contracts, Parties, Site Desk, Team & Profile live in the Workspace hub only — see WORKSPACE_PATHS.
+/** The four you live in. More is the fifth slot and is not a destination. */
+const BAR: Dest[] = [
+  { key: 'book', label: 'Book', to: '/ledger', icon: I.book, at: ['/ledger'], show: notSupervisor },
+  { key: 'review', label: 'Review', to: '/logbook', icon: I.review, at: ['/logbook'], show: all, count: 'review' },
+  { key: 'bills', label: 'Bills', to: '/bills', icon: I.bills, at: ['/bills'], show: notSupervisor },
+  { key: 'pos', label: 'POs', to: '/purchase-orders', icon: I.pos, at: ['/purchase-orders', '/orders'], show: (r) => r !== 'supervisor' && r !== 'accountant', count: 'pos' },
 ];
 
-// The "Workspace" tab — a hub, not a route. It lights when on any page it holds.
-const WORKSPACE_PATHS = ['/insights', '/billing', '/inward-register', '/tasks', '/follow-up-rules', '/site-desk', '/desk', '/team', '/profile', '/work-orders', '/stakeholders'];
-
-/**
- * What the action makes, page by page — and the word it wears. A page with nothing of its own falls
- * through to "New", the universal quick-add, rather than leaving an unexplained circle. 'book' is
- * special: it opens a Money-out / Money-in chooser instead of one route.
- */
-const ACT_BY_TAB: Record<string, { label: string; long: string; to: string; icon: ReactNode }> = {
-  book: { label: 'Entry', long: 'New entry', to: '/ledger/new', icon: I.plus },
-  bills: { label: 'Bill', long: 'New bill', to: '/bills?new=1', icon: <><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z" /><path d="M12 8v6M9 11h6" /></> },
-  pos: { label: 'PO', long: 'New PO', to: '/purchase-orders/new', icon: <><path d="M5 7h14l-1.5 12h-11z" /><path d="M9 7a3 3 0 0 1 6 0" /><path d="M12 11v5M9.5 13.5h5" /></> },
-};
-const ACT_ANY = { label: 'New', long: 'Quick add', to: '', icon: I.plus };
-
-const QUICK_ADD = [
-  { label: 'New entry', sub: 'Payment, receipt or note', to: '/ledger/new', icon: I.plus },
-  { label: 'New bill', sub: 'Drop a photo — Briklay reads it', to: '/bills/new', icon: <><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z" /><path d="M9.5 8.5h5" /></> },
-  { label: 'Mark attendance', sub: 'Today, site by site', to: '/attendance', icon: <><rect x="4" y="5" width="16" height="16" rx="2.5" /><path d="M8.5 14l2.2 2.2 4.8-4.8" /></> },
-  { label: 'New purchase order', sub: 'Track what’s been ordered', to: '/purchase-orders/new', icon: <><path d="M5 7h14l-1.5 12h-11z" /><path d="M9 7a3 3 0 0 1 6 0" /></> },
+/** Everything that is not on the bar. Grouped the way a builder thinks. */
+const MORE: [string, Dest[]][] = [
+  ['Money', [
+    { key: 'pay', label: 'Payables', to: '/payables', icon: I.pay, at: ['/payables'], show: notSupervisor, count: 'payables' },
+    { key: 'billing', label: 'Billing', to: '/billing', icon: I.billing, at: ['/billing', '/invoices'], show: notSupervisor, count: 'billing' },
+    { key: 'contracts', label: 'Contracts', to: '/work-orders', icon: I.contracts, at: ['/work-orders'], show: all, count: 'contracts' },
+  ]],
+  ['Site', [
+    { key: 'attendance', label: 'Attendance', to: '/attendance', icon: I.attendance, at: ['/attendance'], show: all },
+    { key: 'work', label: 'Work plan', to: '/desk/all/plan', icon: I.work, at: ['/desk', '/site-desk', '/tasks'], show: all },
+    { key: 'problems', label: 'Problems', to: '/desk/all/problems', icon: I.problems, at: [], show: all },
+    { key: 'inward', label: 'Inward', to: '/inward-register', icon: I.inward, at: ['/inward-register'], show: (r) => r !== 'supervisor' && r !== 'accountant' },
+  ]],
+  ['People', [
+    { key: 'parties', label: 'Parties', to: '/stakeholders', icon: I.parties, at: ['/stakeholders'], show: notSupervisor },
+    { key: 'clients', label: 'Clients', to: '/stakeholders?tab=client', icon: I.clients, at: [], show: notSupervisor },
+    { key: 'team', label: 'Team', to: '/team', icon: I.team, at: ['/team'], show: admin },
+  ]],
+  ['Setup', [
+    { key: 'insights', label: 'Insights', to: '/insights', icon: I.insights, at: ['/insights'], show: all },
+    { key: 'rules', label: 'Follow-ups', to: '/follow-up-rules', icon: I.clock, at: ['/follow-up-rules'], show: admin },
+    { key: 'settings', label: 'Settings', to: '/profile', icon: I.settings, at: ['/profile', '/settings'], show: all },
+  ]],
 ];
 
-const Svg = ({ children, w = 22 }: { children: ReactNode; w?: number }) => (
-  <svg viewBox="0 0 24 24" style={{ width: w, height: w, stroke: 'currentColor', fill: 'none', strokeWidth: 1.75, strokeLinecap: 'round', strokeLinejoin: 'round' }}>{children}</svg>
+/** What each page makes, and the word the action wears. Absent = nothing to create, so no button. */
+const ACTION: Record<string, { word: string; to: string }> = {
+  book: { word: 'Transaction', to: '/ledger/new' },
+  bills: { word: 'Bill', to: '/bills?new=1' },
+  pos: { word: 'PO', to: '/purchase-orders/new' },
+  contracts: { word: 'Contract', to: '/work-orders/new' },
+  parties: { word: 'Party', to: '/stakeholders?new=1' },
+  clients: { word: 'Client', to: '/stakeholders?tab=client&new=1' },
+  billing: { word: 'Invoice', to: '/billing/new' },
+};
+
+const Glyph = ({ children, cls }: { children: ReactNode; cls?: string }) => (
+  <svg viewBox="0 0 24 24" className={cls} aria-hidden="true">{children}</svg>
 );
 
-export function MobileNavBar({ role, poBadge = 0, hidden = false, onSignOut }: { role: Role; poBadge?: number; hidden?: boolean; onSignOut?: () => void }) {
+export function MobileNavBar({
+  role, counts, poBadge = 0, hidden = false, onSignOut,
+}: {
+  role: Role;
+  /** live waiting counts, by destination key */
+  counts?: Record<string, number>;
+  /** legacy: the PO count, folded into `counts` when `counts` is absent */
+  poBadge?: number;
+  hidden?: boolean;
+  onSignOut?: () => void;
+}) {
   const location = useLocation();
   const navigate = useNavigate();
-  const barRef = useRef<HTMLDivElement>(null);
+  const path = location.pathname;
 
-  const [tight, setTight] = useState(false);      // the page is moving → the pill draws in to a circle
-  const [sheet, setSheet] = useState<null | 'workspace' | 'quickadd'>(null);
-  const [fabMenu, setFabMenu] = useState(false);   // Book's Money-out / Money-in chooser
+  const navRef = useRef<HTMLElement | null>(null);
+  const fabRef = useRef<HTMLButtonElement | null>(null);
+  const measureRef = useRef<HTMLSpanElement | null>(null);
+  const panelRef = useRef<HTMLElement | null>(null);
 
-  // A short haptic nudge on every nav tap (as in the reference). No-op where unsupported.
   const hapt = (ms: number | number[] = 6) => { try { navigator.vibrate?.(ms); } catch { /* unsupported */ } };
 
-  // Four by role, then More. For management that is Book · Review · Bills · POs, with Payables and
-  // Attendance a tap away in More; a role that sees fewer pages simply gets fewer slots.
-  const visible = useMemo(() => ALL_TABS.filter((t) => t.show(role)), [role]);
-  const slots = useMemo(() => visible.slice(0, 4), [visible]);
-  const spilled = useMemo(() => visible.slice(4), [visible]);
+  const n = useMemo(() => counts ?? { pos: poBadge }, [counts, poBadge]);
+  const countOf = useCallback((d: Dest) => (d.count ? (n[d.count] ?? 0) : 0), [n]);
 
-  const path = location.pathname;
-  const isTabActive = (t: Tab) => t.activePaths.some((p) => path === p || path.startsWith(p + '/') || path.startsWith(p + '?'));
-  const workspaceActive = WORKSPACE_PATHS.some((p) => path === p || path.startsWith(p + '/'));
-  const activeKey = visible.find(isTabActive)?.key ?? (workspaceActive ? 'workspace' : (slots[0]?.key ?? ''));
-  // More lights for the Workspace pages AND for any destination that spilled into it.
-  const moreOn = workspaceActive || spilled.some((t) => t.key === activeKey);
-  const act = ACT_BY_TAB[activeKey] ?? ACT_ANY;
-  // The POs badge follows POs: on its own slot when it has one, on More when it does not.
-  const badgeOnMore = poBadge > 0 && !slots.some((t) => t.key === 'pos');
+  const bar = useMemo(() => BAR.filter((t) => t.show(role)), [role]);
+  const groups = useMemo(
+    () => MORE.map(([title, items]) => [title, items.filter((x) => x.show(role))] as [string, Dest[]]).filter(([, items]) => items.length > 0),
+    [role],
+  );
+  const moreItems = useMemo(() => groups.flatMap(([, items]) => items), [groups]);
+  const moreCount = useMemo(() => moreItems.reduce((s, d) => s + countOf(d), 0), [moreItems, countOf]);
 
-  // enable the ink-draw signature (needs pathLength=1 on every drawn segment)
+  const lit = (d: Dest) => d.at.some((p) => path === p || path.startsWith(p + '/'));
+  const activeKey = bar.find(lit)?.key ?? moreItems.find(lit)?.key ?? (path.startsWith('/desk/') && path.endsWith('/problems') ? 'problems' : '');
+  const inMore = moreItems.find((x) => x.key === activeKey);
+  const slot = inMore ? 'more' : activeKey;
+
+  // ── the dot, which slides to wherever you are ──
+  const [dotX, setDotX] = useState(0);
+  const [dotReady, setDotReady] = useState(false);
+  const placeDot = useCallback(() => {
+    const el = navRef.current?.querySelector<HTMLElement>(`[data-tab="${slot || '\u0000'}"]`);
+    if (el) setDotX(el.offsetLeft + el.offsetWidth / 2);
+  }, [slot]);
+  useLayoutEffect(() => {
+    const r = requestAnimationFrame(() => { placeDot(); requestAnimationFrame(() => setDotReady(true)); });
+    return () => cancelAnimationFrame(r);
+  }, [placeDot]);
   useEffect(() => {
-    barRef.current?.querySelectorAll('.mnav-tab svg *').forEach((el) => el.setAttribute('pathLength', '1'));
+    window.addEventListener('resize', placeDot);
+    document.fonts?.ready.then(placeDot).catch(() => { /* no font metrics: the dot is already placed */ });
+    return () => window.removeEventListener('resize', placeDot);
+  }, [placeDot]);
+
+  // ── More: the bar opens ──
+  const [moreMounted, setMoreMounted] = useState(false);
+  const [moreOn, setMoreOn] = useState(false);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const openMore = () => {
+    if (closeTimer.current) { clearTimeout(closeTimer.current); closeTimer.current = null; }
+    hapt(6); setMoreMounted(true);
+  };
+  const closeMore = useCallback(() => {
+    setMoreOn(false);
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+    closeTimer.current = setTimeout(() => { setMoreMounted(false); closeTimer.current = null; }, 500);
   }, []);
-
-  // While the page is moving the pill draws in to a circle — an action with a word in it should not sit
-  // over the rows being read. It opens again a beat after the page stops. (The capsule itself never
-  // minimizes on scroll: that toggle flickered. It hides only for full-screen forms.)
   useEffect(() => {
-    let t = 0;
-    const onScroll = () => { setTight(true); window.clearTimeout(t); t = window.setTimeout(() => setTight(false), 900); };
+    if (!moreMounted) return;
+    const r = requestAnimationFrame(() => setMoreOn(true));
+    return () => cancelAnimationFrame(r);
+  }, [moreMounted]);
+  useEffect(() => {
+    if (!moreOn) return;
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') closeMore(); };
+    document.addEventListener('keydown', esc);
+    return () => document.removeEventListener('keydown', esc);
+  }, [moreOn, closeMore]);
+  useEffect(() => () => { if (closeTimer.current) clearTimeout(closeTimer.current); }, []);
+
+  // pull the panel down to close it
+  const drag = useRef({ y0: 0, dy: 0, on: false });
+  const dragStart = (e: React.TouchEvent) => {
+    const el = panelRef.current; if (!el || el.scrollTop > 0) return;
+    drag.current = { y0: e.touches[0].clientY, dy: 0, on: true };
+    el.style.transition = 'none';
+  };
+  const dragMove = (e: React.TouchEvent) => {
+    const el = panelRef.current; if (!el || !drag.current.on) return;
+    drag.current.dy = Math.max(0, e.touches[0].clientY - drag.current.y0);
+    el.style.transform = `translateY(${drag.current.dy * 0.8}px)`;
+  };
+  const dragEnd = () => {
+    const el = panelRef.current; if (!el || !drag.current.on) return;
+    drag.current.on = false;
+    el.style.transition = ''; el.style.transform = '';
+    if (drag.current.dy > 70) closeMore();
+  };
+
+  // ── the action ──
+  const act = ACTION[activeKey];
+  const [fab, setFab] = useState<NavActionState>(() => navAction.state);
+  useEffect(() => navAction.subscribe(setFab), []);
+  const busy = fab.phase !== 'idle';
+
+  const [word, setWord] = useState(act ? act.word : '');
+  const [swap, setSwap] = useState(false);
+  const [folded, setFolded] = useState(false);
+  const [ctaVisible, setCtaVisible] = useState(false);
+
+  const away = !busy && (!act || ctaVisible || moreOn);
+  const awayRef = useRef(away);
+  useEffect(() => { awayRef.current = away; });
+
+  // the label hands over when the page changes: the + gives a quarter turn, the word swaps under it
+  useEffect(() => {
+    if (!act || busy) return;
+    if (awayRef.current) { setWord(act.word); return; }
+    setSwap(true);
+    const t = setTimeout(() => { setWord(act.word); setSwap(false); }, 200);
+    return () => clearTimeout(t);
+  }, [act, busy]);
+
+  // the width is the word's own width: 54 (the plus) − 6 (its overlap) + the text + 22 of air
+  const label = busy ? fab.label : word;
+  useLayoutEffect(() => {
+    const m = measureRef.current, f = fabRef.current;
+    if (!m || !f) return;
+    m.textContent = label;
+    f.style.setProperty('--w', Math.ceil(54 - 6 + m.getBoundingClientRect().width + 22) + 'px');
+  }, [label]);
+
+  // the action is wanted unless this page has none, or the page's own button for the same thing is on screen
+  const ctaOnScreen = () => {
+    const c = document.querySelector<HTMLElement>('[data-page-cta]');
+    if (!c) return false;
+    const r = c.getBoundingClientRect();
+    return r.height > 0 && r.bottom > 8 && r.top < window.innerHeight;
+  };
+  // fold on the way down, unfold on the way up
+  useEffect(() => {
+    let last = window.scrollY;
+    const onScroll = () => {
+      const y = window.scrollY, d = y - last;
+      if (Math.abs(d) > 5) { setFolded(d > 0 && y > 40); last = y; }
+      if (y < 8) setFolded(false);
+      setCtaVisible(ctaOnScreen());
+    };
     window.addEventListener('scroll', onScroll, { passive: true });
-    return () => { window.removeEventListener('scroll', onScroll); window.clearTimeout(t); };
+    return () => window.removeEventListener('scroll', onScroll);
   }, []);
-
-  // close the FAB menu on any outside tap
   useEffect(() => {
-    if (!fabMenu) return;
-    const h = () => setFabMenu(false);
-    window.addEventListener('pointerdown', h);
-    return () => window.removeEventListener('pointerdown', h);
-  }, [fabMenu]);
+    const r = requestAnimationFrame(() => { setFolded(false); setCtaVisible(ctaOnScreen()); });
+    const t = setTimeout(() => setCtaVisible(ctaOnScreen()), 200);
+    return () => { cancelAnimationFrame(r); clearTimeout(t); };
+  }, [path]);
 
-  const go = (to: string) => { hapt(6); setSheet(null); setFabMenu(false); navigate(to); window.scrollTo({ top: 0 }); };
-  const goDir = (direction: 'out' | 'in') => { hapt(6); setFabMenu(false); navigate('/ledger/new', { state: { direction } }); window.scrollTo({ top: 0 }); };
-
-  // long-press on the FAB → universal quick-add
-  const lp = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const held = useRef(false);
-  const fabDown = () => { held.current = false; lp.current = setTimeout(() => { held.current = true; hapt([8, 25, 8]); setSheet('quickadd'); }, 420); };
-  const fabUp = () => { if (lp.current) clearTimeout(lp.current); };
-  const fabClick = () => {
-    if (held.current) return;
-    hapt(8);
-    // On the Book page the action is the money chooser (Out / In) — like the old ledger FAB.
-    if (activeKey === 'book') { setFabMenu((v) => !v); return; }
-    if (act.to) { go(act.to); return; }
-    setSheet('quickadd');                      // nothing of its own here — offer everything
+  const go = (to: string) => { hapt(6); closeMore(); navigate(to); window.scrollTo({ top: 0 }); };
+  const onTab = (d: Dest) => {
+    if (d.key === activeKey) { window.scrollTo({ top: 0, behavior: 'smooth' }); return; }   // tap the tab you are on: back to the top
+    go(d.to);
+  };
+  const onFab = () => {
+    if (fab.phase === 'working' || fab.phase === 'done' || fab.phase === 'offline') return;
+    if ((fab.phase === 'failed' || fab.phase === 'draft') && fab.retry) { hapt(8); fab.retry(); return; }
+    if (!act) return;
+    hapt(8); go(act.to);
   };
 
-  const badge = (n: number) => <span className="mnav-badge">{n > 9 ? '9+' : n}</span>;
-
-  const renderTab = (t: Tab) => {
-    const on = t.key === activeKey;
-    return (
-      <button key={t.key} className={`mnav-tab${on ? ' on' : ''}`}
-        onClick={() => go(t.to)} type="button" aria-current={on ? 'page' : undefined}>
-        <span className="mnav-ic">
-          <Svg>{t.icon}</Svg>
-          {t.key === 'pos' && poBadge > 0 && badge(poBadge)}
-        </span>
-        <small>{t.label}</small>
-      </button>
-    );
-  };
+  const Count = ({ v }: { v: number }) => <i className="count" aria-label={`${v} waiting`}>{v}</i>;
 
   return (
     <>
       <style>{CSS}</style>
-      <div className={`mnav-stack${hidden ? ' gone' : ''}`}>
-        {/* The action — above the bar's right end, carrying the word for what it makes. */}
-        <button className={`mnav-act${tight ? ' tight' : ''}${fabMenu ? ' open' : ''}`} type="button" aria-label={act.long}
-          onPointerDown={(e) => { e.stopPropagation(); fabDown(); }} onPointerUp={fabUp} onPointerLeave={fabUp} onPointerCancel={fabUp} onClick={fabClick}>
-          <Svg w={18}>{act.icon}</Svg>
-          <span>{act.label}</span>
-        </button>
-
-        {/* Five slots that never move. */}
-        <div ref={barRef} className="mnav-bar">
-          <div className="mnav-slots">
-            {slots.map((t) => renderTab(t))}
-            <button className={`mnav-tab${moreOn ? ' on' : ''}`} type="button" aria-label="More"
-              onClick={() => { hapt(6); setSheet('workspace'); }}>
-              <span className="mnav-ic">
-                <Svg>{I.workspace}</Svg>
-                {badgeOnMore && badge(poBadge)}
-              </span>
-              <small>More</small>
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Book's Money-out / Money-in chooser — the old ledger FAB, kept (elegant, two options) */}
-      {fabMenu && activeKey === 'book' && (
-        <div className="mnav-fabmenu" onPointerDown={(e) => e.stopPropagation()}>
-          <button type="button" className="mnav-mopt out" onClick={() => goDir('out')}>
-            <span>Money <u>O</u>ut</span>
-            <span className="mnav-mic"><svg viewBox="0 0 24 24"><path d="M7 17L17 7M9 7h8v8" /></svg></span>
-          </button>
-          <button type="button" className="mnav-mopt in" onClick={() => goDir('in')}>
-            <span>Money <u>I</u>n</span>
-            <span className="mnav-mic"><svg viewBox="0 0 24 24"><path d="M17 7L7 17M15 17H7V9" /></svg></span>
-          </button>
-        </div>
-      )}
-
-      {/* sheets */}
-      <div className={`mnav-shade${sheet ? ' show' : ''}`} onClick={() => setSheet(null)} />
-      <div className={`mnav-sheet${sheet ? ' show' : ''}`}>
-        <button type="button" className="mnav-grab" aria-label="Close" onClick={() => setSheet(null)} />
-        <button type="button" className="mnav-close" aria-label="Close" onClick={() => setSheet(null)}>
-          <svg viewBox="0 0 24 24" style={{ width: 16, height: 16, stroke: 'currentColor', fill: 'none', strokeWidth: 2, strokeLinecap: 'round' }}><path d="M6 6l12 12M18 6L6 18" /></svg>
-        </button>
-        {sheet === 'workspace' && <WorkspaceHub role={role} onGo={go} onSignOut={onSignOut} spilled={spilled} activeKey={activeKey} />}
-        {sheet === 'quickadd' && (
+      <div className="mnav">
+        {moreMounted && (
           <>
-            <div className="mnav-qtitle">Quick add</div>
-            {QUICK_ADD.map((q) => (
-              <button key={q.label} className="mnav-qrow" type="button" onClick={() => go(q.to)}>
-                <span className="mnav-qic"><Svg w={17}>{q.icon}</Svg></span>
-                <span><b>{q.label}</b><small>{q.sub}</small></span>
-              </button>
-            ))}
+            <div className={`mnav-scrim${moreOn ? ' on' : ''}`} onClick={closeMore} />
+            <section
+              ref={panelRef} className={`mnav-more${moreOn ? ' on' : ''}`} role="dialog" aria-modal="true" aria-label="All sections"
+              onTouchStart={dragStart} onTouchMove={dragMove} onTouchEnd={dragEnd} onTouchCancel={dragEnd}
+            >
+              <div className="grab" aria-hidden="true"><i /></div>
+              {groups.map(([title, items], gi) => (
+                <div key={title}>
+                  <h2>{title}</h2>
+                  <div className="grid">
+                    {items.map((d, di) => {
+                      const c = countOf(d);
+                      return (
+                        <button key={d.key} type="button"
+                          className={`item${d.key === activeKey ? ' at' : ''}`}
+                          aria-current={d.key === activeKey ? 'page' : undefined}
+                          style={{ ['--i' as string]: groups.slice(0, gi).reduce((k, [, g]) => k + g.length, 0) + di } as React.CSSProperties}
+                          onClick={() => { closeMore(); go(d.to); }}>
+                          <Glyph>{d.icon}</Glyph><b>{d.label}</b>
+                          {c > 0 && <i className="n" aria-label={`${c} waiting`}>{c}</i>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+              {onSignOut && (
+                <button type="button" className="signout" onClick={() => { closeMore(); onSignOut(); }}>
+                  <Glyph>{I.out}</Glyph><b>Sign out</b>
+                </button>
+              )}
+            </section>
           </>
         )}
-      </div>
-    </>
-  );
-}
 
-// ── the Workspace hub (the reference's card grid) ──
-function WorkspaceHub({ role, onGo, onSignOut, spilled = [], activeKey = '' }: {
-  role: Role; onGo: (to: string) => void; onSignOut?: () => void;
-  /** Daily destinations with no slot in the bar — they lead here, not buried among the hub cards. */
-  spilled?: Tab[]; activeKey?: string;
-}) {
-  const cards = [
-    { label: 'Site Desk', sub: 'work plan', to: '/desk/all/plan', icon: I.sitedesk, show: true },
-    { label: 'Site Problems', sub: 'issues & snags', to: '/desk/all/problems', icon: I.sitedesk, show: true },
-    { label: 'Worker contracts', sub: 'work orders', to: '/work-orders', icon: I.contracts, show: true },
-    { label: 'Client Billing', sub: 'invoices', to: '/billing', icon: I.billing, show: role !== 'supervisor' },
-    { label: 'Clients', sub: 'you bill', to: '/stakeholders?tab=client', icon: I.parties, show: role !== 'supervisor' },
-    { label: 'Workers & vendors', sub: 'you pay', to: '/stakeholders', icon: I.parties, show: role !== 'supervisor' },
-    { label: 'Insights', sub: 'spend & trends', to: '/insights', icon: I.insights, show: true },
-    { label: 'Inward Register', sub: 'deliveries', to: '/inward-register', icon: I.inward, show: role !== 'supervisor' && role !== 'accountant' },
-  ].filter((c) => c.show);
-  const account = [
-    { label: 'Profile & firm settings', to: '/profile', icon: I.firm },
-    // Team & access is admin/settings, not a daily-work card — it lives with the account, matching the desktop rail.
-    { label: 'Members & roles', to: '/team', icon: I.team, show: role === 'principal' || role === 'management' },
-    { label: 'Follow-up rules', to: '/follow-up-rules', icon: I.clock, show: role === 'principal' || role === 'management' },
-  ].filter((c) => c.show !== false);
-  return (
-    <>
-      {spilled.length > 0 && (
-        <>
-          <div className="mnav-qtitle">Go to</div>
-          <div className="mnav-hubgrid">
-            {spilled.map((t) => (
-              <button key={t.key} className={`mnav-hcard${t.key === activeKey ? ' on' : ''}`} type="button" onClick={() => onGo(t.to)}>
-                <span className="mnav-hic"><Svg w={16}>{t.icon}</Svg></span>
-                <b>{t.label}</b><span className="mnav-hsub">{t.key === 'payables' ? 'the weekly run' : 'today, site by site'}</span>
+      <div className={`mnav-dock${hidden ? ' gone' : ''}`}>
+        {/* the action — off the bar, above its right end, saying what it makes */}
+        <button
+          ref={fabRef} type="button"
+          className={`fab ${fab.cls}${away ? ' away' : ''}${folded && !busy ? ' folded' : ''}${swap ? ' swap' : ''}`}
+          aria-label={busy ? label : `New ${label.toLowerCase()}`}
+          aria-hidden={away ? true : undefined}
+          onClick={onFab}
+        >
+          <span className="plus">
+            <Glyph cls="p"><path d="M12 5v14M5 12h14" /></Glyph>
+            <Glyph cls="tick"><path d="m6 12.5 4 4 8-9" /></Glyph>
+            <i className="pip" aria-hidden="true" />
+          </span>
+          <span className="lbl">{label}</span>
+        </button>
+        <span className="measure" ref={measureRef} aria-hidden="true" />
+        <div className="live" role="status" aria-live="polite">{busy ? label : ''}</div>
+
+        <nav className="nav" ref={navRef} aria-label="Sections" style={{ gridTemplateColumns: `repeat(${bar.length + 1}, 1fr)` }}>
+          {bar.map((d) => {
+            const c = countOf(d);
+            return (
+              <button key={d.key} type="button" className="tab" data-tab={d.key}
+                aria-current={slot === d.key ? 'page' : undefined} onClick={() => onTab(d)}>
+                <Glyph>{d.icon}</Glyph><span>{d.label}</span>{c > 0 && <Count v={c} />}
               </button>
-            ))}
-          </div>
-          <div className="mnav-hublab">Workspace</div>
-        </>
-      )}
-      {spilled.length === 0 && <div className="mnav-qtitle">Workspace</div>}
-      <div className="mnav-hubgrid">
-        {cards.map((c) => (
-          <button key={c.label} className="mnav-hcard" type="button" onClick={() => onGo(c.to)}>
-            <span className="mnav-hic"><Svg w={16}>{c.icon}</Svg></span>
-            <b>{c.label}</b><span className="mnav-hsub">{c.sub}</span>
+            );
+          })}
+          <button type="button" className={`tab${moreOn ? ' open' : ''}`} data-tab="more"
+            aria-haspopup="dialog" aria-expanded={moreOn} aria-current={slot === 'more' ? 'page' : undefined}
+            onClick={() => (moreMounted ? closeMore() : openMore())}>
+            <Glyph cls="g">{I.grid}</Glyph>
+            <i className="x" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 7l10 10M17 7 7 17" /></svg></i>
+            {/* the door wears the name of the room you are in */}
+            <span>{inMore ? inMore.label : 'More'}</span>
+            {moreCount > 0 && <i className="count" aria-label={`${moreCount} waiting inside`}>{moreCount}</i>}
           </button>
-        ))}
+          <i className="here" aria-hidden="true" style={{ transform: `translateX(${dotX}px)`, transition: dotReady ? undefined : 'none', opacity: slot ? 1 : 0 }} />
+        </nav>
       </div>
-      <div className="mnav-hublab">Account</div>
-      {account.map((c) => (
-        <button key={c.label} className="mnav-hcard wide" type="button" onClick={() => onGo(c.to)}>
-          <span className="mnav-hic"><Svg w={16}>{c.icon}</Svg></span>
-          <b>{c.label}</b><span className="mnav-ch">›</span>
-        </button>
-      ))}
-      {onSignOut && (
-        <button type="button" className="mnav-signout" onClick={onSignOut}>
-          <span className="mnav-hic"><svg viewBox="0 0 24 24" style={{ width: 16, height: 16, stroke: 'currentColor', fill: 'none', strokeWidth: 1.7, strokeLinecap: 'round', strokeLinejoin: 'round' }}><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3" /><path d="M10 17l-5-5 5-5" /><path d="M15 12H5" /></svg></span>
-          <b>Sign out</b>
-        </button>
-      )}
+      </div>
     </>
   );
 }
 
-// ── scoped CSS (the reference, ported verbatim in value) ──
+// ── scoped CSS — the reference's own values, unchanged ──
 const CSS = `
-/* Ground matches the desktop sidenav / transaction-page header: the bitter-chocolate "night binding". */
-.mnav-stack{position:fixed; left:14px; right:14px; bottom:calc(14px + env(safe-area-inset-bottom)); max-width:402px; margin:0 auto;
-  z-index:40; display:flex; flex-direction:column; align-items:flex-end; gap:10px; pointer-events:none;
-  transition:transform .28s cubic-bezier(.4,0,.2,1), opacity .28s}
-.mnav-stack.gone{transform:translateY(200%); opacity:0; pointer-events:none}
-@media (min-width:768px){ .mnav-stack{display:none} }
+.mnav{--sage:#2F5D3A;--night:#15100C;--cream:250,248,243;--paper:#FFFFFF;--ink:#2B211A;--ink-2:#5C4F45;
+  --clay:#B5472A;--clay-hi:#D4633E;--ease:cubic-bezier(.22,.8,.24,1);--nav-h:64px;--nav-gap:12px;
+  position:fixed;inset:0;z-index:40;pointer-events:none;
+  font-family:'DM Sans',system-ui,-apple-system,'Segoe UI',sans-serif}
+/* the bar and the action ride together; only they tuck away for a full-screen form */
+.mnav-dock{position:absolute;inset:0;pointer-events:none;transition:transform .28s cubic-bezier(.4,0,.2,1),opacity .28s}
+.mnav-dock.gone{transform:translateY(200%);opacity:0}
+@media (min-width:768px){.mnav{display:none}}
 
-/* the action: warm, named, and plainly not one of the five */
-.mnav-act{pointer-events:auto; display:inline-flex; align-items:center; justify-content:center; gap:8px; height:42px; padding:0 18px 0 15px;
-  border:0; border-radius:999px; background:#C75B2B; color:#FFF7EF; cursor:pointer;
-  font-family:'DM Sans',system-ui,sans-serif; font-size:13.5px; font-weight:700; letter-spacing:.01em;
-  box-shadow:0 12px 26px -12px rgba(199,91,43,.85), inset 0 1px 0 rgba(255,255,255,.18);
-  transition:transform .26s cubic-bezier(.2,.9,.3,1.4), padding .34s cubic-bezier(.22,.8,.24,1), gap .34s cubic-bezier(.22,.8,.24,1), width .34s cubic-bezier(.22,.8,.24,1)}
-.mnav-act span{max-width:120px; overflow:hidden; white-space:nowrap; transition:max-width .34s cubic-bezier(.22,.8,.24,1), opacity .22s ease}
-.mnav-act:active{transform:scale(.94)}
-.mnav-act.tight{padding:0; width:42px; gap:0}                     /* the page is moving: draw in */
-.mnav-act.tight span{max-width:0; opacity:0}
-.mnav-act svg{transition:transform .22s cubic-bezier(.2,.9,.3,1.4)}
-.mnav-act.open svg{transform:rotate(45deg)}
+/* =====================================================================
+   THE BAR.  Navigation only. Nothing sits on it, nothing hides a tab.
+   ===================================================================== */
+.mnav .nav{pointer-events:auto;z-index:20;position:absolute;left:var(--nav-gap);right:var(--nav-gap);bottom:calc(var(--nav-gap) + env(safe-area-inset-bottom));
+  max-width:406px;margin:0 auto;height:var(--nav-h);
+  display:grid;padding:0 6px;border-radius:32px;background:var(--night);
+  box-shadow:0 18px 36px -14px rgba(21,16,12,.55),0 2px 0 0 rgba(var(--cream),.05) inset}
+.mnav .tab{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;min-width:0;padding:0 0 7px;
+  border:0;background:none;color:rgba(var(--cream),.52);font:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent;
+  transition:color .3s ease,transform .18s ease}
+.mnav .tab:active{transform:scale(.94)}
+.mnav .tab[aria-current="page"]{color:rgb(var(--cream))}
+.mnav .tab svg{width:23px;height:23px;fill:none;stroke:currentColor;stroke-width:1.65;stroke-linecap:round;stroke-linejoin:round}
+.mnav .tab span{font-size:10.5px;font-weight:600;letter-spacing:.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.mnav .count{font-style:normal;position:absolute;top:8px;left:calc(50% + 5px);min-width:17px;height:17px;padding:0 5px;border-radius:9px;
+  background:var(--clay-hi);color:#fff;font-family:'DM Mono',ui-monospace,Menlo,monospace;font-size:10px;font-weight:500;
+  display:grid;place-items:center;box-shadow:0 0 0 2px var(--night)}
+.mnav .here{position:absolute;left:0;bottom:7px;width:4px;height:4px;margin-left:-2px;border-radius:2px;background:var(--clay-hi);pointer-events:none;
+  transition:transform .46s cubic-bezier(.3,1.32,.5,1),opacity .3s ease}
+/* the four dots give way to a cross while the panel is open */
+.mnav .tab .x{position:absolute;inset:0 0 18px;display:grid;place-items:center;opacity:0;transform:rotate(-45deg) scale(.7);transition:opacity .25s ease,transform .4s var(--ease)}
+.mnav .tab .x svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.65;stroke-linecap:round;stroke-linejoin:round}
+.mnav .tab svg.g{transition:opacity .25s ease,transform .4s var(--ease)}
+.mnav .tab.open{color:rgb(var(--cream))}
+.mnav .tab.open svg.g{opacity:0;transform:rotate(45deg) scale(.7)}
+.mnav .tab.open .x{opacity:1;transform:none}
 
-/* Ground matches the desktop sidenav / transaction-page header: the bitter-chocolate "night binding". */
-.mnav-bar{pointer-events:auto; position:relative; width:100%;
-  --b-rule:#302014; --b-soft:rgba(245,240,231,.55); --b-clay:#E8935F;
-  background:linear-gradient(180deg,#191009,#140D07);
-  border:1px solid rgba(245,240,231,.08); border-radius:999px; overflow:hidden;
-  box-shadow:0 22px 44px -18px rgba(20,13,7,.72), inset 0 1px 0 rgba(245,240,231,.06);
-  display:flex; align-items:center; padding:6px}
+/* =====================================================================
+   THE ACTION.  One per page, off the bar, and it says what it does.
+   filled = alive · hollow = not connected · clay = working · sage = done · breath = working · one shake = no
+   ===================================================================== */
+.mnav .fab{--w:150px;pointer-events:auto;position:absolute;right:16px;bottom:calc(var(--nav-gap) + var(--nav-h) + 14px + env(safe-area-inset-bottom));
+  z-index:19;height:54px;width:var(--w);padding:0;border:0;border-radius:27px;cursor:pointer;
+  background:var(--clay);color:#fff;display:flex;align-items:center;overflow:hidden;white-space:nowrap;
+  box-shadow:0 16px 28px -14px rgba(181,71,42,.95),0 4px 10px -6px rgba(21,16,12,.4);
+  transition:width .42s var(--ease),transform .38s var(--ease),opacity .25s ease,background-color .4s ease,box-shadow .4s ease,color .3s ease}
+.mnav .fab:active{transform:scale(.96)}
+.mnav .fab .plus{position:relative;flex:none;width:54px;height:54px;display:grid;place-items:center}
+.mnav .fab .plus svg{position:absolute;inset:0;margin:auto;width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;
+  transition:transform .42s var(--ease),opacity .25s ease}
+.mnav .fab .lbl{font-size:16px;font-weight:600;margin-left:-6px;padding-right:22px;transition:opacity .22s ease}
+.mnav .fab.folded{width:54px}
+.mnav .fab.folded .lbl{opacity:0}
+.mnav .fab.swap .lbl{opacity:0}
+.mnav .fab.swap .plus svg{transform:rotate(90deg)}
+.mnav .fab.away{transform:translateY(16px) scale(.7);opacity:0;pointer-events:none}
+.mnav .fab .pip{position:absolute;inset:0;margin:auto;width:8px;height:8px;border-radius:50%;background:currentColor;opacity:0;transform:scale(.4);
+  transition:opacity .25s ease,transform .4s var(--ease),background-color .3s,box-shadow .3s}
+.mnav .fab .pip::after{content:'';position:absolute;inset:0;border-radius:50%;border:1px solid currentColor;opacity:0}
+.mnav .fab .tick{stroke-width:2.6!important;stroke-linejoin:round;stroke-dasharray:22;stroke-dashoffset:22;opacity:0}
+.mnav .fab.working .p,.mnav .fab.done .p,.mnav .fab.hollow .p,.mnav .fab.draft .p{opacity:0;transform:scale(.5) rotate(90deg)}
+.mnav .fab.working .pip{opacity:1;transform:none;animation:mnavbreath 1.5s ease-in-out infinite}
+.mnav .fab.working .pip::after{animation:mnavping 1.5s var(--ease) infinite}
+.mnav .fab.working.slow .pip{animation-duration:2.8s}
+.mnav .fab.working.slow .pip::after{animation:none}
+.mnav .fab.done{background:var(--sage);box-shadow:0 16px 28px -14px rgba(47,93,58,.9),0 4px 10px -6px rgba(21,16,12,.4)}
+.mnav .fab.done .tick{opacity:1;animation:mnavtick .42s .16s ease-out forwards}
+.mnav .fab.hollow{background:var(--paper);color:var(--ink);box-shadow:inset 0 0 0 1.5px var(--ink-2),0 14px 26px -16px rgba(21,16,12,.5)}
+.mnav .fab.hollow .pip{opacity:1;transform:none;background:transparent;box-shadow:inset 0 0 0 1.5px var(--ink-2);width:10px;height:10px}
+.mnav .fab.no{animation:mnavno .42s ease-in-out 1}
+.mnav .fab.draft .pip{opacity:1;transform:none}
+@keyframes mnavbreath{0%,100%{transform:scale(1)}50%{transform:scale(.72)}}
+@keyframes mnavping{0%{transform:scale(1);opacity:.5}100%{transform:scale(3);opacity:0}}
+@keyframes mnavtick{to{stroke-dashoffset:0}}
+@keyframes mnavno{0%,100%{transform:translateX(0)}25%{transform:translateX(-5px)}75%{transform:translateX(5px)}}
+.mnav .measure{position:absolute;visibility:hidden;white-space:nowrap;font-size:16px;font-weight:600}
+.mnav .live{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
 
-/* five equal slots — nothing scrolls, nothing is masked, every label whole */
-.mnav-slots{flex:1; display:flex; align-items:stretch; min-width:0}
-.mnav-slots > .mnav-tab{flex:1 1 0; width:auto; min-width:0}
-.mnav-ic{position:relative; display:inline-flex}
+/* =====================================================================
+   MORE.  The panel is the bar's own colour and rises out of it, so it reads
+   as the bar opening, not a new screen.
+   ===================================================================== */
+.mnav .mnav-scrim{pointer-events:auto;position:absolute;inset:0;z-index:17;background:rgba(21,16,12,.38);opacity:0;transition:opacity .35s ease}
+.mnav .mnav-scrim.on{opacity:1}
+.mnav .mnav-more{pointer-events:auto;
+  position:absolute;left:var(--nav-gap);right:var(--nav-gap);bottom:calc(var(--nav-gap) + env(safe-area-inset-bottom));z-index:18;
+  max-width:406px;margin:0 auto;padding:8px 10px calc(var(--nav-h) + 10px);
+  border-radius:32px;background:var(--night);color:rgb(var(--cream));box-shadow:0 24px 50px -16px rgba(21,16,12,.7);
+  transform-origin:50% 100%;transform:translateY(24px) scale(.96);opacity:0;max-height:calc(100% - 80px);overflow:auto;
+  transition:transform .46s var(--ease),opacity .28s ease;touch-action:pan-y;-webkit-overflow-scrolling:touch}
+.mnav .mnav-more.on{transform:none;opacity:1;transition:transform .5s var(--ease),opacity .3s ease}
+.mnav .mnav-more .grab{display:grid;place-items:center;height:22px}
+.mnav .mnav-more .grab i{width:36px;height:4px;border-radius:2px;background:rgba(var(--cream),.18)}
+.mnav .mnav-more h2{margin:10px 12px 6px;font-size:12.5px;font-weight:600;color:rgba(var(--cream),.5)}
+.mnav .mnav-more .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.mnav .mnav-more .item{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;min-height:78px;padding:8px 4px;
+  border:0;border-radius:20px;background:rgba(var(--cream),.055);color:rgba(var(--cream),.9);font:inherit;cursor:pointer;
+  opacity:0;transform:translateY(8px);transition:background .2s ease,opacity .35s ease,transform .45s var(--ease)}
+.mnav .mnav-more.on .item{opacity:1;transform:none;transition-delay:calc(var(--i) * 20ms + 60ms)}
+.mnav .mnav-more .item:active{background:rgba(var(--cream),.12)}
+.mnav .mnav-more .item svg{flex:none;width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:1.65;stroke-linecap:round;stroke-linejoin:round;opacity:.9}
+.mnav .mnav-more .item b{max-width:100%;font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mnav .mnav-more .item .n{font-style:normal;position:absolute;top:10px;left:calc(50% + 6px);min-width:18px;height:18px;padding:0 5px;border-radius:9px;
+  background:var(--clay-hi);color:#fff;font-family:'DM Mono',ui-monospace,Menlo,monospace;font-size:10.5px;display:grid;place-items:center;box-shadow:0 0 0 2px #1E1813}
+.mnav .mnav-more .item.at{background:rgba(var(--cream),.12);color:rgb(var(--cream))}
+.mnav .mnav-more .item.at::after{content:'';position:absolute;bottom:7px;left:50%;width:4px;height:4px;margin-left:-2px;border-radius:50%;background:var(--clay-hi)}
+.mnav .mnav-more .signout{display:flex;align-items:center;gap:12px;width:100%;min-height:52px;margin-top:10px;padding:0 14px;border:0;border-radius:20px;
+  background:rgba(212,99,62,.12);color:#E8A184;font:inherit;font-size:14px;cursor:pointer;text-align:left}
+.mnav .mnav-more .signout:active{background:rgba(212,99,62,.2)}
+.mnav .mnav-more .signout svg{flex:none;width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.65;stroke-linecap:round;stroke-linejoin:round}
+.mnav .mnav-more .signout b{font-weight:600}
 
-.mnav-tab{flex:none; width:63px; border:0; background:none; display:flex; flex-direction:column; align-items:center; gap:4px;
-  cursor:pointer; color:var(--b-soft); padding:7px 0 6px; position:relative; transition:color .3s; font-family:'DM Sans',system-ui,sans-serif}
-.mnav-tab svg{shape-rendering:geometricPrecision; position:relative; z-index:1; transition:transform .2s cubic-bezier(.2,.9,.3,1.4)}
-.mnav-tab small{font-size:9.5px; font-weight:600; letter-spacing:.02em; white-space:nowrap; position:relative; z-index:1; opacity:.8; transition:opacity .25s}
-.mnav-tab:active svg{transform:scale(.85)}
-.mnav-tab.on{color:var(--b-clay)}
-.mnav-tab.on svg{animation:mnavspring .45s cubic-bezier(.2,.9,.3,1.5) both}
-.mnav-tab.on small{opacity:1; font-weight:700}
-@keyframes mnavspring{0%{transform:scale(.88)}55%{transform:scale(1.06) translateY(-1px)}100%{transform:scale(1) translateY(-1px)}}
-.mnav-tab svg *{stroke-dasharray:1; stroke-dashoffset:0}
-.mnav-tab.on svg *{animation:mnavink .5s cubic-bezier(.5,.05,.3,1) both}
-.mnav-tab.on svg *:nth-child(2){animation-delay:.07s}
-.mnav-tab.on svg *:nth-child(3){animation-delay:.14s}
-.mnav-tab.on svg *:nth-child(4){animation-delay:.2s}
-@keyframes mnavink{from{stroke-dashoffset:1}to{stroke-dashoffset:0}}
-
-.mnav-badge{position:absolute; top:-5px; right:-9px; min-width:15px; height:15px; padding:0 3px; border-radius:99px; background:#D0432C; color:#FFF7EF;
-  font-size:9px; font-weight:700; line-height:15px; text-align:center; box-shadow:0 0 0 1.5px #191009}
-
-/* THE LAMP, PER TAB — a warm pool of light + a filament, drawn behind the ACTIVE tab itself. Because it
-   lives on the tab, it is always perfectly centred and rides the rail as it scrolls — no JS positioning,
-   so it can never land off (the old misplacement under Payables/Attendance/Workspace is gone). */
-.mnav-tab::before{content:''; position:absolute; inset:-1px 0 0; z-index:0; pointer-events:none; opacity:0;
-  background:radial-gradient(ellipse 62% 46% at 50% 34%, rgba(232,147,95,.34), rgba(232,147,95,.10) 46%, transparent 64%);
-  transition:opacity .3s}
-.mnav-tab.on::before{opacity:1}
-.mnav-tab.on::after{content:''; position:absolute; top:5px; left:50%; width:22px; height:2px; border-radius:99px; transform:translateX(-50%);
-  background:var(--b-clay); opacity:.9; box-shadow:0 0 6px rgba(232,147,95,.55); z-index:0}
-
-/* Book's Money-out / Money-in chooser — floats above the capsule, right-aligned to the FAB */
-.mnav-fabmenu{position:fixed; right:calc(20px + env(safe-area-inset-right)); bottom:calc(126px + env(safe-area-inset-bottom)); z-index:41;
-  display:flex; flex-direction:column; align-items:flex-end; gap:10px; font-family:'DM Sans',system-ui,sans-serif; animation:mnavpop .18s cubic-bezier(.2,.9,.3,1.4) both}
-@keyframes mnavpop{from{opacity:0; transform:translateY(8px) scale(.96)}to{opacity:1; transform:none}}
-.mnav-mopt{display:inline-flex; align-items:center; gap:10px; padding:9px 8px 9px 14px; border-radius:999px; cursor:pointer;
-  background:#FFFDF9; border:1px solid #E4DCD0; color:#2F2622; box-shadow:0 10px 26px -12px rgba(47,38,34,.4); font-size:13px; font-weight:600;
-  transition:background .15s, color .15s, box-shadow .16s, transform .12s}
-.mnav-mopt:active{transform:scale(.97)}
-.mnav-mopt u{text-underline-offset:3px; text-decoration-thickness:1px; text-decoration-color:color-mix(in srgb, currentColor 45%, transparent)}
-.mnav-mopt.out:hover{background:#C4613A; color:#fff; box-shadow:0 12px 26px -12px rgba(196,97,58,.6)}
-.mnav-mopt.in:hover{background:#5F7F5B; color:#fff; box-shadow:0 12px 26px -12px rgba(95,127,91,.6)}
-.mnav-mic{display:inline-grid; place-items:center; width:26px; height:26px; border-radius:50%; flex:none}
-.mnav-mopt.out .mnav-mic{background:rgba(196,97,58,.14); color:#C4613A}
-.mnav-mopt.in .mnav-mic{background:rgba(95,127,91,.16); color:#5F7F5B}
-.mnav-mopt:hover .mnav-mic{background:rgba(255,255,255,.22); color:#fff}
-.mnav-mic svg{width:15px; height:15px; stroke:currentColor; fill:none; stroke-width:2; stroke-linecap:round; stroke-linejoin:round}
-
-.mnav-signout{display:flex; align-items:center; gap:13px; padding:14px 16px; margin-top:9px; width:100%; border-radius:16px; cursor:pointer;
-  background:rgba(178,64,42,.06); border:1px solid rgba(178,64,42,.14); color:#B2402A; font-family:'DM Sans',system-ui,sans-serif; text-align:left}
-.mnav-signout:active{transform:scale(.98)}
-.mnav-signout b{font-size:14px; font-weight:700}
-.mnav-signout .mnav-hic{background:rgba(178,64,42,.10); border-color:rgba(178,64,42,.18); color:#B2402A; margin:0}
-
-.mnav-shade{position:fixed; inset:0; background:rgba(30,24,17,.4); opacity:0; pointer-events:none; transition:opacity .3s; z-index:60}
-.mnav-shade.show{opacity:1; pointer-events:auto}
-.mnav-sheet{position:fixed; left:0; right:0; bottom:0; max-width:430px; margin:0 auto; background:#fff;
-  border-radius:22px 22px 0 0; padding:10px 20px calc(22px + env(safe-area-inset-bottom)); z-index:61;
-  transform:translateY(105%); transition:transform .38s cubic-bezier(.2,.9,.25,1); font-family:'DM Sans',system-ui,sans-serif;
-  /* Never taller than the screen — scroll inside instead of bleeding off the phone. */
-  max-height:85vh; overflow-y:auto; -webkit-overflow-scrolling:touch}
-.mnav-sheet.show{transform:none}
-.mnav-grab{display:block; width:40px; height:5px; border-radius:99px; background:#E4DACB; margin:2px auto 14px; border:0; padding:0; cursor:pointer}
-.mnav-close{position:absolute; top:12px; right:14px; width:30px; height:30px; border-radius:50%; border:0; background:#F4F0E8; color:#7A6E61; display:grid; place-items:center; cursor:pointer; z-index:1}
-.mnav-close:active{transform:scale(.92)}
-.mnav-qtitle{font-family:'Playfair Display',Georgia,serif; font-size:19px; font-weight:600; margin-bottom:12px; color:#221C14}
-.mnav-qrow{display:flex; align-items:center; gap:13px; padding:14px 2px; border-bottom:1px solid #EEE5D8; width:100%; border-left:0; border-right:0; border-top:0;
-  background:none; text-align:left; font-size:15px; font-weight:600; cursor:pointer; color:#221C14}
-.mnav-qrow:last-child{border-bottom:0}
-.mnav-qrow:active{background:#FAF5EE}
-.mnav-qic{width:36px; height:36px; border-radius:11px; background:#FAF5EE; border:1px solid #EEE5D8; display:grid; place-items:center; color:#C75B2B; flex:none}
-.mnav-qrow small{display:block; font-size:11.5px; color:#9A8C77; font-weight:400; margin-top:1px}
-
-.mnav-hubgrid{display:grid; grid-template-columns:1fr 1fr; gap:11px}
-.mnav-hcard{background:#fff; border:1px solid #EEE5D8; border-radius:16px; padding:15px 15px 13px; cursor:pointer; text-align:left; transition:transform .15s; color:#221C14}
-.mnav-hcard:active{transform:scale(.97)}
-.mnav-hic{width:34px; height:34px; border-radius:10px; background:#FAF5EE; border:1px solid #EEE5D8; display:grid; place-items:center; color:#6E5F4C; margin-bottom:10px}
-.mnav-hcard b{display:block; font-size:14px; font-weight:700}
-.mnav-hsub{display:block; font-size:11.5px; color:#9A8C77; margin-top:3px; font-family:'DM Mono',monospace}
-.mnav-hcard.wide{display:flex; align-items:center; gap:13px; padding:14px 16px; margin-top:9px; width:100%}
-.mnav-hcard.wide .mnav-hic{margin:0}
-.mnav-hcard.wide b{font-size:14px}
-.mnav-ch{margin-left:auto; color:#9A8C77}
-.mnav-hcard.on{border-color:rgba(199,91,43,.35); background:rgba(199,91,43,.07)}
-.mnav-hcard.on b{color:#B2402A}
-.mnav-hublab{font-family:'DM Mono',monospace; font-size:9.5px; letter-spacing:.2em; text-transform:uppercase; color:#9A8C77; margin:18px 2px 9px}
+@media (prefers-reduced-motion:reduce){
+  .mnav .fab .pip,.mnav .fab .pip::after,.mnav .fab.no{animation:none!important}
+  .mnav .fab .tick{stroke-dashoffset:0}
+}
 `;

@@ -1,4 +1,4 @@
-import React, { createContext, lazy, Suspense, useCallback, useContext, useEffect, useState, useTransition } from 'react';
+import React, { createContext, lazy, Suspense, useCallback, useContext, useEffect, useMemo, useState, useTransition } from 'react';
 import { createPortal } from 'react-dom';
 import { useAuth } from './lib/auth/AuthProvider';
 import { LOGIN_ROUTE, loginRouteFor } from './lib/auth/routes';
@@ -815,6 +815,31 @@ function BottomTabBar({ session, onMoreTap }: { session: Session; onMoreTap: () 
   });
 
 
+  // The bar's own counts — the real numbers, not "9+". Same query keys as the desktop rail, so
+  // React Query serves both from one fetch.
+  const { data: inboxCount = 0 } = useQuery({
+    queryKey: ['inbox_badge'],
+    queryFn: async () => (await supabase.from('rough_entries').select('*', { count: 'exact', head: true }).eq('status', 'PENDING')).count ?? 0,
+    staleTime: 30_000,
+  });
+  const { data: pendingCertsCount = 0 } = useQuery({
+    queryKey: ['nav_pending_certs'],
+    queryFn: async () => (await supabase.from('work_certifications').select('*', { count: 'exact', head: true }).eq('status', 'pending')).count ?? 0,
+    staleTime: 60_000, enabled: role !== 'supervisor',
+  });
+  const { data: billOverdueCount = 0 } = useQuery({
+    queryKey: ['nav_bill_overdue'],
+    queryFn: async () => {
+      const today = new Date().toISOString().split('T')[0];
+      return (await supabase.from('client_invoices').select('*', { count: 'exact', head: true }).lt('due_date', today).not('status', 'in', '("Paid","Void","Cancelled")')).count ?? 0;
+    },
+    staleTime: 60_000, enabled: role !== 'supervisor',
+  });
+  const navCounts = useMemo(() => ({
+    review: inboxCount, pos: poUntalliedCount, payables: pendingCertsCount,
+    contracts: woPendingCount, billing: billOverdueCount,
+  }), [inboxCount, poUntalliedCount, pendingCertsCount, woPendingCount, billOverdueCount]);
+
   const ordersBadge = (woPendingCount ?? 0) + (poUntalliedCount ?? 0);
 
   // ── Mobile auto-hide: tuck the bar away on scroll-down, bring it back on scroll-up;
@@ -891,7 +916,7 @@ function BottomTabBar({ session, onMoreTap }: { session: Session; onMoreTap: () 
   // ── Global context nav — the floating capsule (pinned Book + scrollable rail + contextual FAB +
   //    Workspace hub). It owns the global create action, so the standalone FAB steps aside off-project.
   //    Only fully hide it on full-screen forms; scroll-down minimizes it to a pill (its own behaviour). ──
-  return <MobileNavBar role={role} poBadge={poUntalliedCount} hidden={hideForRoute} onSignOut={triggerSignOut} />;
+  return <MobileNavBar role={role} counts={navCounts} hidden={hideForRoute} onSignOut={triggerSignOut} />;
 }
 
 function MoreNavSheet({
