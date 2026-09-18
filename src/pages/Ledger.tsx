@@ -5,7 +5,6 @@ import { useSearchScope } from '../components/search/searchScope';
 import SearchBar from '../components/search/SearchBar';
 import { useSettleScroll } from '../lib/settleScroll';
 import { usePullToRefresh, useLiveCount } from '../lib/usePullToRefresh';
-import PullQuipu from '../components/brand/PullQuipu';
 import { useLongPress } from '../lib/useLongPress';
 import PartyFilterChip from '../components/search/PartyFilterChip';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -1092,7 +1091,7 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
   // Pull the page down from the top and it reads the books again; what the page uncovers while it
   // travels is the quipu (PullQuipu), tying itself as far as the finger takes it.
   const liveCount = useLiveCount(filteredTransactions.length);
-  const { pull: pullY, phase: pullPhase, news: pullNews } = usePullToRefresh({
+  const { view: pullView } = usePullToRefresh({
     attachTo: elasticRef,
     enabled: isPhone,
     noun: 'entry',
@@ -1266,7 +1265,7 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
   // ── Render ───────────────────────────────────────────────────────────────────
   return (
     <div ref={elasticRef} className="min-h-screen" style={{ background: V.page, ...font, overscrollBehaviorY: 'contain' }}>
-      <PullQuipu pull={pullY} phase={pullPhase} news={pullNews} label="Day Book" />
+      {pullView}
       <style>{TRACK_CHIP_CSS}</style>
       {importOpen && (
         <Suspense fallback={<div className="fixed inset-0 z-[1000]" style={{ background: 'rgba(30,26,21,0.55)' }} />}>

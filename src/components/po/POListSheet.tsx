@@ -20,7 +20,6 @@ import { useSnackbar } from '../Snackbar';
 import SendToVendorModal from '../po-new-ui/SendToVendorModal';
 import { useIsMobile } from '../../lib/useIsMobile';
 import { usePullToRefresh, useLiveCount } from '../../lib/usePullToRefresh';
-import PullQuipu from '../brand/PullQuipu';
 import { billedByPO } from '../../lib/billsApi';
 
 const POLX_CSS = `
@@ -526,7 +525,7 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
   const canApprove = profile?.role === 'management' || profile?.role === 'principal';
   const qc = useQueryClient();
   // Pull the list down on a phone to read the orders again.
-  const { wrapRef: pullRef, pull: pullY, phase: pullPhase, news: pullNews } = usePullToRefresh({
+  const { wrapRef: pullRef, view: pullView } = usePullToRefresh({
     enabled: isMobile, noun: 'order', count: useLiveCount(rows.length),
     onRefresh: () => qc.refetchQueries({ type: 'active' }),
   });
@@ -803,7 +802,7 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
     })();
     return (
       <div className="polx m" ref={pullRef}>
-        <PullQuipu pull={pullY} phase={pullPhase} news={pullNews} label="orders" />
+        {pullView}
         <style>{POLX_CSS}</style>
         <div className="m-mast">
           <div className="r1">

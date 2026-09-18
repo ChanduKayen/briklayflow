@@ -22,7 +22,6 @@ import { useNavigate } from 'react-router-dom';
 import type { Session } from '@supabase/supabase-js';
 import { useOrgId } from '../../lib/auth/AuthProvider';
 import { usePullToRefresh } from '../../lib/usePullToRefresh';
-import PullQuipu from '../brand/PullQuipu';
 import { useSnackbar } from '../Snackbar';
 import {
   loadWeek, loadParties, mondayOf, weekDates, weekLabel,
@@ -211,7 +210,7 @@ export default function AttendanceMobile({ session }: { session: Session }) {
 
   useEffect(() => { void load(); }, [load]);
   // Pull the muster down to read the week again (this page loads its own data — `load` IS the refresh).
-  const { pull: pullY, phase: pullPhase, news: pullNews } = usePullToRefresh({ attachTo: rootRef, onRefresh: load });
+  const { view: pullView } = usePullToRefresh({ attachTo: rootRef, onRefresh: load });
 
   /* ---------- date strip ---------- */
   function renderStrip() {
@@ -813,7 +812,7 @@ export default function AttendanceMobile({ session }: { session: Session }) {
 
   return (
     <div className="atmx-page">
-    <PullQuipu pull={pullY} phase={pullPhase} news={pullNews} label="muster" />
+    {pullView}
     <div className="atmx" ref={rootRef}>
       <style>{ATMX_CSS}</style>
 

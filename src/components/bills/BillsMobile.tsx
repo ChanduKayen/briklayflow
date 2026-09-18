@@ -23,7 +23,6 @@ import { createPortal } from 'react-dom';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { usePullToRefresh, useLiveCount } from '../../lib/usePullToRefresh';
-import PullQuipu from '../brand/PullQuipu';
 import { useOrgId } from '../../lib/auth/AuthProvider';
 import { useSignedDocUrl } from '../../lib/storage';
 import { useSearchScope } from '../search/searchScope';
@@ -141,7 +140,7 @@ export default function BillsMobile() {
 
   const open = useMemo(() => bills.filter(b => dueOf(b) > 0.5), [bills]);
   // Pull the register down to read it again — the quipu ties itself in the space that opens.
-  const { pull: pullY, phase: pullPhase, news: pullNews } = usePullToRefresh({
+  const { view: pullView } = usePullToRefresh({
     attachTo: rootRef, noun: 'bill', count: useLiveCount(shown.length),
     onRefresh: () => qc.refetchQueries({ type: 'active' }),
   });
@@ -180,7 +179,7 @@ export default function BillsMobile() {
 
   return (
     <div className="blm-page">
-      <PullQuipu pull={pullY} phase={pullPhase} news={pullNews} label="bills" />
+      {pullView}
       <div className="blm" ref={rootRef}>
         <style>{BLM_CSS}</style>
 

@@ -21,7 +21,6 @@ import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useIsMobile } from '../lib/useIsMobile';
 import { usePullToRefresh, useLiveCount } from '../lib/usePullToRefresh';
-import PullQuipu from '../components/brand/PullQuipu';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import { useOrgId } from '../lib/auth/AuthProvider';
@@ -389,14 +388,14 @@ export default function Payables({ session }: { session: Session }) {
   const paidCount = rowsAll.filter(r => paidOf(r) != null).length;
 
   // Pull the run down to read it again — on a phone, where there is no other way to ask.
-  const { wrapRef: pullRef, pull: pullY, phase: pullPhase, news: pullNews } = usePullToRefresh({
+  const { wrapRef: pullRef, view: pullView } = usePullToRefresh({
     enabled: useIsMobile(720), noun: 'row', count: useLiveCount(rowsAll.length),
     onRefresh: async () => { await Promise.all([refetch(), refetchPaid(), refetchRec()]); },
   });
 
   return (
     <div className="pyr-page" ref={pullRef}>
-      <PullQuipu pull={pullY} phase={pullPhase} news={pullNews} label="run" />
+      {pullView}
       <style>{PH_CSS}</style>
       <div className="ph">
         <header className="hero" ref={heroRef}>
