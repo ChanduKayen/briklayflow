@@ -40,6 +40,8 @@ export const navAction = {
     emit({ phase: 'offline', label, cls: 'hollow' });
     later(() => emit({ phase: 'draft', label: 'Resume draft', cls: 'draft', retry: resume }), 2600);
   },
+  /** half-finished and nothing lost: the capsule offers to pick it back up */
+  draft(label = 'Resume draft', resume?: () => void) { clearActionTimers(); emit({ phase: 'draft', label, cls: 'draft', retry: resume }); },
   reset() { clearActionTimers(); emit(IDLE); },
   subscribe(f: (s: NavActionState) => void) { listeners.add(f); return () => { listeners.delete(f); }; },
   get state() { return actionState; },

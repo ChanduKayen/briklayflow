@@ -10,6 +10,8 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { DirLabel } from './NewTxnFab';
+import { composer } from './nav/txDraft';
+import { useIsMobile } from '../lib/useIsMobile';
 
 const OUT = '#C4613A';
 const IN = '#5F7F5B';
@@ -25,7 +27,14 @@ export function NewTxnMenuButton({ children, className, style }: { children: Rea
   const openNow = () => { cancelClose(); setOpen(true); };
   const closeSoon = () => { cancelClose(); closeTimer.current = setTimeout(() => setOpen(false), 140); };
 
-  const go = (direction: 'out' | 'in') => { cancelClose(); setOpen(false); navigate('/ledger/new', { state: { direction } }); };
+  // On a phone this button and the nav bar's action are the same door: both open the composer panel,
+  // which asks the direction itself. Only the desktop shows the Out / In menu.
+  const isMobile = useIsMobile();
+  const go = (direction: 'out' | 'in') => {
+    cancelClose(); setOpen(false);
+    if (isMobile && composer.available) { composer.open(direction); return; }
+    navigate('/ledger/new', { state: { direction } });
+  };
 
   useEffect(() => () => cancelClose(), []);
 
@@ -90,7 +99,7 @@ export function NewTxnMenuButton({ children, className, style }: { children: Rea
   return (
     <span ref={wrapRef} data-page-cta className="relative inline-flex" onMouseEnter={openNow} onMouseLeave={closeSoon}>
       {/* Click OPENS the options (same menu hover shows) — never toggles the just-hovered menu shut. */}
-      <button type="button" onClick={() => setOpen(true)} className={className} style={style}>
+      <button type="button" onClick={() => { if (isMobile && composer.available) { composer.open("out"); return; } setOpen(true); }} className={className} style={style}>
         {children}
       </button>
 

@@ -26,6 +26,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { navAction, type NavActionState } from './navAction';
+import { TxComposer } from './TxComposer';
+import { TX_CSS, composer, emptyDraft, type TxDraft } from './txDraft';
 
 // ── icons, exact from the reference (24×24, stroke 1.65, round caps) ──
 const I: Record<string, ReactNode> = {
@@ -43,11 +45,8 @@ const I: Record<string, ReactNode> = {
   team: <><circle cx="12" cy="8.5" r="3.2" /><path d="M5.5 19.5a6.5 6.5 0 0 1 13 0" /></>,
   tally: <><path d="M4 12a8 8 0 0 1 13.7-5.7L20 8.5" /><path d="M20 4v4.5h-4.5" /><path d="M20 12a8 8 0 0 1-13.7 5.7L4 15.5" /><path d="M4 20v-4.5h4.5" /></>,
   settings: <><path d="M5 7h9M18 7h1M5 12h2M11 12h8M5 17h7M16 17h3" /><circle cx="16" cy="7" r="2" /><circle cx="9" cy="12" r="2" /><circle cx="14" cy="17" r="2" /></>,
-  insights: <><path d="M4 19.5V4.5" /><path d="M4 19.5h16" /><path d="m8 15.5 3.5-4.5 3 2 5-6" /></>,
   billing: <><rect x="3" y="6.5" width="18" height="11" rx="2.5" /><circle cx="12" cy="12" r="2.4" /><path d="M6.4 12h.01M17.6 12h.01" /></>,
   clients: <><path d="M4 20.5V6.8l7-3.3v17" /><path d="M11 9.8h8.5v10.7" /><path d="M20.5 20.5H3.5" /><path d="M7.2 9.5h.01M7.2 13h.01M7.2 16.5h.01M15 13.5h.01M15 16.8h.01" /></>,
-  inward: <><path d="M3.5 9.5 12 5l8.5 4.5V17L12 21.5 3.5 17V9.5Z" /><path d="M3.5 9.5 12 14l8.5-4.5M12 14v7.5" /></>,
-  clock: <><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 2" /></>,
   out: <><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3" /><path d="M10 17l-5-5 5-5" /><path d="M15 12H5" /></>,
 };
 
@@ -83,25 +82,24 @@ const MORE: [string, Dest[]][] = [
     { key: 'attendance', label: 'Attendance', to: '/attendance', icon: I.attendance, at: ['/attendance'], show: all },
     { key: 'work', label: 'Work plan', to: '/desk/all/plan', icon: I.work, at: ['/desk', '/site-desk', '/tasks'], show: all },
     { key: 'problems', label: 'Problems', to: '/desk/all/problems', icon: I.problems, at: [], show: all },
-    { key: 'inward', label: 'Inward', to: '/inward-register', icon: I.inward, at: ['/inward-register'], show: (r) => r !== 'supervisor' && r !== 'accountant' },
   ]],
   ['People', [
     { key: 'parties', label: 'Parties', to: '/stakeholders', icon: I.parties, at: ['/stakeholders'], show: notSupervisor },
     { key: 'clients', label: 'Clients', to: '/stakeholders?tab=client', icon: I.clients, at: [], show: notSupervisor },
     { key: 'team', label: 'Team', to: '/team', icon: I.team, at: ['/team'], show: admin },
   ]],
-  ['Setup', [
-    { key: 'insights', label: 'Insights', to: '/insights', icon: I.insights, at: ['/insights'], show: all },
-    { key: 'rules', label: 'Follow-ups', to: '/follow-up-rules', icon: I.clock, at: ['/follow-up-rules'], show: admin },
-    { key: 'settings', label: 'Settings', to: '/profile', icon: I.settings, at: ['/profile', '/settings'], show: all },
-  ]],
+];
+
+/** The account, at the foot of the panel — not daily work, so not a card in the grid. */
+const FOOT: Dest[] = [
+  { key: 'settings', label: 'Settings', to: '/profile', icon: I.settings, at: ['/profile', '/settings'], show: all },
 ];
 
 /** What each page makes, and the word the action wears. Absent = nothing to create, so no button. */
 const ACTION: Record<string, { word: string; to: string }> = {
   book: { word: 'Transaction', to: '/ledger/new' },
   bills: { word: 'Bill', to: '/bills?new=1' },
-  pos: { word: 'PO', to: '/purchase-orders/new' },
+  pos: { word: 'PO', to: '/purchase-orders?new=1' },
   contracts: { word: 'Contract', to: '/work-orders/new' },
   parties: { word: 'Party', to: '/stakeholders?new=1' },
   clients: { word: 'Client', to: '/stakeholders?tab=client&new=1' },
@@ -142,7 +140,7 @@ export function MobileNavBar({
     () => MORE.map(([title, items]) => [title, items.filter((x) => x.show(role))] as [string, Dest[]]).filter(([, items]) => items.length > 0),
     [role],
   );
-  const moreItems = useMemo(() => groups.flatMap(([, items]) => items), [groups]);
+  const moreItems = useMemo(() => [...groups.flatMap(([, items]) => items), ...FOOT.filter((d) => d.show(role))], [groups, role]);
   const moreCount = useMemo(() => moreItems.reduce((s, d) => s + countOf(d), 0), [moreItems, countOf]);
 
   const lit = (d: Dest) => d.at.some((p) => path === p || path.startsWith(p + '/'));
@@ -212,6 +210,22 @@ export function MobileNavBar({
     if (drag.current.dy > 70) closeMore();
   };
 
+  // ── the composer ── the bar opens for a new transaction, exactly as it does for More
+  const [draft, setDraft] = useState<TxDraft | null>(null);
+  const draftRef = useRef(draft);
+  useEffect(() => { draftRef.current = draft; });
+  // close it half-way and nothing is lost: the capsule becomes "Resume draft"
+  const closeComposer = useCallback((keep: boolean) => {
+    const d = draftRef.current;
+    setDraft(null);
+    if (keep && d && (d.party || d.amt)) navAction.draft('Resume draft', () => setDraft({ ...d }));
+  }, []);
+
+  const openComposer = useCallback((dir: 'out' | 'in' = 'out') => {
+    closeMore(); setDraft((d) => d ?? emptyDraft(dir)); navAction.reset();
+  }, [closeMore]);
+  useEffect(() => composer.bind(openComposer), [openComposer]);
+
   // ── the action ──
   const act = ACTION[activeKey];
   const [fab, setFab] = useState<NavActionState>(() => navAction.state);
@@ -223,7 +237,7 @@ export function MobileNavBar({
   const [folded, setFolded] = useState(false);
   const [ctaVisible, setCtaVisible] = useState(false);
 
-  const away = !busy && (!act || ctaVisible || moreOn);
+  const away = !busy && (!act || ctaVisible || moreOn || !!draft);
   const awayRef = useRef(away);
   useEffect(() => { awayRef.current = away; });
 
@@ -272,6 +286,7 @@ export function MobileNavBar({
 
   const go = (to: string) => { hapt(6); closeMore(); navigate(to); window.scrollTo({ top: 0 }); };
   const onTab = (d: Dest) => {
+    if (draft) closeComposer(true);                    // going somewhere puts the half-written entry aside
     if (d.key === activeKey) { window.scrollTo({ top: 0, behavior: 'smooth' }); return; }   // tap the tab you are on: back to the top
     go(d.to);
   };
@@ -279,15 +294,18 @@ export function MobileNavBar({
     if (fab.phase === 'working' || fab.phase === 'done' || fab.phase === 'offline') return;
     if ((fab.phase === 'failed' || fab.phase === 'draft') && fab.retry) { hapt(8); fab.retry(); return; }
     if (!act) return;
-    hapt(8); go(act.to);
+    hapt(8);
+    if (activeKey === 'book') { openComposer(); return; }
+    go(act.to);
   };
 
   const Count = ({ v }: { v: number }) => <i className="count" aria-label={`${v} waiting`}>{v}</i>;
 
   return (
     <>
-      <style>{CSS}</style>
+      <style>{CSS + TX_CSS}</style>
       <div className="mnav">
+        <TxComposer key={draft ? "on" : "off"} draft={draft} onDraft={setDraft} onClose={closeComposer} />
         {moreMounted && (
           <>
             <div className={`mnav-scrim${moreOn ? ' on' : ''}`} onClick={closeMore} />
@@ -315,6 +333,13 @@ export function MobileNavBar({
                     })}
                   </div>
                 </div>
+              ))}
+              {FOOT.filter((d) => d.show(role)).map((d) => (
+                <button key={d.key} type="button" className={`foot${d.key === activeKey ? ' at' : ''}`}
+                  aria-current={d.key === activeKey ? 'page' : undefined}
+                  onClick={() => { closeMore(); go(d.to); }}>
+                  <Glyph>{d.icon}</Glyph><b>{d.label}</b><span className="ch">›</span>
+                </button>
               ))}
               {onSignOut && (
                 <button type="button" className="signout" onClick={() => { closeMore(); onSignOut(); }}>
@@ -356,7 +381,7 @@ export function MobileNavBar({
           })}
           <button type="button" className={`tab${moreOn ? ' open' : ''}`} data-tab="more"
             aria-haspopup="dialog" aria-expanded={moreOn} aria-current={slot === 'more' ? 'page' : undefined}
-            onClick={() => (moreMounted ? closeMore() : openMore())}>
+            onClick={() => { if (draft) closeComposer(true); if (moreMounted) closeMore(); else openMore(); }}>
             <Glyph cls="g">{I.grid}</Glyph>
             <i className="x" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 7l10 10M17 7 7 17" /></svg></i>
             {/* the door wears the name of the room you are in */}
@@ -377,6 +402,7 @@ const CSS = `
   --clay:#B5472A;--clay-hi:#D4633E;--ease:cubic-bezier(.22,.8,.24,1);--nav-h:64px;--nav-gap:12px;
   position:fixed;inset:0;z-index:40;pointer-events:none;
   font-family:'DM Sans',system-ui,-apple-system,'Segoe UI',sans-serif}
+.mnav,.mnav *{box-sizing:border-box}
 /* the bar and the action ride together; only they tuck away for a full-screen form */
 .mnav-dock{position:absolute;inset:0;pointer-events:none;transition:transform .28s cubic-bezier(.4,0,.2,1),opacity .28s}
 .mnav-dock.gone{transform:translateY(200%);opacity:0}
@@ -478,6 +504,13 @@ const CSS = `
   background:var(--clay-hi);color:#fff;font-family:'DM Mono',ui-monospace,Menlo,monospace;font-size:10.5px;display:grid;place-items:center;box-shadow:0 0 0 2px #1E1813}
 .mnav .mnav-more .item.at{background:rgba(var(--cream),.12);color:rgb(var(--cream))}
 .mnav .mnav-more .item.at::after{content:'';position:absolute;bottom:7px;left:50%;width:4px;height:4px;margin-left:-2px;border-radius:50%;background:var(--clay-hi)}
+.mnav .mnav-more .foot{display:flex;align-items:center;gap:12px;width:100%;min-height:52px;margin-top:8px;padding:0 14px;border:0;border-radius:20px;
+  background:rgba(var(--cream),.055);color:rgba(var(--cream),.9);font:inherit;font-size:14px;cursor:pointer;text-align:left}
+.mnav .mnav-more .foot:active{background:rgba(var(--cream),.12)}
+.mnav .mnav-more .foot.at{background:rgba(var(--cream),.12);color:rgb(var(--cream))}
+.mnav .mnav-more .foot svg{flex:none;width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.65;stroke-linecap:round;stroke-linejoin:round;opacity:.9}
+.mnav .mnav-more .foot b{font-weight:600}
+.mnav .mnav-more .foot .ch{margin-left:auto;color:rgba(var(--cream),.4)}
 .mnav .mnav-more .signout{display:flex;align-items:center;gap:12px;width:100%;min-height:52px;margin-top:10px;padding:0 14px;border:0;border-radius:20px;
   background:rgba(212,99,62,.12);color:#E8A184;font:inherit;font-size:14px;cursor:pointer;text-align:left}
 .mnav .mnav-more .signout:active{background:rgba(212,99,62,.2)}
