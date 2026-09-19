@@ -113,3 +113,40 @@ suite('settling only what an approval covers', () => {
       .toEqual(['A1']);
   });
 });
+
+// A contract's name is often its whole scope of work — a paragraph. Anywhere it sits beside other
+// words (a muster row, an option in the ask, a ledger sub-line) it has to become a phrase, or it
+// takes the row over. The full text always survives in a title attribute; only the display is cut.
+import { shortContract } from '../attendanceApi'
+
+suite('naming a contract in one line', () => {
+  test('a short name is left alone', () => {
+    expect(shortContract('Masonry package')).toBe('Masonry package');
+  });
+
+  test('a scope-of-work name is cut to a phrase, on a word boundary', () => {
+    const long = 'Ceiling, walls wallcare ground floor 1st floor 2nd floor & Terrace 2 cottings putty';
+    const out = shortContract(long);
+    expect(out.length <= 35).toBe(true);
+    expect(out.endsWith('…')).toBe(true);
+    expect(long.startsWith(out.slice(0, -1))).toBe(true);
+  });
+
+  test('it never ends on a dangling comma or ampersand', () => {
+    for (const n of ['Ceiling, walls, ground floor work', 'Slab & beams & columns work', 'Putty; priming; painting work'])
+      for (let max = 10; max <= 26; max++)
+        expect(/[,;&·-]…$/.test(shortContract(n, max))).toBe(false);
+  });
+
+  test('a single unbroken word is cut where it must be', () => {
+    expect(shortContract('A'.repeat(60), 10)).toBe('A'.repeat(10) + '…');
+  });
+
+  test('runs of whitespace collapse before the cut', () => {
+    expect(shortContract('Painting   the\n  walls')).toBe('Painting the walls');
+  });
+
+  test('an empty name still reads as something', () => {
+    expect(shortContract('')).toBe('the contract');
+  });
+});

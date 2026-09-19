@@ -32,7 +32,7 @@ import {
   cardIsEmpty, seedRateCard, autoSettleCrewWages,
   type SiteRow, type CrewRow, type DirectRow, type RateCard, type Cell, type StageRow,
 } from '../../lib/attendanceApi';
-import { WAGES_ASK, loadWageContracts, setWagesAgainstContract, wagesAgainstLabel, type WageContract } from './wagesOnContract';
+import { WAGES_ASK, loadWageContracts, setWagesAgainstContract, shortContract, wagesContractStanding, type WageContract } from './wagesOnContract';
 import { searchPayees } from '../../lib/payeeSearch';
 import { createParty } from '../day-book/fileEntry';
 import { CertificationWizard, type CertifyContext } from './CertificationWizard';
@@ -59,6 +59,8 @@ interface MWorker {
   name: string; trade: string;
   types: WType[];
   onContract: boolean;
+  /** Its day wages come off a contract — the row wears a mark, the sheet carries the figures. */
+  wagesOff?: boolean;
   crew?: CrewRow; direct?: DirectRow;
   stages: StageRow[];
   projectId: string;
@@ -77,9 +79,8 @@ function workersOf(site: SiteRow, si: number): MWorker[] {
     const onContract = crew.basis === 'contract' && !wagesOnContract;
     out.push({
       si, wi: ci, key: `c${ci}`, name: crew.n,
-      trade: onContract ? `${crew.d || crew.trade || 'Contract'} · contract`
-        : wagesOnContract ? `${crewTrade(crew, types)} · ${wagesAgainstLabel(crew.stages[0]?.n)}`
-        : crewTrade(crew, types),
+      trade: onContract ? `${crew.d || crew.trade || 'Contract'} · contract` : crewTrade(crew, types),
+      wagesOff: wagesOnContract,
       types, onContract, crew, stages: crew.stages, projectId: site.site,
     });
   });
@@ -348,7 +349,7 @@ export default function AttendanceMobile({ session }: { session: Session }) {
           <div class="wav">${esc((w.name.trim()[0] || '?').toUpperCase())}${waAt(w, sel) !== null && c > 0 ? '<span class="src"></span>' : ''}</div>
           <div class="wmid">
             <b>${esc(w.name)}</b>
-            <span class="sub">${esc(w.trade)}</span>
+            <span class="subline"><span class="sub">${esc(w.trade)}</span>${w.wagesOff ? `<span class="ctag">${esc(WAGES_ASK.chip)}</span>` : ''}</span>
             <div class="weekdots">${dates.map((_d, di) =>
               `<span class="wd ${(w.onContract ? 0 : countOf(w, di)) ? 'on' : ''} ${di === sel ? 'tod' : ''}"></span>`).join('')}</div>
           </div>
@@ -611,7 +612,7 @@ export default function AttendanceMobile({ session }: { session: Session }) {
 
     const finishKeep = () => { closeSheet(); toast(WAGES_ASK.doneKeep(party.name)); };
     const commitOff = async (c: WageContract) => {
-      sheet.innerHTML = head + `<div class="siteempty">Setting the wages against ${esc(c.label)}…</div>`;
+      sheet.innerHTML = head + `<div class="siteempty">Setting the wages against ${esc(shortContract(c.label, 30))}…</div>`;
       try {
         if (made.kind === 'crew') {
           await setWagesAgainstContract({ crewId: made.id, orgId, projectId: site.site, stakeholderId: party.stakeholder_id || null, woId: c.woId });
@@ -632,7 +633,7 @@ export default function AttendanceMobile({ session }: { session: Session }) {
       sheet.innerHTML = head + `<div class="f-lab">${esc(WAGES_ASK.which)}</div>
         <div class="picklist">${contracts.map((c, i) => `<div class="pick" data-c="${i}">
           <div class="wav">${CONTRACT_IC.replace('<svg', '<svg style="width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.7"')}</div>
-          <div class="pm"><b>${esc(c.label)}</b><span>${inr(c.left)} still to certify</span></div>
+          <div class="pm"><b title="${esc(c.label)}">${esc(shortContract(c.label, 40))}</b><span>${inr(c.left)} still to certify</span></div>
           <span class="prate">${c.value ? inr(c.value) : ''}</span></div>`).join('')}</div>`;
       sheet.querySelectorAll('.pick[data-c]').forEach(el => el.addEventListener('click', () => {
         void commitOff(contracts[+(el as HTMLElement).dataset.c!]);
@@ -640,10 +641,11 @@ export default function AttendanceMobile({ session }: { session: Session }) {
     };
 
     sheet.innerHTML = head + `<div class="picklist">
-      <div class="pick tall" id="wa-off"><div class="wav">₹</div>
-        <div class="pm"><b>${esc(WAGES_ASK.offLabel)}</b><span>${esc(WAGES_ASK.offDesc(contracts[0]))}</span></div>
+      <div class="pick tall" id="wa-off"><div class="wav minus">−</div>
+        <div class="pm"><b>${esc(WAGES_ASK.offLabel)}</b><span>${esc(WAGES_ASK.offDesc(contracts[0]))}</span>
+          ${contracts.length === 1 ? `<span class="conname" title="${esc(contracts[0].label)}">${esc(WAGES_ASK.offMeta(contracts[0]))}</span>` : ''}</div>
         <span class="prate">›</span></div>
-      <div class="pick tall" id="wa-keep"><div class="wav">·</div>
+      <div class="pick tall" id="wa-keep"><div class="wav">₹</div>
         <div class="pm"><b>${esc(WAGES_ASK.keepLabel)}</b><span>${esc(WAGES_ASK.keepDesc)}</span></div>
         <span class="prate">›</span></div>
     </div>`;
@@ -665,6 +667,7 @@ export default function AttendanceMobile({ session }: { session: Session }) {
     sheet.innerHTML = `<div class="grab"></div>
       <div class="sh-head"><b>${esc(w.name)}</b><span>${dayLbl}</span></div>
       ${waT !== null && countOf(w, sel) ? `<div class="sh-src">● filed from WhatsApp${waT ? ` at ${esc(waT)}` : ''}</div>` : ''}
+      ${w.wagesOff ? `<div class="wcon" id="s-con"><div class="t">${esc(WAGES_ASK.standingHead)}</div><div class="n">${esc(shortContract(w.crew?.stages[0]?.n || 'the contract', 44))}</div></div>` : ''}
       ${w.types.map((t, ti) => `<div class="srow">
         <div class="t">${esc(t.t)}<small>${inr(t.rate)}/day</small></div>
         <div class="step"><button data-ti="${ti}" data-d="-1">−</button><b id="s-${ti}">${num(val(t.cells[sel]))}</b><button data-ti="${ti}" data-d="1">＋</button></div>
@@ -678,12 +681,27 @@ export default function AttendanceMobile({ session }: { session: Session }) {
       <div class="divider"></div>
       <div class="quietacts">
         <button class="qa" id="a-edit">Edit rates</button>
-        ${w.onContract ? '' : '<button class="qa" id="a-con">Put on contract</button>'}
+        ${w.onContract || w.wagesOff ? '' : '<button class="qa" id="a-con">Put on contract</button>'}
         <button class="qa danger" id="a-del">Remove</button>
       </div>
       <div style="height:8px"></div>
       <button class="sh-done">Done</button>`;
     showSheet();
+
+    // The figures behind the row's mark: what these wages have already taken off the contract, and
+    // what is left on it. Fetched after the sheet is up so the sheet never waits on the network.
+    if (w.wagesOff && w.crew?.woId) {
+      const box = sheet.querySelector('#s-con') as HTMLElement | null;
+      void wagesContractStanding(w.projectId, w.crew.stakeholderId ?? null, w.crew.woId).then(st => {
+        if (!st || !box || !box.isConnected) return;
+        box.querySelector('.n')!.textContent = st.label;
+        box.setAttribute('title', st.full);
+        const m = document.createElement('div');
+        m.className = 'm';
+        m.innerHTML = `<span>${esc(WAGES_ASK.standingSet(st.setAgainst))}</span><span>${esc(WAGES_ASK.standingLeft(st.left))}</span>`;
+        box.appendChild(m);
+      }).catch(() => {});
+    }
 
     const foot = () => {
       (sheet.querySelector('#s-c') as HTMLElement).textContent = num(countOf(w, sel)) + ' on site';

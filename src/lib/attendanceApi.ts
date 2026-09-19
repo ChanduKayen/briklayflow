@@ -545,6 +545,17 @@ export const WAGE_SETTLE_NOTE = 'Wages set against';
 export const wageSettleNote = (phaseName: string) => `${WAGE_SETTLE_NOTE} ${phaseName}`;
 export const isWageSettleNote = (note: string | null | undefined) => !!note && note.startsWith(WAGE_SETTLE_NOTE);
 
+/** A contract's name is often its whole scope — a paragraph. Anywhere it sits beside other words it
+ *  is cut to a phrase, on a word boundary, and the full text is kept for the title attribute. */
+export function shortContract(label: string, max = 34): string {
+  const one = (label || 'the contract').replace(/\s+/g, ' ').trim();
+  if (one.length <= max) return one;
+  const cut = one.slice(0, max);
+  const sp = cut.lastIndexOf(' ');
+  return (sp > max * 0.5 ? cut.slice(0, sp) : cut).replace(/[,;&·-]$/, '').trim() + '…';
+}
+
+
 /** Commit a settlement: certify each step's amount to its phase (governed), then stamp the attendance
  *  rows that the APPROVED certifications cover so they no longer mint a day-wage credit.
  *
@@ -565,7 +576,7 @@ export async function commitCrewSettlement(p: {
     let readingValue: number, computedAmount: number;
     if (ph.kind === 'lump') {
       const cum = ph.certified + st.applied;                 // lump: the cert asserts the CUMULATIVE ₹ (latest wins)
-      readingValue = ph.value ? Math.round(cum / ph.value * 100) : 100;
+      readingValue = ph.value ? Math.round(cum / ph.value * 10000) / 100 : 100;   // a day's wage is often a fraction of a percent — don't round it to nothing
       computedAmount = Math.round(cum);
     } else {
       readingValue = ph.rate ? st.applied / ph.rate : 0;     // measured: the INCREMENTAL qty (Σ approved = total)

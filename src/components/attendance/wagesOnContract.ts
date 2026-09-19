@@ -14,7 +14,8 @@
 //
 // The copy lives here so the desktop dialog and the phone's sheet say the same words.
 import { supabase } from '../../lib/supabase';
-import { loadWorkOrdersForProject, putCrewOnContract } from '../../lib/attendanceApi';
+import { loadWorkOrdersForProject, putCrewOnContract, wagesSetAgainstContract, shortContract } from '../../lib/attendanceApi';
+export { shortContract } from '../../lib/attendanceApi';
 
 export interface WageContract {
   woId: string;
@@ -72,20 +73,38 @@ export async function setWagesAgainstContract(p: {
   });
 }
 
+/** Where a crew's wages stand against its contract right now — for the line that has to make the
+ *  subtraction plain: what has come off it, and what is left. */
+export interface WagesStanding { label: string; full: string; setAgainst: number; left: number; value: number }
+export async function wagesContractStanding(projectId: string, stakeholderId: string | null, woId: string | null): Promise<WagesStanding | null> {
+  if (!woId) return null;
+  const [contracts, wages] = await Promise.all([
+    loadWageContracts(projectId, stakeholderId).catch(() => [] as WageContract[]),
+    wagesSetAgainstContract(woId).catch(() => ({ byMilestone: {}, total: 0 })),
+  ]);
+  const c = contracts.find((x) => x.woId === woId);
+  if (!c) return null;
+  return { label: shortContract(c.label), full: c.label, setAgainst: wages.total, left: c.left, value: c.value };
+}
+
 // ── the words, one copy, both surfaces ───────────────────────────────────────────────────────────
 export const WAGES_ASK = {
   title: 'How should these day wages be counted?',
   sub: (name: string) => `${name} already has a contract on this site.`,
   offLabel: 'Take them off the contract',
   offDesc: (c: WageContract) =>
-    `Every day marked comes off ${c.label} — ${inr(c.left)} left on it today. Their account shows the wages set against the contract, never a second amount owed.`,
+    `Every day marked comes off it — ${inr(c.left)} left to certify today. Their account shows the wages set against the contract, never a second amount owed.`,
+  offMeta: (c: WageContract) => shortContract(c.label, 32),
   keepLabel: 'Keep them separate',
   keepDesc: 'Day wages are owed as wages. The contract stays whole and is paid on its own, as its stages are certified.',
   which: 'Which contract do they come off?',
-  doneOff: (name: string, label: string) => `${name}'s wages now come off ${label}`,
+  doneOff: (name: string, label: string) => `${name}'s wages now come off ${shortContract(label, 28)}`,
   doneKeep: (name: string) => `${name} is on day wages`,
+  /** The muster row's mark. Short on purpose — the row is a glance; the sheet carries the figures. */
+  chip: 'off contract',
+  chipTitle: (label: string) => `These day wages come off the contract: ${label}`,
+  /** The line inside the worker's sheet that makes the subtraction plain. */
+  standingHead: 'These day wages come off the contract',
+  standingSet: (n: number) => `${inr(n)} taken off so far`,
+  standingLeft: (n: number) => `${inr(n)} left on it`,
 } as const;
-
-/** How a row reads once the wages come off a contract — used on the muster and in the toast. */
-export const wagesAgainstLabel = (stage: string | null | undefined) =>
-  stage ? `wages · set against ${stage}` : 'wages · set against the contract';

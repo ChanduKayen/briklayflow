@@ -8,7 +8,7 @@
 import { supabase } from './supabase';
 import { billDateOf, BILL_DATE_COLUMNS } from './partyLedger';
 import { removeCredit } from './ledgerWrite';
-import { isWageSettleNote, WAGE_SETTLE_NOTE } from './attendanceApi';
+import { isWageSettleNote, WAGE_SETTLE_NOTE, shortContract } from './attendanceApi';
 
 export type EntryKind = 'payment' | 'certified' | 'wage' | 'bill' | 'adjustment' | 'opening' | 'start' | 'consolidated';
 export interface LedgerEntry {
@@ -244,7 +244,7 @@ export async function loadPartyLedger(stakeholderId: string): Promise<PartyLedge
       entries.push({
         id: `cert-${wc.id}`, date: wc.reading_date, kind: 'certified',
         particulars: fromWages ? 'Wages, set against the contract' : 'Contract certified work',
-        detail: fromWages ? (String(wc.note).slice(WAGE_SETTLE_NOTE.length + 1) || undefined) : undefined,
+        detail: fromWages ? (shortContract(String(wc.note).slice(WAGE_SETTLE_NOTE.length + 1), 38) || undefined) : undefined,
         projectId: pid, projectName: pid ? (projName[pid] || pid) : null,
         contractId: wc.wo_id ?? null, paid: 0, cert: amt,
       });

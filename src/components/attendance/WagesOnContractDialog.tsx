@@ -6,7 +6,7 @@
 // contract they come off. Nothing is certified from here; the fold happens day by day as attendance
 // is marked.
 import { useState } from 'react';
-import { WAGES_ASK, setWagesAgainstContract, type WageContract } from './wagesOnContract';
+import { WAGES_ASK, setWagesAgainstContract, shortContract, type WageContract } from './wagesOnContract';
 
 export type WagesAskCtx = {
   orgId: string; projectId: string; stakeholderId: string | null;
@@ -50,6 +50,9 @@ export function WagesOnContractDialog({ ctx, contracts, onClose, onDone, onError
             <div>
               <div className="l">{WAGES_ASK.offLabel}</div>
               <div className="s">{picked ? WAGES_ASK.offDesc(picked) : ''}</div>
+              {picked && contracts.length === 1 && (
+                <div className="conname" title={picked.label}>{WAGES_ASK.offMeta(picked)}</div>
+              )}
             </div>
           </label>
           <label className={`opt${choice === 'keep' ? ' on' : ''}`}>
@@ -66,7 +69,7 @@ export function WagesOnContractDialog({ ctx, contracts, onClose, onDone, onError
               {contracts.map((c) => (
                 <label className={`opt${woId === c.woId ? ' on' : ''}`} key={c.woId}>
                   <input type="radio" name="wages-wo" checked={woId === c.woId} onChange={() => setWoId(c.woId)} />
-                  <div><div className="l">{c.label}</div><div className="s">{INR(c.left)} still to certify</div></div>
+                  <div className="grow"><div className="l clip" title={c.label}>{shortContract(c.label, 46)}</div><div className="s">{INR(c.left)} still to certify</div></div>
                   {c.value ? <span className="m">{INR(c.value)}</span> : null}
                 </label>
               ))}
@@ -105,6 +108,12 @@ const WDLG_CSS = `
 .wdlg .opt input{margin-top:3px;accent-color:#C4552D}
 .wdlg .opt .l{font-weight:500}
 .wdlg .opt .s{color:#6E5F51;font-size:13px;line-height:1.5;margin-top:2px}
+.wdlg .opt .grow{min-width:0;flex:1}
+.wdlg .opt .l.clip{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* a contract's name is often its whole scope — it gets its own clamped line, never a clause */
+.wdlg .conname{margin-top:8px;padding:5px 8px;border-radius:6px;background:#FBEEE7;color:#A8431F;
+  font-family:'DM Mono',ui-monospace,monospace;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wdlg .opt.on .conname{background:#F6E2D8}
 .wdlg .opt .m{margin-left:auto;font-family:'DM Mono',monospace;color:#6E5F51;white-space:nowrap;font-size:13px}
 .wdlg .foot{display:flex;justify-content:flex-end;align-items:center;margin-top:20px;gap:12px}
 .wdlg .foot .acts{display:flex;gap:8px}

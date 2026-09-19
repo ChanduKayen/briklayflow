@@ -22,7 +22,7 @@ import { createParty } from '../day-book/fileEntry';
 import { CertifyDialog, type CertifyCrewCtx } from './CertifyDialog';
 import { PutOnContractDialog, type PocCtx } from './PutOnContractDialog';
 import { WagesOnContractDialog, type WagesAskCtx } from './WagesOnContractDialog';
-import { loadWageContracts, wagesAgainstLabel, type WageContract } from './wagesOnContract';
+import { loadWageContracts, shortContract, WAGES_ASK, type WageContract } from './wagesOnContract';
 
 const inr = (n: number) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');
 const fmtQ = (n: number) => (+n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 });
@@ -43,6 +43,9 @@ type PersistSubject =
   | { type: 'crew_category'; category_id: string }
   | { type: 'direct'; direct_worker_id: string };
 type WorkerRow = { id: string; siteId: string; name: string; trade: string; lines: Line[]; contractWages: boolean; crew?: CrewRow; direct?: SiteRow['direct'][number] };
+/** The contract phase a wages row's days come off — its whole scope for the title, a phrase for the
+ *  chip. `crew.d` is the crew's own trade, never the contract, so it is deliberately not used here. */
+const wagesContractName = (crew: CrewRow | undefined) => crew?.stages[0]?.n || crew?.woId || 'the contract';
 type ContractRow = { id: string; siteId: string; crew: CrewRow; si: number; ci: number };
 
 export default function AttendanceSheet({ session }: { session: Session }) {
@@ -179,8 +182,7 @@ export default function AttendanceSheet({ session }: { session: Session }) {
         return;
       }
       const wages = crew.basis === 'contract' && crew.accrualBasis === 'day';
-      const target = crew.stages[0];
-      const trade = wages && target ? `${crew.trade || crew.d || 'Labour'} · ${wagesAgainstLabel(target.n)}` : (crew.trade || crew.d || 'Labour');
+      const trade = crew.trade || crew.d || 'Labour';
       workers.push({
         id: `c${si}.${ci}`, siteId: site.site, name: crew.n, trade,
         contractWages: wages, crew,
@@ -235,7 +237,9 @@ export default function AttendanceSheet({ session }: { session: Session }) {
       workers.forEach(r => {
         WROWS.current.set(r.id, r);
         const days = rowDays(r), wage = rowWage(r);
-        html += `<tr class="worker" data-row="${r.id}"><td class="who"><span class="n">${escapeHtml(r.name)}</span><span class="t">${escapeHtml(r.trade)}</span></td>`;
+        const wtag = r.contractWages
+          ? `<span class="wtag" title="${escapeHtml(WAGES_ASK.chipTitle(wagesContractName(r.crew)))}">${escapeHtml(WAGES_ASK.chip)}</span>` : '';
+        html += `<tr class="worker" data-row="${r.id}"><td class="who"><span class="n">${escapeHtml(r.name)}</span><span class="t">${escapeHtml(r.trade)}</span>${wtag}</td>`;
         for (let i = 0; i < 7; i++) {
           const isFuture = i > TODAY || i === 6;
           const val = dayVal(r, i);
@@ -253,7 +257,10 @@ export default function AttendanceSheet({ session }: { session: Session }) {
           const editable = !isFuture && !locked;
           html += `<td class="day ${i === TODAY ? 'today' : ''} ${isFuture ? 'future' : ''}"><div class="${cls}" ${editable ? `tabindex="0" data-w="${r.id}" data-i="${i}"` : ''} title="${title}">${inner}</div></td>`;
         }
-        html += `<td class="tot days ${days ? '' : 'zero'}">${days ? fmtQ(days) : '—'}</td><td class="tot ${wage ? '' : 'zero'}">${wage ? inr(wage) : '—'}</td><td class="menu"><button data-menu="${r.id}" aria-label="Row menu">⋯</button></td></tr>`;
+        const wageCell = r.contractWages
+          ? `<span class="amt">${wage ? inr(wage) : '—'}</span><span class="of" title="${escapeHtml(wagesContractName(r.crew))}">off ${escapeHtml(shortContract(wagesContractName(r.crew), 22))}</span>`
+          : (wage ? inr(wage) : '—');
+        html += `<td class="tot days ${days ? '' : 'zero'}">${days ? fmtQ(days) : '—'}</td><td class="tot ${wage ? '' : 'zero'}">${wageCell}</td><td class="menu"><button data-menu="${r.id}" aria-label="Row menu">⋯</button></td></tr>`;
       });
 
       contracts.forEach(c => {
@@ -468,10 +475,15 @@ export default function AttendanceSheet({ session }: { session: Session }) {
 
   function openWorkerMenu(r: WorkerRow, btn: HTMLElement) {
     const el = rowmenu();
-    el.innerHTML = `<button data-rates>Rates for ${escapeHtml((r.trade.split(' · ')[0] || r.trade).toLowerCase())}</button><button data-wa>Message on WhatsApp</button><hr><button data-ctr>Put on a contract…</button><hr><button class="danger" data-rm>Remove from this week</button>`;
+    el.innerHTML = `<button data-rates>Rates for ${escapeHtml((r.trade.split(' · ')[0] || r.trade).toLowerCase())}</button><button data-wa>Message on WhatsApp</button><hr>`
+      + (r.contractWages
+        ? `<div class="note" title="${escapeHtml(wagesContractName(r.crew))}">${escapeHtml(WAGES_ASK.standingHead)}<b>${escapeHtml(shortContract(wagesContractName(r.crew), 30))}</b></div>`
+        : `<button data-ctr>Put on a contract…</button>`)
+      + `<hr><button class="danger" data-rm>Remove from this week</button>`;
     (el.querySelector('[data-rates]') as HTMLElement).onclick = () => { closeAll(); setRcOpen(true); };
     (el.querySelector('[data-wa]') as HTMLElement).onclick = () => { closeAll(); toast('Message on WhatsApp'); };
-    (el.querySelector('[data-ctr]') as HTMLElement).onclick = () => { closeAll(); openPutOnContract(r); };
+    const ctr = el.querySelector('[data-ctr]') as HTMLElement | null;
+    if (ctr) ctr.onclick = () => { closeAll(); openPutOnContract(r); };
     (el.querySelector('[data-rm]') as HTMLElement).onclick = async () => {
       closeAll();
       const days = rowDays(r);
@@ -877,6 +889,17 @@ const ATDX_CSS = `
 .atdx td.who{padding-left:22px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .atdx td.who .n{font-weight:500;letter-spacing:-.005em}
 .atdx td.who .t,.atdx td.who .tag{color:var(--mute);margin-left:9px;font-size:13px}
+/* a crew whose day wages come off a contract wears a short mark — the contract's own scope, often a
+   paragraph, stays in the title and in the figures the contract page carries */
+.atdx td.who .wtag{display:inline-block;margin-left:9px;padding:2px 6px;border-radius:4px;vertical-align:1px;
+  font:500 10px "DM Mono",ui-monospace,monospace;letter-spacing:.07em;text-transform:uppercase;
+  color:var(--terra-ink);background:var(--terra-soft);cursor:default}
+.atdx tr.worker td.tot .amt{display:block}
+.atdx tr.worker td.tot .of{display:block;font-size:11px;color:var(--mute);margin-top:1px;
+  max-width:130px;margin-left:auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.atdx .rowmenu .note{padding:8px 12px;color:var(--mute);font-size:12px;line-height:1.45;max-width:230px}
+.atdx .rowmenu .note b{display:block;color:var(--ink);font-weight:500;font-size:12.5px;margin-top:2px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .atdx td.day{text-align:center;padding:6px 4px}
 .atdx td.day .cell{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;height:38px;border-radius:var(--r-s);
   font-family:"DM Mono",monospace;font-size:15px;color:var(--ink);cursor:pointer;user-select:none;outline:0;

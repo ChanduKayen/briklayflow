@@ -87,6 +87,20 @@ export const ATMX_CSS = `
 .atmx .pick.tall{align-items:flex-start; padding:14px 2px}
 .atmx .pick.tall .pm span{display:block; line-height:1.5; margin-top:3px}
 .atmx .pick.tall .prate{margin-top:2px}
+/* the two answers wear what they do: a minus takes the wage off the contract, a rupee owes it apart */
+.atmx .pick.tall .wav{font-size:17px; line-height:1}
+.atmx .pick.tall .wav.minus{color:var(--clay); background:var(--clay-soft); border-color:var(--clay-soft)}
+/* a contract's name is often its whole scope — it gets its own clamped line, never a clause */
+.atmx .pick.tall .conname{display:block; margin-top:6px; font-family:var(--mono); font-size:11px; color:var(--clay);
+  background:var(--clay-soft); border-radius:5px; padding:4px 7px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.atmx .pick .pm b{white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+
+/* inside a worker's sheet: where the wages go, and what is left of the contract */
+.atmx .wcon{margin:10px 0 2px; padding:10px 12px; border-radius:10px; background:var(--clay-soft)}
+.atmx .wcon .t{font-family:var(--mono); font-size:9.5px; letter-spacing:.12em; text-transform:uppercase; color:var(--clay)}
+.atmx .wcon .n{font-size:13px; font-weight:600; margin-top:3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.atmx .wcon .m{display:flex; justify-content:space-between; gap:10px; margin-top:5px;
+  font-family:var(--mono); font-size:11.5px; color:var(--walnut)}
 .atmx .pick.newrow{color:var(--clay); font-weight:700; border-bottom:0}
 .atmx .pick.newrow .wav{color:var(--clay); background:var(--clay-soft); border-color:var(--clay-soft); font-family:var(--sans)}
 .atmx .picklist{max-height:290px; overflow-y:auto; margin-top:4px}
@@ -134,6 +148,12 @@ export const ATMX_CSS = `
 .atmx .wmid{flex:1; min-width:0}
 .atmx .wmid b{display:block; font-size:14px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
 .atmx .wmid .sub{font-size:11px; color:var(--soft)}
+/* the row is a glance: its trade stays on one line however long the crew's name runs, and a crew
+   whose wages come off a contract wears a short mark instead of the contract's whole scope */
+.atmx .wmid .subline{display:flex; align-items:center; gap:6px; min-width:0}
+.atmx .wmid .subline .sub{flex:0 1 auto; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.atmx .ctag{flex:none; font-family:var(--mono); font-size:9px; letter-spacing:.08em; text-transform:uppercase;
+  color:var(--clay); background:var(--clay-soft); border-radius:4px; padding:2px 5px; line-height:1.4}
 .atmx .weekdots{display:flex; gap:3.5px; margin-top:5px}
 .atmx .wd{width:5px; height:5px; border-radius:50%; background:var(--rule)}
 .atmx .wd.on{background:var(--sage)}
@@ -164,7 +184,9 @@ export const ATMX_CSS = `
 /* fat invisible drag zone */
 .atmx .sh-head{display:flex; align-items:baseline; justify-content:space-between; margin-bottom:4px}
 .atmx .sh-head b{font-family:var(--serif); font-size:19px; font-weight:600}
-.atmx .sh-head span{font-family:var(--mono); font-size:11px; color:var(--soft)}
+.atmx .sh-head span{font-family:var(--mono); font-size:11px; color:var(--soft);
+  flex:none; max-width:42%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; padding-left:10px}
+.atmx .sh-head b{min-width:0}
 .atmx .sh-src{font-size:11.5px; color:var(--sage); font-weight:600; margin-bottom:10px}
 .atmx .srow{display:flex; align-items:center; gap:12px; padding:13px 0; border-bottom:1px solid var(--rule)}
 .atmx .srow:last-of-type{border-bottom:0}
