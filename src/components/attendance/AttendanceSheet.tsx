@@ -24,7 +24,7 @@ import { PutOnContractDialog, type PocCtx } from './PutOnContractDialog';
 import { WagesOnContractDialog, type WagesAskCtx } from './WagesOnContractDialog';
 import { loadWageContracts, shortContract, WAGES_ASK, type WageContract } from './wagesOnContract';
 import { musterLines } from './musterRows';
-import { tradeChoices, TRADE_ASK } from './tradeList';
+import { TRADE_ASK, OTHER_TRADE, tradeOptionsHTML, rateNote, cardTradeOf } from './tradeList';
 
 const inr = (n: number) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');
 const fmtQ = (n: number) => (+n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 });
@@ -65,7 +65,7 @@ export default function AttendanceSheet({ session }: { session: Session }) {
   const CROWS = useRef<Map<string, ContractRow>>(new Map());
   // `newName` is a name typed that nobody in Parties answers to yet: the trade is asked before the
   // party is minted, so it is never created without one.
-  const addState = useRef<{ site: string | null; picked: any | null; exp: boolean; newName: string | null }>({ site: null, picked: null, exp: false, newName: null });
+  const addState = useRef<{ site: string | null; picked: any | null; exp: boolean; newName: string | null; newTrade: string; newOther: string }>({ site: null, picked: null, exp: false, newName: null, newTrade: '', newOther: '' });
 
   const [monday, setMonday] = useState<Date>(() => mondayOf(new Date()));
   const [rcOpen, setRcOpen] = useState(false);
@@ -90,7 +90,9 @@ export default function AttendanceSheet({ session }: { session: Session }) {
     if (cat === 'Supervisor') return C.supervisor ?? 0;
     if (cat === 'Helper · male') return (trade ? C.trades[trade]?.hm : null) ?? C.unskilled.hm ?? 0;
     if (cat === 'Helper · female') return (trade ? C.trades[trade]?.hf : null) ?? C.unskilled.hf ?? 0;
-    return C.trades[cat]?.skilled ?? 700;
+    // A party is a "Tile Fitter"; the card prices a "Tiler". Look the alias up before giving up.
+    const alias = cardTradeOf(cat);
+    return C.trades[cat]?.skilled ?? (alias ? C.trades[alias]?.skilled : null) ?? 700;
   }, []);
   const mixFor = useCallback((trade: string | null): string[] => {
     if (!trade) return ['Helper · male', 'Helper · female'];
@@ -98,21 +100,7 @@ export default function AttendanceSheet({ session }: { session: Session }) {
     const femaleHelper = !t || t.hf != null;
     return [trade, 'Helper · male', ...(femaleHelper ? ['Helper · female'] : [])];
   }, []);
-  const TRADE_ALIASES: Record<string, string> = {
-    'painting worker': 'Painter', 'polish worker': 'Painter', 'wood polish worker': 'Painter', 'painter': 'Painter',
-    'tile fitter': 'Tiler', 'marble fixer': 'Tiler', 'granite fixer': 'Tiler', 'tiler': 'Tiler',
-    'shuttering carpenter': 'Carpenter', 'carpenter': 'Carpenter', 'modular kitchen installer': 'Carpenter', 'wardrobe installer': 'Carpenter',
-    'bar bender / reinforcement': 'Bar bender', 'bar bender': 'Bar bender',
-    'mason': 'Mason', 'stone mason': 'Mason', 'concrete worker': 'Mason',
-    'electrician': 'Electrician', 'plumber': 'Plumber',
-  };
-  const resolveTrade = useCallback((category: string | null): string | null => {
-    const c = (category || '').trim(); if (!c) return null;
-    const lc = c.toLowerCase();
-    if (/helper|unskilled|labour|labor|supervisor|guard|housekeep|cleaner|driver|operator|material handler|security/.test(lc)) return null;
-    return TRADE_ALIASES[lc] || c;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const resolveTrade = useCallback((category: string | null): string | null => cardTradeOf(category), []);
 
   // ── load a week + render ──────────────────────────────────────────────────────
   const load = useCallback(async () => {
@@ -286,13 +274,17 @@ export default function AttendanceSheet({ session }: { session: Session }) {
 
       // add-worker row
       if (A.site === site.site && A.newName) {
-        const { trades, roles } = tradeChoices(CARD.current);
-        const chip = (c: { label: string; rate: number | null }) =>
-          `<button type="button" class="tchip" data-trade="${escapeHtml(c.label)}">${escapeHtml(c.label)}${c.rate ? `<em>${inr(c.rate)}</em>` : ''}</button>`;
+        const T = A.newTrade;
+        const other = T === OTHER_TRADE;
+        const picked = other ? (A.newOther || '').trim() : T;
+        const resolved = picked ? resolveTrade(picked) : null;
         html += `<tr class="addrow"><td colspan="8"><div class="ask trade"><div class="askhd">${escapeHtml(TRADE_ASK.title(A.newName))} <span>· ${TRADE_ASK.sub}</span></div>
-          <div class="tgrid">${trades.map(chip).join('') || `<span class="tnone">${TRADE_ASK.none}</span>`}</div>
-          <div class="tgrid roles">${roles.map(chip).join('')}</div>
-          <div class="tother"><input id="tradeother" placeholder="${TRADE_ASK.otherPlaceholder}" autocomplete="off"><button type="button" data-tradeother>${TRADE_ASK.otherLabel}</button></div>
+          <div class="trow">
+            <select id="tradesel">${tradeOptionsHTML(T, escapeHtml)}</select>
+            ${other ? `<input id="tradeother" placeholder="${TRADE_ASK.otherPlaceholder}" autocomplete="off" value="${escapeHtml(A.newOther || '')}">` : ''}
+            <span class="trate">${escapeHtml(picked ? rateNote(picked, resolved, resolved ? rateFor(resolved, resolved) : 0, !!resolved && !!CARD.current?.trades[resolved]) : '')}</span>
+            <button type="button" class="tgo" data-tradego ${picked ? '' : 'disabled'}>${escapeHtml(picked ? TRADE_ASK.go(A.newName, picked) : TRADE_ASK.waiting)}</button>
+          </div>
           <button class="cancel" data-addcancel>cancel</button></div></td><td class="tot days sum ${sd ? '' : 'zero'}">${sd ? fmtQ(sd) : '—'}</td><td class="tot sum ${sm ? '' : 'zero'}">${sm ? inr(sm) : '—'}</td><td class="menu"></td></tr>`;
       } else if (A.site === site.site && A.picked) {
         const p = A.picked;
@@ -371,8 +363,8 @@ export default function AttendanceSheet({ session }: { session: Session }) {
   function collapseAdd() {
     const A = addState.current;
     const m = q('.morph.exp');
-    if (m && !A.picked) { m.classList.remove('exp'); m.querySelector('.picker')?.remove(); setTimeout(() => { A.site = null; A.picked = null; A.newName = null; A.exp = false; render(); }, 260); }
-    else { A.site = null; A.picked = null; A.newName = null; A.exp = false; render(); }
+    if (m && !A.picked) { m.classList.remove('exp'); m.querySelector('.picker')?.remove(); setTimeout(() => { A.site = null; A.picked = null; A.newName = null; A.newTrade = ''; A.newOther = ''; A.exp = false; render(); }, 260); }
+    else { A.site = null; A.picked = null; A.newName = null; A.newTrade = ''; A.newOther = ''; A.exp = false; render(); }
   }
 
   // ── persistence ──────────────────────────────────────────────────────────────
@@ -593,6 +585,19 @@ export default function AttendanceSheet({ session }: { session: Session }) {
       (c.crew as any)._uiStage = +(sel as HTMLSelectElement).value; render();
     });
     grid.querySelectorAll('[data-stsel]').forEach(sel => (sel as HTMLElement).onclick = (e) => e.stopPropagation());
+    const tsel = grid.querySelector('#tradesel') as HTMLSelectElement | null;
+    if (tsel) {
+      tsel.onclick = (e) => e.stopPropagation();
+      tsel.onchange = () => { const A = addState.current; A.newTrade = tsel.value; A.newOther = ''; render(); (q('#tradeother') as HTMLInputElement | null)?.focus(); };
+    }
+    const toth = grid.querySelector('#tradeother') as HTMLInputElement | null;
+    if (toth) {
+      toth.onclick = (e) => e.stopPropagation();
+      // The row is redrawn on every keystroke, so the caret is put back where it was.
+      toth.oninput = () => { const A = addState.current; A.newOther = toth.value; const at = toth.selectionStart; render();
+        const again = q('#tradeother') as HTMLInputElement | null; if (again) { again.focus(); try { again.setSelectionRange(at, at); } catch { /* not every field carries a caret */ } } };
+      toth.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); void createNewParty(addState.current.newOther); } };
+    }
   }
 
   // A single document click handles the rest (delegation), like the artifact.
@@ -601,13 +606,16 @@ export default function AttendanceSheet({ session }: { session: Session }) {
       const root = rootRef.current; if (!root) return;
       const t = e.target as HTMLElement;
       if (!root.contains(t) && !t.closest('.editor,.rowmenu')) { return; }
-      const pill = t.closest('[data-f]'); if (pill) { filterRef.current = (pill as HTMLElement).dataset.f!; addState.current = { site: null, picked: null, exp: false, newName: null }; render(); return; }
-      const add = t.closest('[data-add]'); if (add) { e.preventDefault(); const s = (add as HTMLElement).dataset.add!; const A = addState.current; if (A.site === s) return; A.site = s; A.picked = null; A.newName = null; A.exp = false; render(); return; }
+      const pill = t.closest('[data-f]'); if (pill) { filterRef.current = (pill as HTMLElement).dataset.f!; addState.current = { site: null, picked: null, exp: false, newName: null, newTrade: '', newOther: '' }; render(); return; }
+      const add = t.closest('[data-add]'); if (add) { e.preventDefault(); const s = (add as HTMLElement).dataset.add!; const A = addState.current; if (A.site === s) return; A.site = s; A.picked = null; A.newName = null; A.newTrade = ''; A.newOther = ''; A.exp = false; render(); return; }
       if (t.closest('[data-addcancel]')) { collapseAdd(); return; }
       const pick = t.closest('[data-pick]'); if (pick) { const id = (pick as HTMLElement).dataset.pick!; addState.current.picked = PARTIES.current.find(x => x.stakeholder_id === id) || null; render(); (q('.card[data-mode="wages"]'))?.focus(); return; }
       if (t.closest('[data-new]')) { askTrade(); return; }
-      const tc = t.closest('[data-trade]'); if (tc) { void createNewParty((tc as HTMLElement).dataset.trade!); return; }
-      if (t.closest('[data-tradeother]')) { void createNewParty((q('#tradeother') as HTMLInputElement | null)?.value || ''); return; }
+      if (t.closest('[data-tradego]')) {
+        const A2 = addState.current;
+        void createNewParty(A2.newTrade === OTHER_TRADE ? A2.newOther : A2.newTrade);
+        return;
+      }
       const md = t.closest('[data-mode]'); if (md) { void chooseMode((md as HTMLElement).dataset.mode as 'wages' | 'contract'); return; }
       const cell = t.closest('.cell[data-w]'); if (cell) { e.stopPropagation(); closeAll(); const r = WROWS.current.get((cell as HTMLElement).dataset.w!); if (r) openEditor(r, +(cell as HTMLElement).dataset.i!, cell as HTMLElement); return; }
       const mc = t.closest('button[data-menu-c]'); if (mc) { e.stopPropagation(); closeAll(); const c = CROWS.current.get((mc as HTMLElement).dataset.menuC!); if (c) openContractMenu(c, mc as HTMLElement); return; }
@@ -646,7 +654,7 @@ export default function AttendanceSheet({ session }: { session: Session }) {
   function askTrade() {
     const A = addState.current; const inp = q('#addinput') as HTMLInputElement | null;
     const name = (inp?.value || '').trim(); if (!name) return;
-    A.newName = name; A.picked = null; render();
+    A.newName = name; A.newTrade = ''; A.newOther = ''; A.picked = null; render();
   }
 
   /** The trade is chosen — NOW the party exists, carrying it, and the add goes on as before. */
@@ -654,7 +662,7 @@ export default function AttendanceSheet({ session }: { session: Session }) {
     const A = addState.current; const name = A.newName; if (!name || !trade.trim()) return;
     try {
       const c = await createParty(name, 'Worker', orgId, trade.trim());
-      A.newName = null;
+      A.newName = null; A.newTrade = ''; A.newOther = '';
       A.picked = { stakeholder_id: c.id, name: c.name, category: trade.trim() };
       PARTIES.current.push({ stakeholder_id: c.id, name: c.name, category: trade.trim() });
       render();
@@ -667,7 +675,7 @@ export default function AttendanceSheet({ session }: { session: Session }) {
     const A = addState.current; const p = A.picked; const siteId = A.site; if (!p || !siteId) return;
     const trade = resolveTrade(p.category);
     const cats = mixFor(trade).map(c => ({ category: c, rate: rateFor(trade, c) }));
-    A.site = null; A.picked = null; A.newName = null; A.exp = false;
+    A.site = null; A.picked = null; A.newName = null; A.newTrade = ''; A.newOther = ''; A.exp = false;
     try {
       const newCrewId = await addCrew(orgId, siteId, p.name, trade, cats, p.stakeholder_id || undefined);
       await load();
@@ -929,17 +937,14 @@ const ATDX_CSS = `
 .atdx .askhd span{color:var(--mute)}
 /* the trade step: the org's own card, as chips, before anybody is created */
 .atdx .ask.trade{flex-direction:column;align-items:flex-start;gap:10px;padding:4px 0}
-.atdx .tgrid{display:flex;flex-wrap:wrap;gap:8px}
-.atdx .tchip{display:inline-flex;align-items:center;gap:8px;height:36px;padding:0 14px;border-radius:18px;border:1px solid var(--hair-2);
-  background:var(--paper);font-size:14px;font-weight:500;color:var(--ink);transition:border-color .15s,background .15s}
-.atdx .tchip:hover{background:var(--cream);border-color:var(--terra)}
-.atdx .tchip em{font-style:normal;font-family:'DM Mono',ui-monospace,monospace;font-size:12px;color:var(--mute)}
-.atdx .tgrid.roles .tchip{background:none;border-style:dashed}
-.atdx .tnone{font-size:13.5px;color:var(--mute)}
-.atdx .tother{display:flex;gap:8px;align-items:center}
-.atdx .tother input{height:36px;width:220px;padding:0 12px;border-radius:18px;border:1px solid var(--hair-2);background:var(--paper);font:inherit;font-size:14px;outline:0}
-.atdx .tother input:focus{border-color:var(--terra)}
-.atdx .tother button{height:36px;padding:0 14px;border-radius:18px;border:0;background:var(--terra);color:#fff;font-size:14px;font-weight:500}
+.atdx .trow{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.atdx .trow select,.atdx .trow input{height:36px;padding:0 12px;border-radius:18px;border:1px solid var(--hair-2);background:var(--paper);font:inherit;font-size:14px;color:var(--ink);outline:0}
+.atdx .trow select{min-width:230px}
+.atdx .trow input{width:210px}
+.atdx .trow select:focus,.atdx .trow input:focus{border-color:var(--terra)}
+.atdx .trate{font-family:'DM Mono',ui-monospace,monospace;font-size:12.5px;color:var(--mute)}
+.atdx .tgo{height:36px;padding:0 16px;border-radius:18px;border:0;background:var(--terra);color:#fff;font-size:14px;font-weight:500}
+.atdx .tgo:disabled{opacity:.4;pointer-events:none}
 .atdx .cards{display:flex;gap:10px;flex-wrap:wrap}
 .atdx .card{display:grid;grid-template-columns:auto 1fr;grid-template-rows:auto auto;column-gap:12px;text-align:left;width:300px;padding:12px 16px 13px 14px;border-radius:14px;background:var(--cream);box-shadow:inset 0 0 0 1px transparent;transition:background .15s var(--ease),box-shadow .15s var(--ease),transform .15s var(--ease)}
 .atdx .card .ci{grid-row:1/3;align-self:start;width:28px;height:28px;border-radius:8px;background:var(--paper);display:grid;place-items:center;font-family:"DM Mono",monospace;font-size:13px;color:var(--walnut);margin-top:1px;box-shadow:var(--shadow-1)}

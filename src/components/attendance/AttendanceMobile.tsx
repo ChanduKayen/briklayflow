@@ -34,7 +34,7 @@ import {
 } from '../../lib/attendanceApi';
 import { WAGES_ASK, loadWageContracts, setWagesAgainstContract, shortContract, wagesContractStanding, type WageContract } from './wagesOnContract';
 import { musterLines, type MusterLine } from './musterRows';
-import { tradeChoices, TRADE_ASK } from './tradeList';
+import { TRADE_ASK, OTHER_TRADE, tradeOptionsHTML, rateNote, cardTradeOf } from './tradeList';
 import { searchPayees } from '../../lib/payeeSearch';
 import { createParty } from '../day-book/fileEntry';
 import { CertificationWizard, type CertifyContext } from './CertificationWizard';
@@ -157,28 +157,16 @@ export default function AttendanceMobile({ session }: { session: Session }) {
     if (cat === 'Supervisor') return C.supervisor ?? 0;
     if (cat === 'Helper · male') return (trade ? C.trades[trade]?.hm : null) ?? C.unskilled.hm ?? 0;
     if (cat === 'Helper · female') return (trade ? C.trades[trade]?.hf : null) ?? C.unskilled.hf ?? 0;
-    return C.trades[cat]?.skilled ?? 700;
+    // A party is a "Tile Fitter"; the card prices a "Tiler". Look the alias up before giving up.
+    const alias = cardTradeOf(cat);
+    return C.trades[cat]?.skilled ?? (alias ? C.trades[alias]?.skilled : null) ?? 700;
   }, []);
   const mixFor = useCallback((trade: string | null): string[] => {
     if (!trade) return ['Helper · male', 'Helper · female'];
     const t = CARD.current?.trades[trade];
     return [trade, 'Helper · male', ...(!t || t.hf != null ? ['Helper · female'] : [])];
   }, []);
-  const TRADE_ALIASES: Record<string, string> = {
-    'painting worker': 'Painter', 'polish worker': 'Painter', 'wood polish worker': 'Painter', 'painter': 'Painter',
-    'tile fitter': 'Tiler', 'marble fixer': 'Tiler', 'granite fixer': 'Tiler', 'tiler': 'Tiler',
-    'shuttering carpenter': 'Carpenter', 'carpenter': 'Carpenter', 'modular kitchen installer': 'Carpenter', 'wardrobe installer': 'Carpenter',
-    'bar bender / reinforcement': 'Bar bender', 'bar bender': 'Bar bender',
-    'mason': 'Mason', 'stone mason': 'Mason', 'concrete worker': 'Mason',
-    'electrician': 'Electrician', 'plumber': 'Plumber',
-  };
-  const resolveTrade = useCallback((category: string | null): string | null => {
-    const c = (category || '').trim(); if (!c) return null;
-    const lc = c.toLowerCase();
-    if (/helper|unskilled|labour|labor|supervisor|guard|housekeep|cleaner|driver|operator|material handler|security/.test(lc)) return null;
-    return TRADE_ALIASES[lc] || c;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const resolveTrade = useCallback((category: string | null): string | null => cardTradeOf(category), []);
 
   const q = <T extends HTMLElement>(sel: string) => rootRef.current?.querySelector(sel) as T | null;
   const sheetEl = () => portalRef.current?.querySelector('#sheet') as HTMLElement;
@@ -504,42 +492,47 @@ export default function AttendanceMobile({ session }: { session: Session }) {
   function tradeSheet(si: number, name: string) {
     const sheet = sheetEl(); if (!sheet) return;
     const site = DATA.current[si];
-    const { trades, roles } = tradeChoices(CARD.current);
-    const chip = (c: { label: string; rate: number | null }) =>
-      `<button type="button" class="tchip" data-trade="${esc(c.label)}">${esc(c.label)}${c.rate ? `<em>${inr(c.rate)}</em>` : ''}</button>`;
     sheet.innerHTML = `<div class="grab"></div>
       <div class="sh-head"><b>${esc(TRADE_ASK.title(name))}</b><span>${esc(site.label.split(' ')[0])}</span></div>
       <div class="wk-week">${esc(TRADE_ASK.sub)}</div>
-      <div class="tgrid">${trades.map(chip).join('') || `<div class="siteempty">${esc(TRADE_ASK.none)}</div>`}</div>
-      <div class="f-lab">Not a trade</div>
-      <div class="tgrid roles">${roles.map(chip).join('')}</div>
-      <div class="f-lab">${esc(TRADE_ASK.otherLabel)}</div>
-      <input class="f-in" id="t-other" placeholder="${esc(TRADE_ASK.otherPlaceholder)}" autocomplete="off" autocapitalize="words">
-      <button class="sh-done" id="t-go" disabled>Pick what they do</button>`;
+      <select class="f-in f-sel" id="t-sel">${tradeOptionsHTML('', esc)}</select>
+      <input class="f-in" id="t-other" placeholder="${esc(TRADE_ASK.otherPlaceholder)}" autocomplete="off" autocapitalize="words" hidden>
+      <div class="t-rate" id="t-rate"></div>
+      <button class="sh-done" id="t-go" disabled>${esc(TRADE_ASK.waiting)}</button>`;
     showSheet();
 
+    const selEl = sheet.querySelector('#t-sel') as HTMLSelectElement;
+    const otherEl = sheet.querySelector('#t-other') as HTMLInputElement;
+    const rateEl = sheet.querySelector('#t-rate') as HTMLElement;
+    const goEl = sheet.querySelector('#t-go') as HTMLButtonElement;
     let busy = false;
-    const go = async (trade: string) => {
-      const t = trade.trim(); if (!t || busy) return;
-      busy = true;
+
+    /** What is actually being added: the picked trade, or the one typed under "Other". */
+    const chosen = () => (selEl.value === OTHER_TRADE ? otherEl.value.trim() : selEl.value);
+    const refresh = () => {
+      const isOther = selEl.value === OTHER_TRADE;
+      otherEl.hidden = !isOther;
+      const t = chosen();
+      const resolved = t ? resolveTrade(t) : null;
+      const known = !!resolved && !!CARD.current?.trades[resolved];
+      rateEl.textContent = t ? rateNote(t, resolved, resolved ? rateFor(resolved, resolved) : 0, known) : '';
+      goEl.disabled = !t;
+      goEl.textContent = t ? TRADE_ASK.go(name, t) : TRADE_ASK.waiting;
+    };
+    selEl.addEventListener('change', () => { hapt(4); refresh(); if (selEl.value === OTHER_TRADE) otherEl.focus(); });
+    otherEl.addEventListener('input', refresh);
+
+    goEl.addEventListener('click', async () => {
+      const t = chosen(); if (!t || busy) return;
+      busy = true; goEl.disabled = true;
       try {
         const c = await createParty(name, 'Worker', orgId, t);
         PARTIES.current = [...PARTIES.current, { stakeholder_id: c.id, name: c.name, category: t }];
         busy = false;
         hapt(8);
         engagementForm(si, { stakeholder_id: c.id, name: c.name, category: t });
-      } catch (e) { busy = false; fail(e); }
-    };
-    sheet.querySelectorAll('.tchip').forEach(b => b.addEventListener('click', () => { hapt(6); void go((b as HTMLElement).dataset.trade!); }));
-    const other = sheet.querySelector('#t-other') as HTMLInputElement;
-    const goBtn = sheet.querySelector('#t-go') as HTMLButtonElement;
-    other.addEventListener('input', () => {
-      const v = other.value.trim();
-      goBtn.disabled = !v;
-      goBtn.textContent = v ? `Add ${esc(name)} as ${v}` : 'Pick what they do';
+      } catch (e) { busy = false; goEl.disabled = false; fail(e); }
     });
-    goBtn.addEventListener('click', () => void go(other.value));
-    other.addEventListener('keydown', (e) => { if ((e as KeyboardEvent).key === 'Enter') void go(other.value); });
   }
 
   /* step 2 — the engagement: wage types for THIS site. The party's stakeholder category carries

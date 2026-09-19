@@ -95,3 +95,79 @@ suite('which line is the trade', () => {
     expect([isHelper('helper male'), isHelper('Helper - Female'), isHelper('Mason')]).toEqual([true, true, false]);
   });
 });
+
+// THE CARD'S NAME FOR WHAT THEY DO.
+//
+// The party list and the rate card speak different dialects. A party is created as a "Tile Fitter" or
+// a "Shuttering Carpenter" — the words the Parties drawer offers — while the card prices a "Tiler" and
+// a "Carpenter". This map is what lets the muster quote a rate at all, and it used to sit verbatim in
+// both attendance components while the card lookup ignored it entirely: a tiler was priced at the
+// ₹700 fallback instead of his own ₹950.
+//
+// A role that is not a trade maps to nothing on purpose. It has no skilled rate, and the muster
+// prices it from the unskilled side of the card instead.
+
+import { cardTradeOf, rateNote, tradeOptionsHTML, OTHER_TRADE } from '../../components/attendance/tradeList'
+
+suite('what the card calls this trade', () => {
+  test('the party list’s words map onto the card’s', () => {
+    expect(['Tile Fitter', 'Marble Fixer', 'Shuttering Carpenter', 'Stone Mason', 'Painting Worker', 'Bar Bender / Reinforcement']
+      .map((t) => cardTradeOf(t)))
+      .toEqual(['Tiler', 'Tiler', 'Carpenter', 'Mason', 'Painter', 'Bar bender']);
+  });
+
+  test('a trade the card already names is itself', () => {
+    expect([cardTradeOf('Mason'), cardTradeOf('Plumber')]).toEqual(['Mason', 'Plumber']);
+  });
+
+  test('a trade nobody has written down is taken as given', () => {
+    expect(cardTradeOf('Glazier')).toBe('Glazier');
+  });
+
+  test('what is not a trade maps to nothing, so it is priced as unskilled', () => {
+    expect(['Helper · male', 'Unskilled Labour', 'Site Supervisor', 'Security Guard', 'Driver', 'Crane / JCB Operator']
+      .map((t) => cardTradeOf(t))).toEqual([null, null, null, null, null, null]);
+  });
+
+  test('case and spacing do not change the answer', () => {
+    expect([cardTradeOf('  tile fitter '), cardTradeOf('TILE FITTER')]).toEqual(['Tiler', 'Tiler']);
+  });
+
+  test('nothing at all is nothing', () => {
+    expect([cardTradeOf(''), cardTradeOf(null), cardTradeOf(undefined)]).toEqual([null, null, null]);
+  });
+});
+
+suite('what the site is told the day is worth', () => {
+  test('a trade on the card, under its own name', () => {
+    expect(rateNote('Mason', 'Mason', 900, true)).toBe('₹900/day from your rate card');
+  });
+  test('a trade on the card, under another name, says which', () => {
+    expect(rateNote('Tile Fitter', 'Tiler', 950, true)).toBe('₹950/day · priced as Tiler');
+  });
+  test('a rate that was fallen back to is not called a rate the office set', () => {
+    expect(rateNote('Glazier', 'Glazier', 700, false)).toBe('₹700/day · not on your rate card yet');
+  });
+  test('and no rate at all says so plainly', () => {
+    expect(rateNote('Site Supervisor', null, 0, false)).toBe('no rate on your card yet — set one under Rate card');
+  });
+  test('nothing picked, nothing said', () => {
+    expect(rateNote('', null, 0, false)).toBe('');
+  });
+});
+
+suite('the dropdown the muster offers', () => {
+  const html = tradeOptionsHTML('', (s: string) => s);
+  test('it is the app’s own grouped list', () => {
+    expect(html.includes('<optgroup label="Civil & Structural">') && html.includes('<option value="Mason">')).toBe(true);
+  });
+  test('it opens on a prompt, not on a trade', () => {
+    expect(html.startsWith('<option value="">Select trade…</option>')).toBe(true);
+  });
+  test('and ends on "Other (specify)"', () => {
+    expect(html.trimEnd().endsWith(`<option value="${OTHER_TRADE}">${OTHER_TRADE}</option></optgroup>`)).toBe(true);
+  });
+  test('what was already picked comes back selected', () => {
+    expect(tradeOptionsHTML('Tile Fitter', (s: string) => s).includes('<option value="Tile Fitter" selected>')).toBe(true);
+  });
+});

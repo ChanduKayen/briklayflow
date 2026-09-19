@@ -1,49 +1,71 @@
 /**
- * The trades a new worker can be.
+ * The trade a new worker is created as.
  *
- * A party created from the muster used to be minted the moment the name was typed, with no trade on
- * it at all — and a party with no trade has no rate, so the sheet then offered helpers where a mason
- * should have been, and the weekly muster priced him at nothing. So the name is not enough: the trade
- * is asked first, from the org's OWN rate card, and only then is the party created carrying it.
+ * A party minted from the muster used to be written with no trade at all, and a party with no trade
+ * has no rate: the crew came out as a gang of two helpers with no tradesman in it, and the week
+ * priced a mason as a labourer. So the trade is asked first, and only then is anybody created.
  *
- * The card is the list. Whatever the office put on it — the seven it starts with, or a welder added
- * later — is what the site is offered, at the rate the card actually pays. Below the trades sit the
- * two roles that are not trades: a helper, and a supervisor. And because a site will always meet a
- * trade nobody has written down yet, a typed one is accepted and carried on the party as given.
+ * The list is THE list — src/lib/trades.ts, the same grouped one the Parties drawer offers when a
+ * party is created anywhere else in the app, ending in "Other (specify)". It is a dropdown, not a
+ * typed field, so the same mason is called the same thing everywhere and the aliases below can price
+ * him: resolveTrade() maps a party trade ("Tile Fitter", "Shuttering Carpenter") onto the rate card's
+ * own ("Tiler", "Carpenter").
  */
-import type { RateCard } from '../../lib/attendanceApi';
-import { HELPER_M, HELPER_F } from './musterRows';
+import { WORKER_TRADE_GROUPS, OTHER_TRADE } from '../../lib/trades';
 
-export interface TradeChoice {
-  label: string;
-  /** What the card pays for a day of it, or null when the card is silent. */
-  rate: number | null;
+export { WORKER_TRADE_GROUPS, OTHER_TRADE };
+
+/**
+ * The party list and the rate card speak different dialects: a party is a "Tile Fitter", the card
+ * prices a "Tiler". This maps one onto the other, and it is the ONLY copy — it used to sit, verbatim,
+ * in both attendance components, and the card lookup did not consult it at all, so a tiler was priced
+ * at the ₹700 fallback instead of his own ₹950.
+ *
+ * A role that is not a trade — a helper, a supervisor, a guard — maps to nothing: it has no skilled
+ * rate, and the muster prices it from the unskilled side of the card instead.
+ */
+const TRADE_ALIASES: Record<string, string> = {
+  'painting worker': 'Painter', 'polish worker': 'Painter', 'wood polish worker': 'Painter', 'painter': 'Painter',
+  'tile fitter': 'Tiler', 'marble fixer': 'Tiler', 'granite fixer': 'Tiler', 'tiler': 'Tiler',
+  'shuttering carpenter': 'Carpenter', 'carpenter': 'Carpenter', 'modular kitchen installer': 'Carpenter', 'wardrobe installer': 'Carpenter',
+  'bar bender / reinforcement': 'Bar bender', 'bar bender': 'Bar bender',
+  'mason': 'Mason', 'stone mason': 'Mason', 'concrete worker': 'Mason',
+  'electrician': 'Electrician', 'plumber': 'Plumber',
+};
+const NOT_A_TRADE = /helper|unskilled|labour|labor|supervisor|guard|housekeep|cleaner|driver|operator|material handler|security/;
+
+/** The card's name for what this party does, or null when what they do is not a trade. */
+export function cardTradeOf(category: string | null | undefined): string | null {
+  const c = (category || '').trim(); if (!c) return null;
+  const lc = c.toLowerCase();
+  if (NOT_A_TRADE.test(lc)) return null;
+  return TRADE_ALIASES[lc] || c;
 }
 
-export interface TradeChoices {
-  /** The skilled trades on the org's card, alphabetical. */
-  trades: TradeChoice[];
-  /** What is not a trade: the helpers, and a supervisor. */
-  roles: TradeChoice[];
-}
-
-export function tradeChoices(card: RateCard | null | undefined): TradeChoices {
-  const trades = Object.entries(card?.trades ?? {})
-    .map(([label, t]) => ({ label, rate: t.skilled }))
-    .sort((a, b) => a.label.localeCompare(b.label));
-  const roles: TradeChoice[] = [
-    { label: HELPER_M, rate: card?.unskilled.hm ?? null },
-    { label: HELPER_F, rate: card?.unskilled.hf ?? null },
-    { label: 'Supervisor', rate: card?.supervisor ?? null },
-  ];
-  return { trades, roles };
-}
-
-/** The question the picker asks, in both places, so it reads the same on a phone and a desk. */
+/** The question, asked in the same words on a phone and at a desk. */
 export const TRADE_ASK = {
   title: (name: string) => `What does ${name} do?`,
-  sub: 'From your rate card — it sets what a day of their work is worth.',
-  otherLabel: 'Another trade',
-  otherPlaceholder: 'Welder, fabricator, glazier…',
-  none: 'Your rate card is empty. Type what they do.',
+  sub: 'Their trade sets what a day of their work is worth.',
+  placeholder: 'Select trade…',
+  otherPlaceholder: 'Type the trade…',
+  go: (name: string, trade: string) => `Add ${name} as ${trade}`,
+  waiting: 'Pick what they do',
 } as const;
+
+/** What the card will pay for the trade just picked — shown so the site sees it before it commits.
+ *  `known` is whether the card actually carries that trade: a rate it fell back to is not a rate the
+ *  office set, and saying so is the difference between a quote and a guess. */
+export function rateNote(trade: string, resolved: string | null, rate: number, known: boolean): string {
+  if (!trade) return '';
+  if (!(rate > 0)) return 'no rate on your card yet — set one under Rate card';
+  const inr = '₹' + Math.round(rate).toLocaleString('en-IN');
+  if (!known) return `${inr}/day · not on your rate card yet`;
+  return resolved && resolved !== trade ? `${inr}/day · priced as ${resolved}` : `${inr}/day from your rate card`;
+}
+
+/** The dropdown's markup, built once so both surfaces offer the same options in the same order. */
+export function tradeOptionsHTML(selected: string, esc: (s: string) => string): string {
+  return `<option value="">${TRADE_ASK.placeholder}</option>` + WORKER_TRADE_GROUPS.map((g) =>
+    `<optgroup label="${esc(g.group)}">${g.trades.map((t) =>
+      `<option value="${esc(t)}"${t === selected ? ' selected' : ''}>${esc(t)}</option>`).join('')}</optgroup>`).join('');
+}

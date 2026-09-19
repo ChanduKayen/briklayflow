@@ -88,13 +88,11 @@ export const ATMX_CSS = `
 .atmx .pick.tall .pm span{display:block; line-height:1.5; margin-top:3px}
 .atmx .pick.tall .prate{margin-top:2px}
 /* a line the crew does not carry yet: offered, quiet, and real the moment it is marked */
-/* the trade step: the org's own card, as chips, before anybody is created */
-.atmx .tgrid{display:flex; flex-wrap:wrap; gap:8px; margin-top:4px}
-.atmx .tchip{display:inline-flex; align-items:center; gap:7px; height:40px; padding:0 15px; border-radius:20px;
-  border:1px solid var(--rule); background:var(--card); font-size:14.5px; font-weight:600; color:var(--ink)}
-.atmx .tchip:active{background:var(--bg); border-color:var(--clay)}
-.atmx .tchip em{font-style:normal; font-family:var(--mono); font-size:11.5px; font-weight:400; color:var(--soft)}
-.atmx .tgrid.roles .tchip{background:none; border-style:dashed; font-weight:500}
+/* the trade step: the app's own trade list, picked before anybody is created */
+.atmx .f-sel{appearance:none; -webkit-appearance:none; margin-top:8px; padding-right:38px;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238A7B6E' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg>");
+  background-repeat:no-repeat; background-position:right 14px center; background-size:16px}
+.atmx .t-rate{min-height:18px; margin:8px 2px 2px; font-family:var(--mono); font-size:12px; color:var(--soft)}
 .atmx .srow.offer .t{color:var(--soft)}
 .atmx .srow.offer .step b{color:var(--soft)}
 .atmx .srow.offer .step button[disabled]{opacity:.3}
