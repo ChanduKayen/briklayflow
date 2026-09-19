@@ -14,8 +14,8 @@ import {
   loadWeek, loadParties, mondayOf, weekDates, weekLabel,
   saveCell, saveRate, setCategoryRate, setDirectRate, setCrewBasis, addCrew,
   accruedDayWagesForCrew, accruedDayWagesForDirect, removeCrew, removeDirectWorker,
-  cardIsEmpty, seedRateCard, SUPERVISOR_KEY, autoSettleCrewWages,
-  type SiteRow, type RateCard, type Cell, type CrewRow, type StageRow,
+  cardIsEmpty, seedRateCard, SUPERVISOR_KEY, autoSettleCrewWages, addCategory,
+  type SiteRow, type RateCard, type Cell, type CrewRow, type CatRow, type StageRow,
 } from '../../lib/attendanceApi';
 import { searchPayees } from '../../lib/payeeSearch';
 import { createParty } from '../day-book/fileEntry';
@@ -23,6 +23,7 @@ import { CertifyDialog, type CertifyCrewCtx } from './CertifyDialog';
 import { PutOnContractDialog, type PocCtx } from './PutOnContractDialog';
 import { WagesOnContractDialog, type WagesAskCtx } from './WagesOnContractDialog';
 import { loadWageContracts, shortContract, WAGES_ASK, type WageContract } from './wagesOnContract';
+import { musterLines } from './musterRows';
 
 const inr = (n: number) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');
 const fmtQ = (n: number) => (+n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 });
@@ -439,25 +440,57 @@ export default function AttendanceSheet({ session }: { session: Session }) {
   }
   const focusCell = (rowId: string, i: number) => (q(`.cell[data-w="${rowId}"][data-i="${i}"]`))?.focus();
 
+  /** The lines the editor shows: the engagement's own, plus the two helpers every muster offers.
+   *  Only a crew can gain a line; a lone worker is one person and keeps the one row they were added as. */
+  function editorLines(r: WorkerRow) {
+    if (!r.crew) return r.lines.map(l => ({ label: l.label, rate: l.rate, own: l as Line | null }));
+    const trade = r.crew.trade || resolveTrade(r.lines[0]?.label ?? null);
+    return musterLines<Line>(trade, r.lines.map(l => ({ label: l.label, row: l })), (label) => {
+      const own = r.lines.find(l => l.label === label);
+      return own ? own.rate : rateFor(trade, label);
+    });
+  }
+
   function openEditor(r: WorkerRow, i: number, cellEl: HTMLElement, keep = false) {
     const el = editor();
     const dt = new Date(dates[i]);
     const pos = { t: el.style.top, l: el.style.left };
+    const lines = editorLines(r);
     el.innerHTML = `<div class="hd"><b>${escapeHtml(r.name)}</b><span>${DAYS[i]} ${dt.getDate()}</span></div>` +
-      r.lines.map((l, j) => `<div class="cat"><span><span class="k">${escapeHtml(l.label)}</span><span class="r">${inr(l.rate)}</span></span><span class="step"><button data-j="${j}" data-d="-1">−</button><input data-j="${j}" value="${lineVal(l, i)}" inputmode="decimal"><button data-j="${j}" data-d="1">+</button></span></div>`).join('') +
+      lines.map((l, j) => `<div class="cat${l.own ? '' : ' offer'}"><span><span class="k">${escapeHtml(l.label)}</span><span class="r">${inr(l.rate)}${l.own ? '' : ' · not on this crew yet'}</span></span><span class="step"><button data-j="${j}" data-d="-1">−</button><input data-j="${j}" value="${l.own ? lineVal(l.own, i) : 0}" inputmode="decimal"><button data-j="${j}" data-d="1">+</button></span></div>`).join('') +
       `<div class="ft"><span>${dayVal(r, i) ? `<span class="amt">${inr(dayWage(r, i))}</span> for the day` : 'nobody yet'}</span><button data-clear>clear</button></div><div class="hint">Saves as you go · Esc to close</div>`;
     el.classList.add('open');
     if (keep) { el.style.top = pos.t; el.style.left = pos.l; } else place(el, cellEl);
-    const setLine = (j: number, v: number) => {
-      const l = r.lines[j]; v = Math.max(0, v);
+    // A line the crew does not carry yet is made the moment somebody marks it — never for a zero.
+    const setLine = async (j: number, v: number) => {
+      const L = lines[j]; if (!L) return;
+      v = Math.max(0, v);
+      if (!L.own) {
+        if (v <= 0 || !r.crew) return;
+        try {
+          const id = await addCategory(orgId, r.crew.crewId, L.label, L.rate);
+          // It joins the CREW, not just this popover — the grid is rebuilt from crew.cats, so a line
+          // that lived only here would vanish the moment anything re-rendered.
+          const cat: CatRow = { id, n: L.label, rate: L.rate, cells: dates.map(() => null) };
+          r.crew.cats.push(cat);
+          const line: Line = { label: cat.n, rate: cat.rate, cells: cat.cells, subject: { type: 'crew_category', category_id: cat.id } };
+          r.lines.push(line); L.own = line;
+          // The day is written either way — but a line the rate card cannot price would quietly owe
+          // nothing, so it says so rather than letting a ₹0 wage pass for a rate.
+          if (!(L.rate > 0)) toast(`${L.label} added — set their rate on the rate card`);
+        } catch (e) { fail(e); return; }
+      }
+      const l = L.own!;
       l.cells[i] = v > 0 ? { v, src: 'office', by: byName, at: 'just now' } : null;
       persistCell(l.subject, r.siteId, i, v, r);
     };
     const commitAll = () => {
-      [...el.querySelectorAll('input')].forEach((inp, j) => setLine(j, parseFloat((inp as HTMLInputElement).value) || 0));
-      render();
-      const c = q(`.cell[data-w="${r.id}"][data-i="${i}"]`);
-      if (c) openEditor(r, i, c as HTMLElement, true);
+      const vals = [...el.querySelectorAll('input')].map(inp => parseFloat((inp as HTMLInputElement).value) || 0);
+      void Promise.all(vals.map((v, j) => setLine(j, v))).then(() => {
+        render();
+        const c = q(`.cell[data-w="${r.id}"][data-i="${i}"]`);
+        if (c) openEditor(r, i, c as HTMLElement, true);
+      });
     };
     el.querySelectorAll('button[data-d]').forEach(b => (b as HTMLElement).onclick = (e) => {
       e.stopPropagation();
@@ -891,6 +924,7 @@ const ATDX_CSS = `
 .atdx td.who .t,.atdx td.who .tag{color:var(--mute);margin-left:9px;font-size:13px}
 /* a crew whose day wages come off a contract wears a short mark — the contract's own scope, often a
    paragraph, stays in the title and in the figures the contract page carries */
+.atdx .editor .cat.offer .k,.atdx .editor .cat.offer .r{color:var(--mute)}
 .atdx td.who .wtag{display:inline-block;margin-left:9px;padding:2px 6px;border-radius:4px;vertical-align:1px;
   font:500 10px "DM Mono",ui-monospace,monospace;letter-spacing:.07em;text-transform:uppercase;
   color:var(--terra-ink);background:var(--terra-soft);cursor:default}

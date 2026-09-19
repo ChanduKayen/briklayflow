@@ -16,6 +16,7 @@ import './importSheet.test'
 import './importCommit.test'
 import './partyRoutes.test'
 import './wageFold.test'
+import './musterRows.test'
 import { runAll } from './harness'
 
 await runAll()

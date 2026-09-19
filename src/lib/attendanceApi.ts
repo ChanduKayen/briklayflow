@@ -291,9 +291,11 @@ export async function setCrewBasis(crewId: string, basis: 'contract' | 'labour')
   const { error } = await supabase.from('labour_crews').update(patch).eq('crew_id', crewId);
   if (error) throw error;
 }
-export async function addCategory(orgId: string, crewId: string, category: string, rate: number): Promise<void> {
-  const { error } = await supabase.from('labour_crew_categories').insert({ org_id: orgId, crew_id: crewId, category, rate });
+export async function addCategory(orgId: string, crewId: string, category: string, rate: number): Promise<string> {
+  const { data, error } = await supabase.from('labour_crew_categories')
+    .insert({ org_id: orgId, crew_id: crewId, category, rate }).select('id').single();
   if (error) throw error;
+  return data!.id as string;
 }
 export async function addDirectWorker(orgId: string, projectId: string, name: string, category: string, rate: number, stakeholderId?: string): Promise<string> {
   // A single worker added here is a day-wage engagement (confirmed basis).

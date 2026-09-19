@@ -87,6 +87,10 @@ export const ATMX_CSS = `
 .atmx .pick.tall{align-items:flex-start; padding:14px 2px}
 .atmx .pick.tall .pm span{display:block; line-height:1.5; margin-top:3px}
 .atmx .pick.tall .prate{margin-top:2px}
+/* a line the crew does not carry yet: offered, quiet, and real the moment it is marked */
+.atmx .srow.offer .t{color:var(--soft)}
+.atmx .srow.offer .step b{color:var(--soft)}
+.atmx .srow.offer .step button[disabled]{opacity:.3}
 /* the two answers wear what they do: a minus takes the wage off the contract, a rupee owes it apart */
 .atmx .pick.tall .wav{font-size:17px; line-height:1}
 .atmx .pick.tall .wav.minus{color:var(--clay); background:var(--clay-soft); border-color:var(--clay-soft)}

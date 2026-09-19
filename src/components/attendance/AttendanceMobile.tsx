@@ -30,9 +30,10 @@ import {
   loadWorkOrdersForProject, linkCrewToWorkOrder, promoteDirectToCrew,
   removeCrew, removeDirectWorker, removeCategory,
   cardIsEmpty, seedRateCard, autoSettleCrewWages,
-  type SiteRow, type CrewRow, type DirectRow, type RateCard, type Cell, type StageRow,
+  type SiteRow, type CrewRow, type CatRow, type DirectRow, type RateCard, type Cell, type StageRow,
 } from '../../lib/attendanceApi';
 import { WAGES_ASK, loadWageContracts, setWagesAgainstContract, shortContract, wagesContractStanding, type WageContract } from './wagesOnContract';
+import { musterLines, type MusterLine } from './musterRows';
 import { searchPayees } from '../../lib/payeeSearch';
 import { createParty } from '../day-book/fileEntry';
 import { CertificationWizard, type CertifyContext } from './CertificationWizard';
@@ -658,9 +659,21 @@ export default function AttendanceMobile({ session }: { session: Session }) {
   }
 
   /* ---------- worker action sheet ---------- */
+  /** The lines this worker's muster shows — its own, plus the two helpers every muster offers.
+   *  Only a crew can gain a line; a lone worker is one person and keeps the one row they were added as. */
+  function rowsFor(w: MWorker): MusterLine<WType>[] {
+    if (!w.crew) return w.types.map(t => ({ label: t.t, rate: t.rate, own: t }));
+    const trade = w.crew.trade || resolveTrade(w.types.find(t => t.t)?.t ?? null);
+    return musterLines<WType>(trade, w.types.map(t => ({ label: t.t, row: t })), (label) => {
+      const own = w.types.find(t => t.t === label);
+      return own ? own.rate : rateFor(trade, label);
+    });
+  }
+
   function openWorkerSheet(w: MWorker) {
     const sheet = sheetEl(); if (!sheet) return;
     const sel = selRef.current;
+    const rows = rowsFor(w);
     const dt = new Date(dates[sel]);
     const dayLbl = `${dt.toLocaleString('en-US', { weekday: 'short' })} ${dt.getDate()}`;
     const waT = waAt(w, sel);
@@ -668,9 +681,9 @@ export default function AttendanceMobile({ session }: { session: Session }) {
       <div class="sh-head"><b>${esc(w.name)}</b><span>${dayLbl}</span></div>
       ${waT !== null && countOf(w, sel) ? `<div class="sh-src">● filed from WhatsApp${waT ? ` at ${esc(waT)}` : ''}</div>` : ''}
       ${w.wagesOff ? `<div class="wcon" id="s-con"><div class="t">${esc(WAGES_ASK.standingHead)}</div><div class="n">${esc(shortContract(w.crew?.stages[0]?.n || 'the contract', 44))}</div></div>` : ''}
-      ${w.types.map((t, ti) => `<div class="srow">
-        <div class="t">${esc(t.t)}<small>${inr(t.rate)}/day</small></div>
-        <div class="step"><button data-ti="${ti}" data-d="-1">−</button><b id="s-${ti}">${num(val(t.cells[sel]))}</b><button data-ti="${ti}" data-d="1">＋</button></div>
+      ${rows.map((r, ri) => `<div class="srow${r.own ? '' : ' offer'}" data-row="${ri}">
+        <div class="t">${esc(r.label)}<small>${inr(r.rate)}/day${r.own ? '' : ' · not on this crew yet'}</small></div>
+        <div class="step"><button data-ti="${ri}" data-d="-1"${r.own ? '' : ' disabled'}>−</button><b id="s-${ri}">${r.own ? num(val(r.own.cells[sel])) : '0'}</b><button data-ti="${ri}" data-d="1">＋</button></div>
       </div>`).join('')}
       <div class="sh-foot"><span id="s-c"></span><span id="s-amt"></span></div>
       <div id="s-musterwrap"></div>
@@ -725,14 +738,37 @@ export default function AttendanceMobile({ session }: { session: Session }) {
         </div>` : '';
       } else mw.innerHTML = '';
     };
-    sheet.querySelectorAll('.step button').forEach(b => b.addEventListener('click', () => {
+    sheet.querySelectorAll('.step button').forEach(b => b.addEventListener('click', async () => {
+      const el = b as HTMLElement;
+      if (el.hasAttribute('disabled')) return;
       hapt(6);
-      const ti = +(b as HTMLElement).dataset.ti!, d = +(b as HTMLElement).dataset.d!;
-      const t = w.types[ti];
+      const ri = +el.dataset.ti!, d = +el.dataset.d!;
+      const r = rows[ri];
+      // A line the crew does not carry yet is made the moment somebody marks it — nobody should have
+      // to go and edit the engagement to write down that a helper turned up.
+      if (!r.own) {
+        if (d < 0 || !w.crew) return;
+        el.setAttribute('disabled', '');
+        try {
+          const catId = await addCategory(orgId, w.crew.crewId, r.label, r.rate);
+          // It joins the CREW, not just this sheet — the list is rebuilt from crew.cats, so a line
+          // that lived only on the open sheet would vanish the moment anything re-rendered.
+          const cat: CatRow = { id: catId, n: r.label, rate: r.rate, cells: dates.map(() => null) };
+          w.crew.cats.push(cat);
+          const t: WType = { t: cat.n, rate: cat.rate, cells: cat.cells, catId: cat.id };
+          w.types.push(t); r.own = t;
+          sheet.querySelector(`.srow[data-row="${ri}"]`)?.classList.remove('offer');
+          // The day is written either way — but a line the rate card cannot price would quietly owe
+          // nothing, so it says so rather than letting a ₹0 wage pass for a rate.
+          if (!(r.rate > 0)) toast(`${r.label} added — set their rate under Edit rates`);
+        } catch (e) { el.removeAttribute('disabled'); fail(e); return; }
+        el.removeAttribute('disabled');
+      }
+      const t = r.own!;
       const v = Math.max(0, val(t.cells[sel]) + d);
-      t.cells[sel] = { v, src: 'office', by: byName, at: 'just now' };
-      (sheet.querySelector('#s-' + ti) as HTMLElement).textContent = num(v);
-      void persist(w, ti, sel, v);
+      t.cells[sel] = v > 0 ? { v, src: 'office', by: byName, at: 'just now' } : null;
+      (sheet.querySelector('#s-' + ri) as HTMLElement).textContent = num(v);
+      void persist(w, w.types.indexOf(t), sel, v);
       foot();
     }));
     (sheet.querySelector('.sh-done') as HTMLElement).addEventListener('click', closeSheet);
