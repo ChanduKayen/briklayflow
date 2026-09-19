@@ -348,8 +348,9 @@ export function LedgerMobile({ rows, wallets, categories, sites, loading, refetc
               {ledger
                 ? <span className="bal">left {inr(leftAfter[e.id] ?? 0)}</span>
                 : e.src === 'wallet' && e.wallet ? <span className="wtag" role="button" tabIndex={-1}
+                    title={`${e.wallet}'s wallet`} aria-label={`${e.wallet}'s wallet`}
                     onPointerDownCapture={(ev) => ev.stopPropagation()}
-                    onClick={(ev) => { ev.stopPropagation(); if (!selecting) openWallet(e.wallet); }}>{WALLET_ICON}{e.wallet}</span> : null}
+                    onClick={(ev) => { ev.stopPropagation(); if (!selecting) openWallet(e.wallet); }}>{WALLET_ICON}{initials(e.wallet)}</span> : null}
             </span>
           </span>
         </span>

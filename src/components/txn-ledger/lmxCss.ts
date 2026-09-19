@@ -76,7 +76,7 @@ export const LMX_CSS = `
 .lmx .dayall{height:32px;padding:0 12px;border:0;border-radius:16px;background:none;font-size:13px;font-weight:600;color:var(--clay);opacity:0;pointer-events:none;transition:opacity .25s}
 .lmx.selecting .dayall{opacity:1;pointer-events:auto}
 .lmx .card{margin:0 16px;background:var(--paper);border:1px solid var(--line);border-radius:22px;overflow:hidden}
-.lmx .row{position:relative;display:flex;align-items:center;gap:12px;width:100%;min-height:68px;padding:11px 16px;border:0;border-top:1px solid var(--rule);background:none;text-align:left;max-height:90px;
+.lmx .row{position:relative;display:flex;align-items:center;gap:12px;width:100%;min-height:72px;padding:12px 16px;border:0;border-top:1px solid var(--rule);background:none;text-align:left;max-height:90px;
   user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;touch-action:pan-y;
   transition:background-color .25s ease,opacity .3s,max-height .4s var(--ease) .1s,min-height .4s var(--ease) .1s,padding .4s var(--ease) .1s,transform .2s var(--ease)}
 .lmx .row:first-child{border-top:0}
@@ -97,17 +97,21 @@ export const LMX_CSS = `
 .lmx.selecting .mark .k{transform:none;opacity:1}
 .lmx .row.sel .mark .k{background:var(--clay);box-shadow:none}
 .lmx .row.sel .mark .k svg{opacity:1}
-.lmx .tx{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+.lmx .tx{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px}
 .lmx .t1{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
 .lmx .t1 b{min-width:0;font-size:16px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .lmx .t1 .amt{flex:none;font-family:var(--mono);font-size:15.5px;font-weight:500}
 .lmx .t1 .amt.in{color:var(--sage)}
 .lmx .t1 .amt.move{color:var(--ink-3)}
 .lmx .t2{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:20px}
-.lmx .t2 .meta{min-width:0;font-size:13px;color:var(--ink-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lmx .t2 .meta{flex:1 1 auto;min-width:0;font-size:13px;color:var(--ink-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .lmx .tags{flex:none;display:flex;align-items:center;gap:8px;color:var(--ink-3)}
 .lmx .tags svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
-.lmx .wtag{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 8px 0 6px;border:0;border-radius:11px;background:#F3EEE5;font-size:12px;font-weight:600;color:var(--ink-2)}
+/* THE WALLET, AS A MARK. It used to carry the holder's whole name and ate 59% of the line the site and
+   the note share — so the note never survived. It is the least changing thing in the row, so it reads as
+   the avatar language does: two letters. The full name is one tap away, on the wallet's own ledger. */
+.lmx .wtag{flex:none;display:inline-flex;align-items:center;gap:4px;height:22px;padding:0 7px 0 6px;border:0;border-radius:11px;background:#F3EEE5;
+  font-family:var(--mono);font-size:11px;font-weight:500;letter-spacing:.03em;color:var(--ink-2)}
 .lmx .wtag svg{width:13px;height:13px}
 .lmx .bal{flex:none;font-family:var(--mono);font-size:12px;color:var(--ink-3)}
 
