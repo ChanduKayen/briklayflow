@@ -110,3 +110,97 @@ suite('what linking does to a payment’s allocations', () => {
     expect(Math.round(sum(parts) * 100) / 100).toBe(10000.5)
   })
 })
+
+// POURING TICKED PAYMENTS INTO A BILL.
+//
+// Standing in front of the paper you tick the payments that paid it, and they pour into what it still
+// asks for. Two things make that arithmetic worth proving: a payment larger than the remainder must
+// give only what is needed — the rest is somebody else's bill, not this one's — and once the bill is
+// covered, the payments ticked after it must give nothing at all rather than over-pay it.
+//
+// The order is the TICK order, not the list order, because that is the order the person chose.
+
+import { allocateAcross } from '../billPayMath'
+
+const ticked = (txnId: string, free: number) => ({
+  txnId, date: '2026-09-01', total: free, free, projectId: null, sameProject: false, parts: [],
+});
+
+suite('pouring payments into a bill', () => {
+  test('nothing ticked pours nothing', () => {
+    expect(allocateAcross([], 5000)).toEqual([]);
+  });
+
+  test('one payment for exactly the amount', () => {
+    expect(allocateAcross([ticked('A', 5000)], 5000).map((x) => x.use)).toEqual([5000]);
+  });
+
+  test('two payments that together cover it', () => {
+    expect(allocateAcross([ticked('A', 3000), ticked('B', 2000)], 5000).map((x) => x.use)).toEqual([3000, 2000]);
+  });
+
+  test('a payment bigger than the remainder gives only what is needed', () => {
+    expect(allocateAcross([ticked('A', 50000)], 5000).map((x) => x.use)).toEqual([5000]);
+  });
+
+  test('and the rest of it stays free', () => {
+    const [a] = allocateAcross([ticked('A', 50000)], 5000);
+    expect(a.pay.free - a.use).toBe(45000);
+  });
+
+  test('once the bill is covered, the ones after it give nothing', () => {
+    expect(allocateAcross([ticked('A', 5000), ticked('B', 9000)], 5000).map((x) => x.use)).toEqual([5000, 0]);
+  });
+
+  test('the tick order is what decides, not the size', () => {
+    expect(allocateAcross([ticked('B', 9000), ticked('A', 5000)], 5000).map((x) => x.use)).toEqual([5000, 0]);
+  });
+
+  test('ticking short of the amount leaves the rest to cover', () => {
+    const al = allocateAcross([ticked('A', 1200)], 5000);
+    expect(5000 - al.reduce((s, x) => s + x.use, 0)).toBe(3800);
+  });
+
+  test('a bill already paid takes nothing more', () => {
+    expect(allocateAcross([ticked('A', 5000)], 0).map((x) => x.use)).toEqual([0]);
+  });
+
+  test('paise never accumulate into a rupee that is not there', () => {
+    const al = allocateAcross([ticked('A', 33.34), ticked('B', 33.34), ticked('C', 33.34)], 100);
+    expect(Math.round(al.reduce((s, x) => s + x.use, 0) * 100) / 100).toBe(100);
+  });
+});
+
+// WHERE THE MONEY LANDS.
+//
+// A row in the drawer can be a first-class bill or a purchase order's own recorded bill, and they
+// settle through different columns: a bill through txn_allocations.bill_id, a PO through
+// order_type='PO' + order_ref. BillRow.kind does not tell them apart — both read as 'po', because
+// that field is about which reader fetches the detail. The id's prefix is the only discriminator.
+//
+// Getting it wrong is silent and expensive: the bill's id goes into order_ref, where the bill's paid
+// total never sees it, so a paid bill keeps reading Unpaid forever.
+
+import { allocTargetOf } from '../billsApi'
+
+suite('where a linked payment lands', () => {
+  test('a first-class bill settles as a bill', () => {
+    expect(allocTargetOf({ id: 'bl~9f2c', projectId: 'P1' }).kind).toBe('bill');
+  });
+
+  test('a consolidated bill settles as a bill', () => {
+    expect(allocTargetOf({ id: 'cb~77a1', projectId: null }).kind).toBe('bill');
+  });
+
+  test("a purchase order's own bill settles against the order", () => {
+    expect(allocTargetOf({ id: 'po~PO-112', projectId: 'P1' }).kind).toBe('po');
+  });
+
+  test('the id is handed on untouched — the writer strips the prefix itself', () => {
+    expect(allocTargetOf({ id: 'bl~9f2c', projectId: 'P1' }).id).toBe('bl~9f2c');
+  });
+
+  test('and the site travels with it', () => {
+    expect(allocTargetOf({ id: 'po~PO-9', projectId: 'P2' }).projectId).toBe('P2');
+  });
+});

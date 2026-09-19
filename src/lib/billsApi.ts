@@ -690,50 +690,135 @@ export interface LinkablePayment {
   free: number;
   projectId: string | null;
   sameProject: boolean;
+  /** What the payment was entered as — the line the phone shows under it. */
+  note?: string | null;
+  /** Who it went to. Set when the whole org's loose payments are read at once. */
+  vendorId?: string | null;
   /** Everything already allocated on that payment — set_txn_allocations replaces the whole set,
    *  so linking must hand these back untouched alongside the new part. */
   parts: Array<{ project_id: string; order_type: string; order_ref: string; milestone_id: string; bill_id: string; allocated_amount: number }>;
 }
+interface AllocRow { project_id?: string | null; order_type?: string | null; order_ref?: string | null; milestone_id?: string | null; bill_id?: string | null; allocated_amount?: number | string | null }
+interface TxnRow { txn_id: string; stakeholder_id?: string | null; date?: string | null; payment_mode?: string | null; total_amount?: number | string | null; status?: string | null; remarks?: string | null; txn_allocations?: AllocRow[] | null }
+
+/** One payment, read the same way wherever it is offered: what of it is still free, and every part
+ *  it already carries (set_txn_allocations replaces the whole set, so linking hands these back). */
+function looseOf(t: TxnRow, projectId: string | null): LinkablePayment | null {
+  if (t.status === 'Voided') return null;
+  const allocs: AllocRow[] = t.txn_allocations ?? [];
+  // "Spoken for" is an allocation that names something — a bill or an order. A part with neither
+  // is the without-bills bucket: money sitting on the payment, free to be pointed at a bill.
+  const spoken = allocs.reduce((s, a) => s + ((a.bill_id || a.order_ref) ? num(a.allocated_amount) : 0), 0);
+  const total = num(t.total_amount);
+  const free = Math.round((total - spoken) * 100) / 100;
+  if (free <= 0.5) return null;
+  const txnProject = allocs.find(a => a.project_id)?.project_id ?? null;
+  // Same site, or not yet placed on one. A payment already tied to a different site is not this
+  // bill's money and is never offered.
+  if (projectId && txnProject && txnProject !== projectId) return null;
+  return {
+    txnId: t.txn_id, date: t.date ?? null, mode: t.payment_mode ?? null,
+    total, free, projectId: txnProject, sameProject: !!projectId && txnProject === projectId,
+    note: (t.remarks ?? '').trim() || null,
+    vendorId: t.stakeholder_id ?? null,
+    parts: allocs.map(a => ({
+      project_id: a.project_id ?? '', order_type: a.order_type ?? '', order_ref: a.order_ref ?? '',
+      milestone_id: a.milestone_id ?? '', bill_id: a.bill_id ?? '', allocated_amount: num(a.allocated_amount),
+    })),
+  };
+}
+
+const LOOSE_SELECT = 'txn_id, stakeholder_id, date, payment_mode, total_amount, status, remarks, txn_allocations(project_id, order_type, order_ref, milestone_id, bill_id, allocated_amount)';
+
 export async function loadLinkablePayments(
   stakeholderId: string, projectId: string | null, target: number,
 ): Promise<LinkablePayment[]> {
   if (!stakeholderId) return [];
-  const { data, error } = await supabase
-    .from('transactions')
-    .select('txn_id, date, payment_mode, total_amount, status, txn_allocations(project_id, order_type, order_ref, milestone_id, bill_id, allocated_amount)')
-    .eq('stakeholder_id', stakeholderId)
-    .order('date', { ascending: false })
-    .limit(120);
+  const { data, error } = await supabase.from('transactions').select(LOOSE_SELECT)
+    .eq('stakeholder_id', stakeholderId).order('date', { ascending: false }).limit(120);
   if (error) throw error;
-
-  interface AllocRow { project_id?: string | null; order_type?: string | null; order_ref?: string | null; milestone_id?: string | null; bill_id?: string | null; allocated_amount?: number | string | null }
-  interface TxnRow { txn_id: string; date?: string | null; payment_mode?: string | null; total_amount?: number | string | null; status?: string | null; txn_allocations?: AllocRow[] | null }
-
   const out: LinkablePayment[] = [];
-  for (const t of (data ?? []) as TxnRow[]) {
-    if (t.status === 'Voided') continue;
-    const allocs: AllocRow[] = t.txn_allocations ?? [];
-    // "Spoken for" is an allocation that names something — a bill or an order. A part with neither
-    // is the without-bills bucket: money sitting on the payment, free to be pointed at this bill.
-    const spoken = allocs.reduce((s, a) => s + ((a.bill_id || a.order_ref) ? num(a.allocated_amount) : 0), 0);
-    const total = num(t.total_amount);
-    const free = Math.round((total - spoken) * 100) / 100;
-    if (free <= 0.5) continue;
-    const txnProject = allocs.find(a => a.project_id)?.project_id ?? null;
-    // Same site, or not yet placed on one. A payment already tied to a different site is not this
-    // bill's money and is never offered.
-    if (projectId && txnProject && txnProject !== projectId) continue;
-    out.push({
-      txnId: t.txn_id, date: t.date ?? null, mode: t.payment_mode ?? null,
-      total, free, projectId: txnProject, sameProject: !!projectId && txnProject === projectId,
-      parts: allocs.map(a => ({
-        project_id: a.project_id ?? '', order_type: a.order_type ?? '', order_ref: a.order_ref ?? '',
-        milestone_id: a.milestone_id ?? '', bill_id: a.bill_id ?? '', allocated_amount: num(a.allocated_amount),
-      })),
-    });
-  }
+  for (const t of (data ?? []) as TxnRow[]) { const l = looseOf(t, projectId); if (l) out.push(l); }
   return rankLoosePayments(out, target);
 }
+
+/**
+ * Every payment in the org with money no bill has claimed, keyed by the vendor it went to.
+ *
+ * The drawer marks a bill "looks paid" when one of these fits it exactly, and that mark has to be
+ * true of the very payment the linker will then offer — so both read a payment the same way, through
+ * looseOf. One query for the whole list, rather than one per row.
+ */
+export async function loadLoosePaymentsByVendor(orgId: string): Promise<Record<string, LinkablePayment[]>> {
+  if (!orgId) return {};
+  const { data, error } = await supabase.from('transactions').select(LOOSE_SELECT)
+    .eq('org_id', orgId).not('stakeholder_id', 'is', null).order('date', { ascending: false }).limit(600);
+  if (error) throw error;
+  const out: Record<string, LinkablePayment[]> = {};
+  for (const t of (data ?? []) as TxnRow[]) {
+    const l = looseOf(t, null);
+    if (l?.vendorId) (out[l.vendorId] ||= []).push(l);
+  }
+  return out;
+}
+
+export interface StatementEvent {
+  kind: 'bill' | 'payment';
+  date: string | null;
+  /** + for a bill, − for a payment. */
+  amount: number;
+  /** What was owed after this line. */
+  running: number;
+  billId: string | null;
+  billNo: string | null;
+  site: string | null;
+  docUrl: string | null;
+  label: string | null;   // payment only: "12 Sep · NEFT"
+}
+
+/**
+ * A vendor's statement: their bills add, the payments linked against those bills subtract, and every
+ * line carries what was owed after it. Oldest first while the running total is built, newest first
+ * when it is handed back — the way a statement is read.
+ *
+ * Only payments LINKED to one of their bills appear. A payment with nothing behind it is not part of
+ * this story; it is what the drawer offers to link, and what the Parties page flags as paid ahead.
+ */
+export async function loadVendorStatement(stakeholderId: string): Promise<StatementEvent[]> {
+  const bills = await loadVendorBills(stakeholderId);
+  if (!bills.length) return [];
+  const byId: Record<string, typeof bills[number]> = {};
+  bills.forEach(b => { byId[b.id] = b; });
+  const { data } = await supabase.from('txn_allocations')
+    .select('bill_id, allocated_amount, transactions(txn_id, date, payment_mode, status)')
+    .in('bill_id', bills.map(b => b.id));
+
+  type TxnJoin = { txn_id: string; date?: string | null; payment_mode?: string | null; status?: string | null };
+  interface AllocJoin { bill_id?: string | null; allocated_amount?: number | string | null; transactions?: TxnJoin | TxnJoin[] | null }
+  const ev: Omit<StatementEvent, 'running'>[] = bills.map(b => ({
+    kind: 'bill' as const, date: b.billDate, amount: b.amount, billId: b.id, billNo: b.billNo,
+    site: b.projectName, docUrl: null, label: null,
+  }));
+  for (const a of (data ?? []) as unknown as AllocJoin[]) {
+    const t = Array.isArray(a.transactions) ? a.transactions[0] : a.transactions;
+    if (!t || t.status === 'Voided' || !a.bill_id) continue;
+    const b = byId[a.bill_id]; if (!b) continue;
+    ev.push({
+      kind: 'payment', date: t.date ?? null, amount: -num(a.allocated_amount),
+      billId: b.id, billNo: b.billNo, site: b.projectName, docUrl: null,
+      label: [t.date ? fmtDay(t.date) : null, t.payment_mode].filter(Boolean).join(' · ') || 'Payment',
+    });
+  }
+  // oldest first to build the running balance; a payment settles on the day it lands, after that
+  // day's bills, so an equal date puts the bill first.
+  ev.sort((x, y) => (x.date || '').localeCompare(y.date || '') || (x.kind === 'bill' ? -1 : 1));
+  let run = 0;
+  const out = ev.map(e => { run += e.amount; return { ...e, running: run }; });
+  return out.reverse();
+}
+
+const STMT_MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const fmtDay = (d: string) => { const dt = new Date(d); return `${dt.getDate()} ${STMT_MON[dt.getMonth()]}`; };
 
 /**
  * Point an existing payment at this bill.
@@ -755,6 +840,19 @@ export async function linkPaymentToBill(
 
 /** A list row's id is prefixed for routing ('bl~<uuid>', 'po~<poId>'); the allocation wants the bare one. */
 const rawBillId = (id: string) => id.replace(/^(bl|po|cb)~/, '');
+
+/**
+ * What an allocation should NAME when money is pointed at this row.
+ *
+ * `BillRow.kind` is about which reader fetches the detail, not about where the money lands — a
+ * first-class bill and a PO's own recorded bill are both kind 'po'. The id's prefix is the only thing
+ * that tells them apart: `bl~` and `cb~` are bills (the allocation carries bill_id), `po~` is the PO
+ * itself (order_type='PO'). Getting this wrong writes a bill's id into order_ref, where the bill's
+ * paid total never sees it — so the rule lives here, once.
+ */
+export const allocTargetOf = (row: { id: string; projectId: string | null }) =>
+  ({ id: row.id, kind: (row.id.startsWith('po~') ? 'po' : 'bill') as 'po' | 'bill', projectId: row.projectId });
+
 
 // The inert "towards PO-xxx" advance memo — pure tracking on the transaction, never a money link.
 export async function setAdvanceMemo(txnId: string, poRef: string | null): Promise<void> {

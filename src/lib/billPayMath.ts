@@ -39,6 +39,23 @@ export function rankLoosePayments<T extends LoosePayment>(rows: T[], target: num
  * bill, and lets whatever is left over fall back into the unallocated bucket it came from. Linking
  * can therefore never move money that was already somewhere.
  */
+/**
+ * Pouring the ticked payments into what the bill still asks for.
+ *
+ * In the order they were ticked, each payment gives the smaller of what it has free and what is
+ * still to cover — so a payment larger than the remainder gives only what is needed and the rest
+ * stays free for another bill, and once the bill is covered the ones after it give nothing. The
+ * order matters, which is why it is the tick order and not the list order.
+ */
+export function allocateAcross<T extends LoosePayment>(picks: T[], target: number): Array<{ pay: T; use: number }> {
+  let need = Math.max(0, target);
+  return picks.map((pay) => {
+    const use = Math.max(0, Math.min(pay.free, need));
+    need = Math.round((need - use) * 100) / 100;
+    return { pay, use };
+  });
+}
+
 export function linkParts(
   pay: LoosePayment,
   bill: { rawId: string; kind: 'bill' | 'po'; projectId: string | null },

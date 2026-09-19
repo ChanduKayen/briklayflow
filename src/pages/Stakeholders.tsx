@@ -11,14 +11,13 @@ import PartySpreadsheet from '../components/PartySpreadsheet';
 import PhoneInput from '../components/PhoneInput';
 import { usePrefetchStakeholder } from '../hooks/usePrefetch';
 import StakeholderLedgerDrawer from '../components/StakeholderLedgerDrawer';
-import { isNewLedgerOrg, loadProjectionMap } from '../lib/ledgerRead';
+import { usePartyMoney, paidOf as paidFrom, outstandingOf as outstandingFrom, creditOf as creditFrom } from '../lib/partyMoney';
 import { mergeStakeholders } from '../lib/stakeholderMerge';
 import { useSearchScope } from '../components/search/searchScope';
 import SearchBar from '../components/search/SearchBar';
 import { renameWalletHolder } from '../lib/walletApi';
 import { useIsMobile } from '../lib/useIsMobile';
-import MobileArtifactFrame from '../components/MobileArtifactFrame';
-import partiesMobileHtml from './partiesMobile.html?raw';
+import PartiesMobile from '../components/party/PartiesMobile';
 
 // ── helpers ─────────────────────────────────────────────────────────────────────
 const GSTIN_REGEX = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][A-Z0-9]Z[A-Z0-9]$/;
@@ -81,10 +80,9 @@ const EMPTY_FORM: DrawerForm = {
 
 export default function Stakeholders({ session }: { session: Session }) {
   const isMobile = useIsMobile();
-  // Mobile Parties is the "Briklay · Parties" reference, rendered verbatim in an iframe (visual-first,
-  // on its own sample data). The desktop page below is unchanged; real data + write-actions are a
-  // later wiring pass.
-  if (isMobile) return <MobileArtifactFrame html={partiesMobileHtml} title="Parties" />;
+  // The phone gets the "Briklay · Parties" page, on the same directory and the same three money
+  // figures this desktop page reads — one hook, one cache, so the two can never disagree.
+  if (isMobile) return <PartiesMobile />;
   return <StakeholdersDesktop session={session} />;
 }
 
@@ -139,47 +137,13 @@ function StakeholdersDesktop({ session }: { session: Session }) {
     },
   });
 
-  // Paid to date — real, from transactions (scoped to this org).
-  const { data: paidMap } = useQuery({
-    queryKey: ['stakeholders_paid', orgId],
-    enabled: !!orgId,
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('transactions').select('stakeholder_id, total_amount')
-        .eq('org_id', orgId!).eq('status', 'Active');
-      const map: Record<string, number> = {};
-      (data || []).forEach((t: any) => {
-        if (t.stakeholder_id) map[t.stakeholder_id] = (map[t.stakeholder_id] || 0) + Number(t.total_amount);
-      });
-      return map;
-    },
-  });
-
-  // Billed — real, from v_party_orders (facts: ordered + billed per project). We sum `billed`
-  // per party; Outstanding = billed − paid (the sanctioned composition, no clamped ghost).
-  const { data: billedMap } = useQuery({
-    queryKey: ['stakeholders_billed', orgId],
-    enabled: !!orgId,
-    queryFn: async () => {
-      const { data } = await supabase.from('v_party_orders').select('stakeholder_id, billed').eq('org_id', orgId!);
-      const map: Record<string, number> = {};
-      (data || []).forEach((r: any) => {
-        if (r.stakeholder_id) map[r.stakeholder_id] = (map[r.stakeholder_id] || 0) + Number(r.billed || 0);
-      });
-      return map;
-    },
-  });
-
-  // New-ledger orgs read the real dues from the allocation projection (INV-12); old orgs keep the
-  // billed−paid netting. One switch, so the Parties list and the party ledger never disagree.
-  const { data: newLedger } = useQuery({ queryKey: ['org_new_ledger', orgId], enabled: !!orgId, queryFn: () => isNewLedgerOrg(orgId!) });
-  const { data: projMap } = useQuery({ queryKey: ['party_projection', orgId], enabled: !!orgId && !!newLedger, queryFn: () => loadProjectionMap(orgId!) });
-
+  // Paid · outstanding · paid-ahead — the three figures, read through the one hook the phone's
+  // Parties page also reads (same query keys, one cache), so the two surfaces cannot drift.
+  const money = usePartyMoney(orgId);
   const all = stakeholders || [];
-  const paidOf = (id: string) => paidMap?.[id] ?? 0;
-  const billedOf = (id: string) => billedMap?.[id] ?? 0;
-  const outstandingOf = (id: string) => newLedger ? (projMap?.[id]?.toPay ?? 0) : Math.max(billedOf(id) - paidOf(id), 0);
-  const creditOf = (id: string) => newLedger ? (projMap?.[id]?.unclassifiedAhead ?? 0) : Math.max(paidOf(id) - billedOf(id), 0);
+  const paidOf = (id: string) => paidFrom(money, id);
+  const outstandingOf = (id: string) => outstandingFrom(money, id);
+  const creditOf = (id: string) => creditFrom(money, id);
 
   // open ?new=1 → new-party drawer
   useEffect(() => {

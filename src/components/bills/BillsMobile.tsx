@@ -1,497 +1,685 @@
 /**
- * Bills on a phone — the briklaybillsmobile reference, wired to the register.
+ * Bills on a phone — the "Briklay · Bills" reference, wired to the register.
  *
- * The reference is one column and one decision: what is still owed, and to whom. A collapsing
- * title, a search, one control (Unpaid / All), and rows carrying the bill's own photograph so you
- * can recognise the paper before you read the words. Its markup, its motion and its stylesheet are
- * ported as they are.
+ * A drawer of paper. What is linked against each paper is what turns into vendor credit in Ledgers,
+ * so this page feeds that one and never invents money of its own.
  *
- * Two things it left open, settled with the author:
- *  · TAPPING a row opens the bill's own page — lines, payments, the settle bar — rather than the
- *    mock's read-only sheet, which would have put those out of a phone's reach.
- *  · SWIPING a row right opens the pay sheet, and there Pay is real. Two ways money meets a bill:
- *    record the payment here and now, or point at one already sitting in the ledger, this vendor's
- *    and this site's, with the amount nearest what the bill is asking at the top of the list —
- *    because site offices pay first and file the paper days later.
- *
- * Adding a bill is deliberately absent from the page, as in the reference: the app's own create
- * button carries it, arriving here as ?new=1 — so the URL is what says the wizard is open, and
- * closing it is simply taking the parameter back off.
+ *   the header   what you owe on bills, and how OLD that debt is. Age is the credit story, so the
+ *                three buckets (this week · 8 to 30 days · older) are also the filter.
+ *   the drawer   every row leads with the bill itself. Status is one word with meaning: due · part
+ *                paid · paid — and "looks paid" when a payment already in Book fits it exactly.
+ *                A bill with no number wears the hollow ring: it cannot be duplicate-checked.
+ *   a vendor     the same drawer read the other way, and their statement: bills add, the payments
+ *                linked against them subtract, and every line says what was owed after it.
+ *   a bill       the paper is the hero, then: is it paid, what the bill says, its particulars.
+ *                Delete is in ⋯ and must be held.
+ *   link         nothing is created — it ties the bill to money ALREADY in Book. Eligible is the
+ *                same vendor, the same site, not yet claimed by any bill; one quiet switch widens it
+ *                to their other sites. A payment bigger than what is left gives only what is needed.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { usePullToRefresh, useLiveCount } from '../../lib/usePullToRefresh';
 import { useOrgId } from '../../lib/auth/AuthProvider';
 import { useSignedDocUrl } from '../../lib/storage';
-import { useSearchScope } from '../search/searchScope';
+import { useSheetDrag } from '../../lib/sheetDrag';
+import { useSheetFlag } from '../../lib/sheetFlag';
+import { allocateAcross } from '../../lib/billPayMath';
 import {
-  loadBills, payBill, loadLinkablePayments, linkPaymentToBill,
-  type BillRow, type LinkablePayment,
+  loadBills, loadBillDetail, deleteBill, loadLinkablePayments, loadLoosePaymentsByVendor,
+  loadVendorStatement, linkPaymentToBill, allocTargetOf,
+  type BillRow, type LinkablePayment, type StatementEvent,
 } from '../../lib/billsApi';
 import NewBillModal from './NewBillModal';
 import { useMintBill } from './useMintBill';
-import { BLM_CSS } from './blmCss';
+import { BMX_CSS } from './bmxCss';
 
-type PayMode = 'NEFT' | 'UPI' | 'Cheque' | 'Cash';
-const MODES: PayMode[] = ['NEFT', 'UPI', 'Cheque', 'Cash'];
-
-const inr = (n: number) => Math.round(n).toLocaleString('en-IN');
-const rupees = (n: number) => '₹' + inr(n);
-const hapt = (ms: number | number[]) => { try { navigator.vibrate?.(ms as number); } catch { /* not every phone has it */ } };
-const dueOf = (b: BillRow) => Math.max(0, b.amount - b.paid);
-const isoToday = () => new Date().toLocaleDateString('en-CA');   // yyyy-mm-dd in the local day
-
-/** "8 Sep" — the way a date is said out loud, which is all a row has room for. The months are
- *  spelled here rather than left to the locale: en-IN's short September is "Sept", four letters
- *  where every other month has three, and a column of dates should not jog. */
+const inr = (n: number) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');
+const initials = (n: string) => n.replace(/[^A-Za-z ]/g, ' ').trim().split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase() || '?';
+const hapt = (p: number | number[]) => { try { navigator.vibrate?.(p as number); } catch { /* not every phone has it */ } };
+const short = (s: string | null) => (s || '').replace(' Residence', '').replace(' Apartments', '');
 const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-const dayLabel = (d: string | null) => {
-  if (!d) return '—';
-  const dt = new Date(d);
-  return `${dt.getDate()} ${MON[dt.getMonth()]}`;
-};
-/** The caption a run of rows sits under. The year appears only when it isn't this one. */
-const monthLabel = (d: string | null) => {
-  if (!d) return 'Undated';
-  const dt = new Date(d);
-  const y = dt.getFullYear() === new Date().getFullYear() ? '' : ` ${dt.getFullYear()}`;
-  return dt.toLocaleDateString('en-IN', { month: 'long' }) + y;
-};
+const day = (d: string | null) => (d ? `${new Date(d).getDate()} ${MON[new Date(d).getMonth()]}` : '—');
+const monthKey = (d: string | null) => (d ? d.slice(0, 7) : '0000-00');
+const monthName = (k: string) => (k === '0000-00' ? 'Undated'
+  : new Date(k + '-01').toLocaleDateString('en-IN', { month: 'long', year: new Date(k + '-01').getFullYear() === new Date().getFullYear() ? undefined : 'numeric' }));
+/** Whole days since the bill's date — what "due · 12 days" counts. */
+const ageOf = (b: BillRow) => (b.billDate ? Math.max(0, Math.round((Date.now() - new Date(b.billDate).getTime()) / 86400000)) : 0);
+const leftOf = (b: BillRow) => Math.max(0, b.amount - b.paid);
+const bucketOf = (b: BillRow) => { const a = ageOf(b); return a <= 7 ? 0 : a <= 30 ? 1 : 2; };
 
-/**
- * The paper itself, at 44×56.
- *
- * The reference draws a ruled sheet in CSS for a bill that has a photo and a dashed camera for one
- * that doesn't — so the list answers "did anyone actually file this?" before you read a word. Where
- * there IS a photo we put the real thing in that same box; the drawn sheet stays underneath as what
- * you see while the signed URL is still being minted, and as the fallback if it never arrives.
- */
-function Thumb({ doc, count }: { doc: string | null; count: number }) {
-  const signed = useSignedDocUrl(doc);
-  // A failure belongs to the URL it happened on. Remembering WHICH one broke means a fresh signed
-  // URL is simply not that one, so nothing has to reset anything.
-  const [brokeOn, setBrokeOn] = useState<string | null>(null);
-  const failed = !!signed && brokeOn === signed;
-  const isPdf = !!doc && /\.pdf(\?|$)/i.test(doc);
+const TICK = <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5" /></svg>;
+const DOTS = <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="19" cy="12" r="1.8" /></svg>;
+const CLOSE = <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>;
 
-  if (!doc) return (
-    <div className="th none" aria-label="No copy filed">
-      <svg viewBox="0 0 24 24"><path d="M4 8h3l2-2.5h6L17 8h3v11H4z" /><circle cx="12" cy="13" r="3" /></svg>
-    </div>
-  );
+/** The drawn stand-in a row wears when the bill has no photograph of its own. */
+function SheetArt({ seed }: { seed: string }) {
+  const v = [...seed].reduce((a, c) => a + c.charCodeAt(0), 0);
+  const head = ['#B5472A', '#2B211A', '#2F5D3A', '#5C4F45'][v % 4];
+  const rows = [48, 60, 72, 84, 96, 108, 120];
   return (
-    <div className={`th${count > 1 ? ' multi' : ''}`} data-n={count > 1 ? `×${count}` : undefined}>
-      {signed && !isPdf && !failed && (
-        <img src={signed} alt="" onError={() => setBrokeOn(signed)}
-          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'top' }} />
-      )}
-    </div>
+    <svg viewBox="0 0 128 170" preserveAspectRatio="xMidYMin slice" aria-hidden="true">
+      <rect width="128" height="170" fill="#F4EFE6" />
+      {v % 2
+        ? <><rect x="12" y="12" width="60" height="8" rx="2" fill={head} opacity=".85" /><rect x="12" y="25" width="40" height="4" rx="2" fill="#2B211A" opacity=".3" /></>
+        : <><rect x="84" y="10" width="32" height="18" rx="3" fill={head} opacity=".8" /><rect x="12" y="13" width="52" height="6" rx="2" fill="#2B211A" opacity=".75" /><rect x="12" y="24" width="36" height="4" rx="2" fill="#2B211A" opacity=".3" /></>}
+      <rect x="12" y="36" width="104" height="7" fill="#2B211A" opacity=".12" />
+      {rows.map((y, i) => (
+        <g key={y}><rect x="12" y={y} width={44 + (i * 17 + v * 7) % 30} height="3.5" rx="1.75" fill="#2B211A" opacity=".28" />
+          <rect x="94" y={y} width="22" height="3.5" rx="1.75" fill="#2B211A" opacity=".28" /></g>
+      ))}
+      <path d="M12 133h104" stroke="#2B211A" strokeOpacity=".25" strokeDasharray="3 3" />
+      <rect x="80" y="142" width="36" height="8" rx="2" fill="#2B211A" opacity=".8" />
+    </svg>
   );
 }
+
+/** The paper itself — the filed photograph when there is one, the drawing otherwise. */
+function Paper({ b, className }: { b: { id: string; docUrl: string | null }; className?: string }) {
+  const url = useSignedDocUrl(b.docUrl);
+  return <span className={className ?? 'sheet'}>{url ? <img src={url} alt="" /> : <SheetArt seed={b.id} />}</span>;
+}
+
+type Lens = 'bills' | 'vendors';
+type Filter = 'open' | 'part' | 'paid' | 'all';
+const CHIPS: [Filter, string][] = [['open', 'Unpaid'], ['part', 'Part paid'], ['paid', 'Paid'], ['all', 'All']];
 
 export default function BillsMobile() {
+  const orgId = useOrgId();
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const orgId = useOrgId();
-  const { data: bills = [], isLoading } = useQuery({ queryKey: ['bills'], queryFn: loadBills });
+  const [params, setParams] = useSearchParams();
+  const mintBill = useMintBill();
 
-  const [q, setQ] = useState('');
-  const [view, setView] = useState<'due' | 'all'>('due');
-  const [scrolled, setScrolled] = useState(false);
-  // `pay` drives whether the sheet is up; `held` is what it is showing. They part company for the
-  // length of the exit, so a sheet sliding away still has its bill in it instead of emptying first.
-  const [pay, setPay] = useState<BillRow | null>(null);
-  const [held, setHeld] = useState<BillRow | null>(null);
-  const holdTimer = useRef<number | null>(null);
-  const openPay = (b: BillRow) => { if (holdTimer.current) window.clearTimeout(holdTimer.current); setHeld(b); setPay(b); };
-  const closePay = () => { setPay(null); holdTimer.current = window.setTimeout(() => setHeld(null), 460); };
-
-  const rootRef = useRef<HTMLDivElement>(null);
-  const portalRef = useRef<HTMLDivElement>(null);
-  const segRef = useRef<HTMLDivElement>(null);
-  const [thumb, setThumb] = useState<{ left: number; width: number }>({ left: 3, width: 0 });
-
-  // Two things arrive in the URL: ?party=<id> from the search's "Bills" row for one vendor, and
-  // ?new=1 from the nav's own New-bill button. The second IS the wizard's open state — no copy of
-  // it to keep in sync, and the back gesture closes it the way a person expects.
-  const [searchParams, setSearchParams] = useSearchParams();
-  const partyId = searchParams.get('party');
-  const addOpen = searchParams.get('new') === '1';
-  const closeAdd = () => {
-    const next = new URLSearchParams(searchParams);
-    next.delete('new');
-    setSearchParams(next, { replace: true });
-  };
-  const mint = useMintBill();
-
-  const shown = useMemo(() => bills.filter(b =>
-    (!partyId || b.vendorId === partyId) &&
-    (view === 'all' || dueOf(b) > 0.5) &&
-    (!q || `${b.vendor} ${b.billNo ?? ''} ${b.site ?? ''}`.toLowerCase().includes(q.toLowerCase()))
-  ), [bills, view, q, partyId]);
-
-  // The page lends itself to the app's search the same way the desktop list does.
-  useSearchScope('Bills', useMemo(() => shown.map(b => ({
-    id: b.id, title: b.vendor, sub: `${b.billNo || 'No number'}${b.site ? ' · ' + b.site : ''}`, right: rupees(b.amount),
-    onPick: () => navigate(`/bills/${encodeURIComponent(b.id)}`),
-  })), [shown, navigate]), setQ);
-
-  const open = useMemo(() => bills.filter(b => dueOf(b) > 0.5), [bills]);
-  // Pull the register down to read it again — the quipu ties itself in the space that opens.
-  const { view: pullView } = usePullToRefresh({
-    attachTo: rootRef, noun: 'bill', count: useLiveCount(shown.length),
-    onRefresh: () => qc.refetchQueries({ type: 'active' }),
+  const { data: bills } = useQuery({ queryKey: ['bills'], queryFn: loadBills, staleTime: 60_000 });
+  const { data: loose } = useQuery({
+    queryKey: ['bills_loose', orgId], enabled: !!orgId, queryFn: () => loadLoosePaymentsByVendor(orgId!),
   });
-  const openTotal = useMemo(() => open.reduce((s, b) => s + dueOf(b), 0), [open]);
 
-  // The collapsing title — the same 120px the reference uses.
+  const B = useMemo(() => bills ?? [], [bills]);
+
+  const [lens, setLens] = useState<Lens>('bills');
+  const [filter, setFilter] = useState<Filter>('open');
+  const [query, setQuery] = useState('');
+  const [bucket, setBucket] = useState(-1);
+  const [compact, setCompact] = useState(false);
+  const [tuck, setTuck] = useState(false);
+  const [folded, setFolded] = useState(false);
+  const [openBill, setOpenBill] = useState<string | null>(null);
+  const [openVendor, setOpenVendor] = useState<string | null>(null);
+  const [panel, setPanel] = useState<null | { kind: 'menu' } | { kind: 'link'; billId: string }>(null);
+  const [zoom, setZoom] = useState<BillRow | null>(null);
+  const [toast, setToast] = useState<{ text: string } | null>(null);
+  const [litId, setLitId] = useState('');
+  const qRef = useRef<HTMLInputElement>(null);
+
+  const newOpen = params.get('new') === '1';
+  useSheetFlag(!!panel || !!zoom);
+
+  const say = useCallback((text: string) => setToast({ text }), []);
+  useEffect(() => { if (!toast) return; const t = window.setTimeout(() => setToast(null), 2400); return () => window.clearTimeout(t); }, [toast]);
+
+  // ── the header: what is owed, and how old it is ────────────────────────────
+  const open = useMemo(() => B.filter((b) => leftOf(b) > 0), [B]);
+  const totalOwed = open.reduce((a, b) => a + leftOf(b), 0);
+  const sums = useMemo(() => { const s = [0, 0, 0]; open.forEach((b) => { s[bucketOf(b)] += leftOf(b); }); return s; }, [open]);
+  const oldest = open.reduce((a, b) => Math.max(a, ageOf(b)), 0);
+
+  /** A payment already in Book that fits what is left of this bill exactly — the "looks paid" mark. */
+  const fitFor = useCallback((b: BillRow): LinkablePayment | null => {
+    if (!b.vendorId || leftOf(b) <= 0) return null;
+    const want = leftOf(b);
+    return (loose?.[b.vendorId] ?? []).find((t) =>
+      Math.abs(t.free - want) < 0.5 && (!b.projectId || !t.projectId || t.projectId === b.projectId)) ?? null;
+  }, [loose]);
+
+  const visible = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return B.filter((b) => {
+      const l = leftOf(b);
+      const passFilter = filter === 'all' ? true
+        : filter === 'open' ? l > 0
+        : filter === 'paid' ? b.status === 'settled'
+        : b.status === 'part';
+      if (!passFilter) return false;
+      if (bucket >= 0 && !(l > 0 && bucketOf(b) === bucket)) return false;
+      if (!q) return true;
+      return `${b.vendor} ${b.billNo ?? ''} ${b.site ?? ''} ${b.amount}`.toLowerCase().includes(q);
+    });
+  }, [B, filter, bucket, query]);
+
+  const months = useMemo(() => {
+    const seen: string[] = [];
+    visible.forEach((b) => { const k = monthKey(b.addedAt || b.billDate); if (!seen.includes(k)) seen.push(k); });
+    return seen.map((k) => ({ k, rows: visible.filter((b) => monthKey(b.addedAt || b.billDate) === k) }));
+  }, [visible]);
+
+  const vendors = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const names = [...new Set(B.map((b) => b.vendor))].filter((v) => !q || v.toLowerCase().includes(q));
+    return names.map((v) => {
+      const bs = B.filter((x) => x.vendor === v), o = bs.filter((x) => leftOf(x) > 0);
+      return {
+        v, id: bs[0]?.vendorId ?? null,
+        billed: bs.reduce((a, x) => a + x.amount, 0),
+        owed: o.reduce((a, x) => a + leftOf(x), 0),
+        n: o.length, all: bs.length, old: o.reduce((a, x) => Math.max(a, ageOf(x)), 0),
+      };
+    }).sort((a, b) => b.owed - a.owed);
+  }, [B, query]);
+
+  // ── scroll: slim header, quick-return tools, folding capsule ───────────────
   useEffect(() => {
-    const on = () => setScrolled(window.scrollY > 120);
-    on();
-    window.addEventListener('scroll', on, { passive: true });
-    return () => window.removeEventListener('scroll', on);
+    let lastY = 0;
+    const onScroll = () => {
+      const y = window.scrollY, past = y > 240 - 54, d = y - lastY;
+      setCompact(past);
+      if (Math.abs(d) > 6) {
+        setFolded(d > 0 && y > 60);
+        setTuck(d > 0 && past && document.activeElement !== qRef.current);
+        lastY = y;
+      }
+      if (!past) setTuck(false);
+      if (y < 8) setFolded(false);
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
   }, []);
 
-  // The segmented control's thumb follows the chosen button.
-  useEffect(() => {
-    const el = segRef.current?.querySelector('button.on') as HTMLElement | null;
-    if (el) setThumb({ left: el.offsetLeft, width: el.offsetWidth });
-  }, [view, isLoading]);
+  const closePanel = useCallback(() => setPanel(null), []);
+  const panelDrag = useSheetDrag<HTMLElement>(closePanel, !!panel);
 
-  const toastTimer = useRef<number | null>(null);
-  const toast = useCallback((t: string) => {
-    const el = portalRef.current?.querySelector('#blm-toast') as HTMLElement | null; if (!el) return;
-    el.textContent = t; el.classList.add('show');
-    if (toastTimer.current) window.clearTimeout(toastTimer.current);
-    toastTimer.current = window.setTimeout(() => el.classList.remove('show'), 2400);
-  }, []);
-
-  const afterMoney = useCallback((msg: string) => {
-    closePay();
-    toast(msg);
+  const refresh = useCallback(() => {
     qc.invalidateQueries({ queryKey: ['bills'] });
-    qc.invalidateQueries({ queryKey: ['party_ledger'] });
-    qc.invalidateQueries({ queryKey: ['ledger'] });
-    qc.invalidateQueries({ queryKey: ['party_topay_map'] });
-  }, [qc, toast]);
+    qc.invalidateQueries({ queryKey: ['bills_loose'] });
+    qc.invalidateQueries({ queryKey: ['bill'] });
+  }, [qc]);
+
+  const bill = openBill ? B.find((b) => b.id === openBill) ?? null : null;
+  const pageOn = !!bill || !!openVendor;
+  const payable = !!bill && leftOf(bill) > 0;
+
+  function statusOf(b: BillRow) {
+    const l = leftOf(b), a = ageOf(b);
+    if (b.status === 'settled') return <span className="st paid">{TICK}paid</span>;
+    if (fitFor(b)) return <span className="st fits"><i />looks paid</span>;
+    if (b.status === 'part') return <span className="st part">{inr(l)} left</span>;
+    return <span className={`st${a > 30 ? ' old' : a > 7 ? ' late' : ''}`}>due · {a === 0 ? 'today' : `${a} ${a === 1 ? 'day' : 'days'}`}</span>;
+  }
+
+  const billRow = (b: BillRow) => (
+    <button key={b.id} type="button" className={`bill${b.id === litId ? ' lit' : ''}`}
+      onClick={() => { setOpenBill(b.id); setLitId(''); hapt(6); }}>
+      <Paper b={b} className={`sheet${b.docUrl ? '' : ''}`} />
+      <span className="bx">
+        <span className="b1"><b>{b.vendor}</b><span className="amt">{inr(b.amount)}</span></span>
+        <span className="b2">
+          <span className="meta">{day(b.billDate)} · {short(b.site) || 'no site'}{b.billNo ? '' : <> · <i className="ring" />no number</>}</span>
+          {statusOf(b)}
+        </span>
+      </span>
+    </button>
+  );
 
   return (
-    <div className="blm-page">
-      {pullView}
-      <div className="blm" ref={rootRef}>
-        <style>{BLM_CSS}</style>
+    <div className={`bmx${pageOn ? ' deep' : ''}`}>
+      <style>{BMX_CSS}</style>
 
-        <div className={`small${scrolled ? ' show' : ''}`}><b>Vendor Bills</b><span>{rupees(openTotal)}</span></div>
+      <div className={`compact${compact && !pageOn ? ' on' : ''}`}><b>Bills</b><span>{inr(totalOwed)}<small>owed</small></span></div>
 
-        <div className="big">
-          <h1>Vendor Bills</h1>
-          <div className="line"><CountUp to={openTotal} /> unpaid · <span>{open.length}</span> bill{open.length === 1 ? '' : 's'}</div>
+      <div className="view">
+        <header className="hero">
+          <div className="hero-top"><h1>Bills</h1>
+            <button type="button" className="icb" aria-label="Export and more" onClick={() => setPanel({ kind: 'menu' })}>{DOTS}</button>
+          </div>
+          <div className="owed"><span>{inr(totalOwed)}</span><small>owed on bills</small></div>
+          <p className="sub">{open.length} unpaid bills · {new Set(open.map((b) => b.vendor)).size} vendors · oldest {oldest} days</p>
+          <div className="age" aria-hidden="true">
+            {sums.map((v, i) => <i key={i} className={`c${i}`} style={{ flex: `${Math.max(v, totalOwed * .015)} 0 0` }} />)}
+          </div>
+          <div className="ages" role="group" aria-label="How old the unpaid bills are">
+            {(['This week', '8 to 30 days', 'Older'] as const).map((l, i) => (
+              <button key={l} type="button" aria-pressed={bucket === i}
+                onClick={() => { setBucket((x) => (x === i ? -1 : i)); if (bucket !== i) { setFilter('open'); setLens('bills'); } hapt(4); }}>
+                <span><i className={`c${i}`} />{l}</span><b>{inr(sums[i])}</b>
+              </button>
+            ))}
+          </div>
+        </header>
+
+        <div className={`tools${tuck ? ' tuck' : ''}`}>
+          <div className="seg2">
+            <span className="th" style={{ transform: `translateX(${lens === 'bills' ? 0 : 100}%)` }} />
+            <button type="button" aria-pressed={lens === 'bills'} onClick={() => { setLens('bills'); hapt(4); }}>Bills</button>
+            <button type="button" aria-pressed={lens === 'vendors'} onClick={() => { setLens('vendors'); setBucket(-1); hapt(4); }}>Vendors</button>
+          </div>
+          <label className="find" style={{ marginTop: 10 }}>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5" /><path d="m16 16 4 4" /></svg>
+            <input ref={qRef} type="search" autoComplete="off" enterKeyHint="search"
+              placeholder={lens === 'bills' ? 'Vendor, bill number, site or item' : 'Vendor'}
+              aria-label="Search bills" value={query} onChange={(e) => setQuery(e.target.value)} onFocus={() => setTuck(false)} />
+          </label>
+          {lens === 'bills' && (
+            <div className="chips" role="group" aria-label="Show">
+              {CHIPS.map(([k, l]) => (
+                <button key={k} type="button" className="chip" aria-pressed={k === filter}
+                  onClick={() => { setFilter(k); if (k !== 'open') setBucket(-1); hapt(4); }}>{l}</button>
+              ))}
+            </div>
+          )}
+          {lens === 'bills' && (query.trim() || bucket >= 0) && (
+            <p className="result">
+              <b>{visible.length}</b> {visible.length === 1 ? 'bill' : 'bills'} · <b>{inr(visible.reduce((a, b) => a + leftOf(b), 0))}</b> still owed
+              {bucket >= 0 ? ' · ' + ['this week', '8 to 30 days old', 'older than 30 days'][bucket] : ''}
+            </p>
+          )}
         </div>
 
-        <div className="search">⌕ <input value={q} onChange={(e) => setQ(e.target.value)}
-          placeholder="Search vendor, number, site" autoComplete="off" autoCorrect="off" spellCheck={false} aria-label="Search bills" /></div>
-
-        <div className="seg" ref={segRef} role="group">
-          <span className="thumb" style={{ left: thumb.left, width: thumb.width }} />
-          <button className={view === 'due' ? 'on' : ''} onClick={() => { hapt(4); setView('due'); }}>Unpaid</button>
-          <button className={view === 'all' ? 'on' : ''} onClick={() => { hapt(4); setView('all'); }}>All</button>
-        </div>
-
-        <div id="list">
-          {isLoading ? <div className="nores">Reading the register…</div>
-            : shown.length === 0 ? <div className="nores">Nothing here.</div>
-            : shown.map((b, i) => {
-              const cap = monthLabel(b.billDate);
-              const first = i === 0 || monthLabel(shown[i - 1].billDate) !== cap;
-              return (
-                <div key={b.id}>
-                  {first && <div className="cap">{cap}</div>}
-                  <BillSlot bill={b} delay={i * 0.03}
-                    onOpen={() => navigate(`/bills/${encodeURIComponent(b.id)}`)}
-                    onPay={() => { hapt([8, 30, 8]); openPay(b); }} />
+        <main>
+          {lens === 'bills' ? (
+            months.length ? months.map(({ k, rows }) => (
+              <div key={k}>
+                <div className="month"><h2>{monthName(k)}</h2>
+                  <span>{rows.length}{rows.length === 1 ? ' bill · ' : ' bills · '}<b>{inr(rows.reduce((a, b) => a + leftOf(b), 0))}</b> owed</span>
                 </div>
-              );
-            })}
-        </div>
+                <div className="card">{rows.map(billRow)}</div>
+              </div>
+            )) : <div className="empty"><b>No bills here</b>Try another word, or look under All.</div>
+          ) : (
+            <VendorLens vendors={vendors} onOpen={(v) => setOpenVendor(v)} />
+          )}
+        </main>
       </div>
 
-      {createPortal(
-        <div className="blm blm-portal" ref={portalRef}>
-          <style>{BLM_CSS}</style>
-          <div id="vshade" className={pay ? 'show' : ''} onClick={closePay} />
-          <PaySheet open={!!pay} bill={held} orgId={orgId} onClose={closePay} onDone={afterMoney} />
-          <div id="blm-toast" />
-        </div>, document.body)}
+      <section className={`page${pageOn ? ' on' : ''}`} aria-live="polite">
+        {bill ? (
+          <BillPage b={bill} backTo={openVendor} fit={fitFor(bill)} orgId={orgId}
+            onBack={() => { if (openVendor) setOpenBill(null); else { setOpenBill(null); setLitId(bill.id); } }}
+            onSay={say} onZoom={() => setZoom(bill)} onLink={() => setPanel({ kind: 'link', billId: bill.id })}
+            onLinked={() => { refresh(); }}
+            onDeleted={() => { setOpenBill(null); setOpenVendor(null); refresh(); say('Bill deleted · ' + inr(bill.amount)); }}
+            onVendor={() => navigate(`/stakeholders/${encodeURIComponent(bill.vendorId ?? '')}`)} />
+        ) : openVendor ? (
+          <VendorPage name={openVendor} bills={B.filter((b) => b.vendor === openVendor)}
+            onBack={() => setOpenVendor(null)} onBill={(id) => setOpenBill(id)} onSay={say} />
+        ) : null}
+      </section>
 
-      {addOpen && <NewBillModal
-        open
-        onClose={closeAdd}
-        onOpenBill={(id) => { closeAdd(); navigate(`/bills/${encodeURIComponent('bl~' + id)}`); }}
-        commit={mint}
-      />}
+      <div className={`scrim${panel ? ' on' : ''}`} onClick={closePanel} />
+      <section className={`panel${panel ? ' on' : ''}`} role="dialog" aria-modal="true" ref={panelDrag}>
+        <div className="grab" aria-hidden="true"><i /></div>
+        {panel?.kind === 'menu' && (
+          <>
+            <div className="p-head"><div className="t"><h2>Bills</h2></div>
+              <button type="button" className="x" data-close aria-label="Close" onClick={closePanel}>{CLOSE}</button></div>
+            <button type="button" className="opt" onClick={() => say('Exports what is shown as CSV, with the papers')}>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7.5 10.5 12 15l4.5-4.5M5 19.5h14" /></svg><span className="m"><b>Export what is shown</b></span></button>
+          </>
+        )}
+        {panel?.kind === 'link' && bill && (
+          <Linker b={bill} orgId={orgId} onClose={closePanel}
+            onDone={(msg) => { closePanel(); refresh(); say(msg); }} onFail={(m) => say(m)} />
+        )}
+      </section>
+
+      <div className={`viewer${zoom ? ' on' : ''}`} role="dialog" aria-modal="true" aria-label="The bill"
+        onClick={(e) => { if (e.target === e.currentTarget) setZoom(null); }}>
+        <div className="big">{zoom && <Paper b={zoom} className="" />}</div>
+        <button type="button" aria-label="Close" onClick={() => setZoom(null)}>{CLOSE}</button>
+      </div>
+
+      <button type="button" className={`fab${folded ? ' folded' : ''}${(pageOn && !payable) || panel ? ' away' : ''}`}
+        style={{ ['--w' as string]: payable ? '170px' : '120px' }}
+        aria-label={payable ? 'Link a payment' : 'Add a bill'}
+        onClick={() => { if (bill && payable) setPanel({ kind: 'link', billId: bill.id }); else setParams({ new: '1' }); }}>
+        <span className="ic">
+          {payable
+            ? <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1" /><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" /></svg>
+            : <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>}
+        </span>
+        <span className="lbl">{payable ? 'Link a payment' : 'Bill'}</span>
+      </button>
+
+      <div className={`toast${toast ? ' on' : ''}`} role="status"><span>{toast?.text ?? ''}</span></div>
+
+      {newOpen && <NewBillModal open commit={mintBill} onClose={() => { setParams({}); refresh(); }} />}
     </div>
   );
 }
 
-/** The one number, counted up — the reference's own flourish, and the only motion on the header. */
-function CountUp({ to }: { to: number }) {
-  const [shownV, setShownV] = useState(to);
-  const from = useRef(to);
-  useEffect(() => {
-    const start = from.current, t0 = performance.now(), D = 550;
-    if (start === to) return;
-    let raf = 0;
-    const tick = (t: number) => {
-      const x = Math.min((t - t0) / D, 1), e = 1 - Math.pow(1 - x, 3);
-      setShownV(Math.round(start + (to - start) * e));
-      if (x < 1) raf = requestAnimationFrame(tick); else from.current = to;
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [to]);
-  return <b>{rupees(shownV)}</b>;
-}
-
-/**
- * One row, and the gesture over it.
- *
- * A bill with nothing left to pay is a record, not a task: it reads back in a lighter weight and
- * has no swipe under it at all. Everything else can be paid from where it lies — drag it right far
- * enough that the sage panel behind it has clearly committed, and let go.
- */
-function BillSlot({ bill, delay, onOpen, onPay }: { bill: BillRow; delay: number; onOpen: () => void; onPay: () => void }) {
-  const rowRef = useRef<HTMLDivElement>(null);
-  const underRef = useRef<HTMLDivElement>(null);
-  const settled = dueOf(bill) <= 0.5;
-  const left = dueOf(bill);
-
-  useEffect(() => {
-    const row = rowRef.current, under = underRef.current;
-    if (!row || settled) return;
-    let x0: number | null = null, dx = 0, axis: 'h' | 'v' | null = null, y0 = 0;
-    const start = (e: TouchEvent) => { x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; axis = null; dx = 0; row.style.transition = 'none'; };
-    const move = (e: TouchEvent) => {
-      if (x0 === null) return;
-      const mx = e.touches[0].clientX - x0, my = e.touches[0].clientY - y0;
-      // Decide once whether this is a swipe or the page scrolling under a thumb, then stay decided.
-      if (!axis) axis = Math.abs(mx) > Math.abs(my) + 6 ? 'h' : Math.abs(my) > Math.abs(mx) + 6 ? 'v' : null;
-      if (axis !== 'h') return;
-      dx = Math.max(0, mx);
-      row.style.transform = `translateX(${Math.min(dx, 110)}px)`;
-      if (under) under.style.opacity = String(Math.min(dx / 70, 1));
-    };
-    const end = () => {
-      if (x0 === null) return;
-      row.style.transition = '';
-      row.style.transform = '';
-      if (under) under.style.opacity = '0';
-      const go = dx > 85;
-      x0 = null; dx = 0; axis = null;
-      if (go) onPay();
-    };
-    row.addEventListener('touchstart', start, { passive: true });
-    row.addEventListener('touchmove', move, { passive: true });
-    row.addEventListener('touchend', end);
-    row.addEventListener('touchcancel', end);
-    return () => {
-      row.removeEventListener('touchstart', start);
-      row.removeEventListener('touchmove', move);
-      row.removeEventListener('touchend', end);
-      row.removeEventListener('touchcancel', end);
-    };
-  }, [settled, onPay]);
-
+// ── the vendors lens ──────────────────────────────────────────────────────────
+interface VendorAgg { v: string; id: string | null; billed: number; owed: number; n: number; all: number; old: number }
+function VendorLens({ vendors, onOpen }: { vendors: VendorAgg[]; onOpen: (v: string) => void }) {
+  const owing = vendors.filter((x) => x.owed > 0), clear = vendors.filter((x) => !x.owed);
+  const row = (x: VendorAgg) => (
+    <button key={x.v} type="button" className="vrow" onClick={() => onOpen(x.v)}>
+      <span className="av">{initials(x.v)}</span>
+      <span className="bx">
+        <span className="b1"><b>{x.v}</b><span className="amt">{x.owed ? inr(x.owed) : ''}</span></span>
+        <span className="b2">
+          <span className="meta">{x.owed ? `${x.n} ${x.n === 1 ? 'bill' : 'bills'} unpaid · oldest ${x.old} days` : `${x.all} ${x.all === 1 ? 'bill' : 'bills'} · all paid`}</span>
+          {x.owed ? null : <span className="st paid">{TICK}clear</span>}
+        </span>
+        <span className="vbar"><i style={{ width: `${x.billed ? Math.round((1 - x.owed / x.billed) * 100) : 100}%` }} /></span>
+      </span>
+    </button>
+  );
+  if (!vendors.length) return <div className="empty"><b>No vendors here</b>Try another word.</div>;
   return (
-    <div className="slot">
-      {!settled && <div className="under" ref={underRef}>✓ Pay</div>}
-      <div className={`row${settled ? ' settled' : ''}`} ref={rowRef} style={{ animationDelay: `${delay}s` }}
-        onClick={onOpen} role="button" tabIndex={0}
-        onKeyDown={(e) => { if (e.key === 'Enter') onOpen(); }}>
-        <Thumb doc={bill.docUrl} count={bill.docCount} />
-        <div className="bm">
-          <b>{bill.vendor}</b>
-          <span>{bill.billNo ? bill.billNo + ' · ' : ''}{dayLabel(bill.billDate)}{bill.site ? ' · ' + bill.site : ''}</span>
-        </div>
-        <div className="br">
-          <b>₹{inr(settled ? bill.amount : left)}</b>
-          {settled ? <span>paid</span>
-            : bill.paid > 0.5 ? <span className="part">of ₹{inr(bill.amount)}</span>
-            : <span className="due">due</span>}
-        </div>
-      </div>
-    </div>
+    <>
+      {!!owing.length && (<>
+        <div className="month"><h2>You owe</h2><span>{inr(owing.reduce((a, x) => a + x.owed, 0))}</span></div>
+        <div className="card">{owing.map(row)}</div>
+      </>)}
+      {!!clear.length && (<>
+        <div className="month"><h2>All clear</h2><span /></div>
+        <div className="card">{clear.map(row)}</div>
+      </>)}
+    </>
   );
 }
 
-/**
- * The pay sheet — the swipe's destination.
- *
- * Two ways, one sheet, because they are the same question asked in two tenses: is this bill's money
- * going out now, or did it already? Recording writes the payment and points it at this bill in one
- * motion. Linking finds the payments this vendor has on this site with something still unattached
- * and puts the closest amount first, because that is the one being looked for.
- */
-function PaySheet({ open, bill, orgId, onClose, onDone }: {
-  open: boolean; bill: BillRow | null; orgId: string; onClose: () => void; onDone: (msg: string) => void;
+const PBar = ({ back, name, onBack, onMenu }: { back: string; name?: string; onBack: () => void; onMenu?: () => void }) => (
+  <div className="pbar">
+    <button type="button" onClick={onBack}>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" /></svg>{back}
+    </button>
+    <b>{name ?? ''}</b>
+    {onMenu ? <button type="button" className="dots" aria-label="More" onClick={onMenu}>{DOTS}</button> : <span style={{ width: 44 }} />}
+  </div>
+);
+
+// ── a bill ────────────────────────────────────────────────────────────────────
+function BillPage({ b, backTo, fit, orgId, onBack, onSay, onZoom, onLink, onLinked, onDeleted, onVendor }: {
+  b: BillRow; backTo: string | null; fit: LinkablePayment | null; orgId: string | null | undefined;
+  onBack: () => void; onSay: (s: string) => void; onZoom: () => void; onLink: () => void;
+  onLinked: () => void; onDeleted: () => void; onVendor: () => void;
 }) {
-  const sheetRef = useRef<HTMLDivElement>(null);
-
-  // Swipe the sheet down to dismiss — the gesture the reference gives every sheet.
-  useEffect(() => {
-    const el = sheetRef.current; if (!el) return;
-    let y0: number | null = null, dy = 0;
-    const start = (e: TouchEvent) => {
-      // The body of the sheet holds fields and a list; only the handle and the header drag it.
-      if (!(e.target as HTMLElement).closest('.grab, .pv-h')) return;
-      y0 = e.touches[0].clientY; dy = 0; el.style.transition = 'none';
-    };
-    const move = (e: TouchEvent) => { if (y0 === null) return; dy = Math.max(0, e.touches[0].clientY - y0); el.style.transform = `translateY(${dy}px)`; };
-    const end = () => {
-      if (y0 === null) return;
-      el.style.transition = ''; el.style.transform = '';
-      const go = dy > 100; y0 = null; dy = 0;
-      if (go) { hapt(5); onClose(); }
-    };
-    el.addEventListener('touchstart', start, { passive: true });
-    el.addEventListener('touchmove', move, { passive: true });
-    el.addEventListener('touchend', end);
-    return () => { el.removeEventListener('touchstart', start); el.removeEventListener('touchmove', move); el.removeEventListener('touchend', end); };
-  }, [onClose]);
-
-  return (
-    <div className={`sheet${open ? ' show' : ''}`} ref={sheetRef} role="dialog" aria-label="Pay this bill" aria-hidden={!open}>
-      {bill && <PayBody key={bill.id} bill={bill} orgId={orgId} onDone={onDone} />}
-    </div>
-  );
-}
-
-/** One bill's worth of pay sheet. Keyed by the bill, so every open is a fresh mount and the
- *  defaults are simply what the fields start as — nothing is ever reset. */
-function PayBody({ bill, orgId, onDone }: { bill: BillRow; orgId: string; onDone: (msg: string) => void }) {
-  const left = dueOf(bill);
-  const [tab, setTab] = useState<'new' | 'link'>('new');
-  const [amt, setAmt] = useState(() => String(Math.round(left)));
-  const [date, setDate] = useState(isoToday);
-  const [mode, setMode] = useState<PayMode>('NEFT');
+  const { data: d } = useQuery({ queryKey: ['bill', b.id], queryFn: () => loadBillDetail(b.id) });
+  const [menu, setMenu] = useState(false);
+  const [noHint, setNoHint] = useState(false);
+  const [held, setHeld] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  const [links, setLinks] = useState<LinkablePayment[] | null>(null);
-  const segRef = useRef<HTMLDivElement>(null);
-  const [thumb, setThumb] = useState<{ left: number; width: number }>({ left: 3, width: 0 });
+  const holdRef = useRef(0);
 
-  useEffect(() => {
-    const el = segRef.current?.querySelector('button.on') as HTMLElement | null;
-    if (el) setThumb({ left: el.offsetLeft, width: el.offsetWidth });
-  }, [tab]);
+  const left = leftOf(b), paidPct = b.amount ? Math.min(100, (b.paid / b.amount) * 100) : 0;
+  const cap = b.status === 'settled' ? <span className="cap paid">{TICK}Paid</span>
+    : b.status === 'part' ? <span className="cap part">{inr(left)} left</span>
+    : <span className="cap due">Unpaid · {ageOf(b)} {ageOf(b) === 1 ? 'day' : 'days'}</span>;
 
-  // The vendor's loose payments, fetched the first time that side is opened.
-  useEffect(() => {
-    if (tab !== 'link' || links !== null) return;
-    let live = true;
-    loadLinkablePayments(bill.vendorId ?? '', bill.projectId, left)
-      .then(r => { if (live) setLinks(r); })
-      .catch(e => { if (live) { setLinks([]); setErr((e as Error)?.message || 'Could not read this vendor’s payments'); } });
-    return () => { live = false; };
-  }, [bill, tab, links, left]);
-
-  // Which of the loose payments is nearest what this bill is asking.
-  const nearest = useMemo(() => {
-    if (!links?.length) return -1;
-    let best = 0;
-    links.forEach((p, i) => { if (Math.abs(p.free - left) < Math.abs(links[best].free - left)) best = i; });
-    return best;
-  }, [links, left]);
-
-  const value = Math.round(Number(amt.replace(/[^\d]/g, '')) || 0);
-  const overpay = value > left + 0.5;
-
-  const record = async () => {
-    if (busy || value <= 0) return;
-    setBusy(true); setErr(null);
+  async function linkTheFit() {
+    if (!fit || !orgId || busy) return;
+    setBusy(true);
     try {
-      await payBill({
-        orgId,
-        bill: { id: bill.id, kind: bill.kind === 'consolidated' ? 'bill' : (bill.id.startsWith('po~') ? 'po' : 'bill'), vendorId: bill.vendorId, projectId: bill.projectId },
-        amount: value, date, mode,
-        remarks: `Bill ${bill.billNo || ''}`.trim(),
-      });
-      hapt([8, 30, 8]);
-      onDone(`${rupees(value)} paid — ${bill.vendor}`);
-    } catch (e) { setBusy(false); setErr((e as Error)?.message || 'Could not record that payment'); }
-  };
+      await linkPaymentToBill(orgId, fit, allocTargetOf(b), left);
+      hapt([10, 40, 18]);
+      onSay('Linked. This bill is paid.');
+      onLinked();
+    } catch (e) { onSay(e instanceof Error ? e.message : 'Could not link that payment'); }
+    finally { setBusy(false); }
+  }
 
-  const link = async (p: LinkablePayment) => {
-    if (busy) return;
-    setBusy(true); setErr(null);
-    try {
-      await linkPaymentToBill(orgId, p,
-        { id: bill.id, kind: bill.id.startsWith('po~') ? 'po' : 'bill', projectId: bill.projectId },
-        Math.min(left, p.free));
-      hapt([8, 30, 8]);
-      onDone(`${rupees(Math.min(left, p.free))} linked — ${bill.vendor}`);
-    } catch (e) { setBusy(false); setErr((e as Error)?.message || 'Could not link that payment'); }
+  const startHold = (e: React.PointerEvent) => {
+    e.preventDefault(); setHeld(true); hapt(6);
+    holdRef.current = window.setTimeout(async () => {
+      setHeld(false); hapt([14, 40, 24]);
+      try { await deleteBill(b.id); onDeleted(); } catch (er) { onSay(er instanceof Error ? er.message : 'Could not delete'); }
+    }, 1000);
   };
+  const stopHold = () => { if (!held) return; window.clearTimeout(holdRef.current); setHeld(false); onSay('Keep holding to delete'); };
 
   return (
     <>
-      <div className="grab" />
-        <div className="pv-h"><b>{bill.vendor}</b><span>{dayLabel(bill.billDate)}</span></div>
-        <div className="pv-meta">{bill.billNo ? bill.billNo + ' · ' : ''}{bill.site || 'No site'}</div>
+      <PBar back={backTo ? backTo.split(' ')[0] : 'Bills'} name={b.vendor} onBack={onBack} onMenu={() => setMenu(true)} />
+      <div className="phead">
+        <h1>{b.vendor}</h1>
+        <p>{b.billNo ? `Bill no. ${b.billNo}` : <><i className="ring" />No bill number</>} · {day(b.billDate)} · {b.site || 'no site'}</p>
+        <div className="pamt"><b>{inr(b.amount)}</b>{cap}</div>
+      </div>
 
-        <div className="pv-due"><span>Still due</span><b>₹{inr(left)}</b></div>
-        {bill.paid > 0.5 && <div className="pv-paid"><b>₹{inr(bill.paid)} paid</b><span>of ₹{inr(bill.amount)}</span></div>}
-
-        <div className="seg pv-seg" ref={segRef} role="group">
-          <span className="thumb" style={{ left: thumb.left, width: thumb.width }} />
-          <button className={tab === 'new' ? 'on' : ''} onClick={() => { hapt(4); setTab('new'); }}>Pay now</button>
-          <button className={tab === 'link' ? 'on' : ''} onClick={() => { hapt(4); setTab('link'); }}>Already paid</button>
+      {fit && !noHint && b.status !== 'settled' && (
+        <div className="match">
+          <b>This looks paid already</b>
+          <p>{inr(fit.free)} to {b.vendor} is in your Book, {day(fit.date)}{fit.mode ? ` · ${fit.mode}` : ''}. Same vendor, same site, same amount.</p>
+          <div>
+            <button type="button" className="y" disabled={busy} onClick={linkTheFit}>Yes, link it</button>
+            <button type="button" className="n" onClick={() => setNoHint(true)}>Not this one</button>
+          </div>
         </div>
+      )}
 
-        {tab === 'new' ? (
-          <>
-            <div className="pv-lab">Amount</div>
-            <div className="pv-amt">
-              <i>₹</i>
-              <input inputMode="numeric" value={amt} onChange={(e) => setAmt(e.target.value.replace(/[^\d]/g, ''))} aria-label="Amount" />
-              {value !== Math.round(left) && <button onClick={() => setAmt(String(Math.round(left)))}>All of it</button>}
-            </div>
-            <div className="pv-lab">Paid on, and how</div>
-            <div className="pv-row">
-              <input className="pv-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} aria-label="Payment date" />
-            </div>
-            <div className="pv-modes" role="group" aria-label="How it was paid">
-              {MODES.map(m => (
-                <button key={m} className={mode === m ? 'on' : ''} onClick={() => { hapt(4); setMode(m); }}>{m}</button>
-              ))}
-            </div>
-            {overpay && <div className="lp-err">That is {rupees(value - left)} more than this bill is asking — the rest will sit as an advance.</div>}
-            {err && <div className="lp-err">{err}</div>}
-            <button className="pv-go" disabled={busy || value <= 0} onClick={() => void record()}>
-              {busy ? 'Recording…' : `Pay ₹${inr(value)}`}
+      <button type="button" className={`bigsheet${b.docUrl ? '' : ' none'}`}
+        onClick={() => (b.docUrl ? onZoom() : onSay('Opens the camera to add the paper'))}>
+        {b.docUrl ? <><i className="pp"><Paper b={b} className="" /></i><span>Tap to see the whole bill</span></>
+          : <span>No photo. Typed in by hand. Add the paper</span>}
+      </button>
+
+      <div className="blk">
+        <h3>Paid against this bill<span>{d?.payments.length ? `${d.payments.length} ${d.payments.length === 1 ? 'payment' : 'payments'}` : 'from your Book'}</span></h3>
+        <div className="setbar"><i style={{ width: `${paidPct}%` }} /></div>
+        <div className="setnum"><span><b>{inr(b.paid)}</b> paid</span><span><b>{inr(left)}</b> left</span></div>
+        {d?.payments.length
+          ? d.payments.map((p) => (
+            <div className="payrow" key={p.txnId}>
+              <span className="tickc">{TICK}</span>
+              <span className="m"><b>{day(p.date)}{p.mode ? ` · ${p.mode}` : ''}</b><span>In Book · linked to this bill</span></span>
+              <em>{inr(p.amount)}</em>
+            </div>))
+          : <p className="none2">Nothing in Book is linked to it yet.</p>}
+        {left > 0 ? <div className="two"><button type="button" className="pri" data-link onClick={onLink}>Link a payment</button></div> : <div style={{ height: 10 }} />}
+      </div>
+
+      <div className="blk">
+        <h3>On the bill<span>as read from the paper</span></h3>
+        {(d?.lines ?? []).map((l, i) => (
+          <div className="ln" key={i}><b>{l.name}</b><span>{[l.qty ? `${l.qty}${l.unit ? ' ' + l.unit : ''}` : '', l.rate ? `× ${inr(l.rate)}` : ''].filter(Boolean).join(' ')}</span><em>{inr(l.amount)}</em></div>
+        ))}
+        {!d?.lines.length && <p className="none2">No lines were read off this paper.</p>}
+        <div className="tot"><i>Bill total</i><b>{inr(b.amount)}</b></div>
+      </div>
+
+      <div className="blk">
+        <h3>Particulars</h3>
+        <div className="kv"><span>Bill no.</span><b className={b.billNo ? '' : 'warn'}>{b.billNo || 'No number'}</b></div>
+        <div className="kv"><span>Site</span><b>{b.site || 'Not set'}</b></div>
+        <div className="kv"><span>Order</span><b className={d?.poId ? '' : 'warn'}>{d?.poId ? `${d.poId} · matches` : 'Not linked'}</b></div>
+        {d?.docCount && d.docCount > 1 ? <div className="kv"><span>On this paper</span><b>{d.docCount} invoices</b></div> : null}
+      </div>
+
+      <div className="blk"><button type="button" className="kv" style={{ borderTop: 0 }} onClick={onVendor}><span>Vendor</span><b>Open the ledger ›</b></button></div>
+
+      {menu && (
+        <>
+          <div className="scrim on" onClick={() => setMenu(false)} />
+          <section className="panel on" role="dialog" aria-modal="true">
+            <div className="grab" aria-hidden="true"><i /></div>
+            <div className="p-head"><div className="t"><h2>This bill</h2></div>
+              <button type="button" className="x" aria-label="Close" onClick={() => setMenu(false)}>{CLOSE}</button></div>
+            <button type="button" className={`opt danger${held ? ' hold' : ''}`}
+              onContextMenu={(e) => e.preventDefault()} onPointerDown={startHold}
+              onPointerUp={stopHold} onPointerLeave={stopHold} onPointerCancel={stopHold}>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M10 7V4.5h4V7M7 7l1 12.5h8L17 7" /></svg>
+              <span className="m"><b>Hold to delete this bill</b></span>
             </button>
-          </>
-        ) : (
-          <>
-            <div className="pv-lab">Payments to {bill.vendor.split(' ')[0]} with money still loose</div>
-            {links === null ? <div className="lp-none">Looking…</div>
-              : links.length === 0 ? <div className="lp-none">Nothing unattached for this vendor{bill.site ? ` on ${bill.site}` : ''}.</div>
-              : links.map((p, i) => (
-                // The badge is worked out here rather than assumed of the first row, so the word
-                // "closest" can never be pointing at something that isn't.
-                <div key={p.txnId} className={`lp${i === nearest ? ' best' : ''}`} onClick={() => void link(p)} role="button" tabIndex={0}
-                  onKeyDown={(e) => { if (e.key === 'Enter') void link(p); }}>
-                  <div className="lm">
-                    <b>₹{inr(p.free)}</b>
-                    <span>{dayLabel(p.date)}{p.mode ? ' · ' + p.mode : ''}{p.free < p.total - 0.5 ? ` · of ₹${inr(p.total)}` : ''}{p.sameProject ? '' : ' · no site yet'}</span>
-                  </div>
-                  {i === nearest && links.length > 1 && <span className="lt">closest</span>}
-                </div>
-              ))}
-            {err && <div className="lp-err">{err}</div>}
-          </>
-        )}
+          </section>
+        </>
+      )}
     </>
+  );
+}
+
+// ── a vendor's statement ──────────────────────────────────────────────────────
+function VendorPage({ name, bills, onBack, onBill, onSay }: {
+  name: string; bills: BillRow[]; onBack: () => void; onBill: (id: string) => void; onSay: (s: string) => void;
+}) {
+  const vendorId = bills[0]?.vendorId ?? null;
+  const { data: ev } = useQuery({
+    queryKey: ['bill_statement', vendorId], enabled: !!vendorId, queryFn: () => loadVendorStatement(vendorId!),
+  });
+  const owed = bills.reduce((a, b) => a + leftOf(b), 0);
+  const billed = bills.reduce((a, b) => a + b.amount, 0);
+  const paid = bills.reduce((a, b) => a + b.paid, 0);
+  const byNo: Record<string, string> = {};
+  bills.forEach((b) => { if (b.billNo) byNo[b.id] = b.billNo; });
+
+  return (
+    <>
+      <PBar back="Bills" name={name} onBack={onBack} onMenu={() => onSay('Send this statement to the vendor')} />
+      <div className="phead">
+        <h1>{name}</h1>
+        <p>{bills.length} {bills.length === 1 ? 'bill' : 'bills'} in the drawer · {inr(billed)} billed · {inr(paid)} paid</p>
+        <div className="pamt"><b>{inr(owed)}</b>{owed ? <span className="cap due">You owe</span> : <span className="cap paid">{TICK}All clear</span>}</div>
+      </div>
+      <div className="blk" style={{ marginTop: 18 }}>
+        <h3>Statement<span>newest first</span></h3>
+        {(ev ?? []).map((x: StatementEvent, i) => x.kind === 'payment' ? (
+          <div className="sline" key={i}>
+            <span className="k"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg></span>
+            <span className="m"><b>Payment</b><span>{x.label} · against {x.billNo ? `no. ${x.billNo}` : 'the ' + day(x.date) + ' bill'}</span></span>
+            <span className="r"><em className="minus">−{inr(-x.amount)}</em><small>owed {inr(x.running)}</small></span>
+          </div>
+        ) : (
+          <button type="button" className="sline" key={i} style={{ width: '100%', border: 0, background: 'none', textAlign: 'left' }}
+            onClick={() => x.billId && onBill(x.billId)}>
+            <span className="m"><b>Bill{x.billNo ? ` ${x.billNo}` : ''}</b><span>{day(x.date)} · {short(x.site)}</span></span>
+            <span className="r"><em>+{inr(x.amount)}</em><small>owed {inr(x.running)}</small></span>
+          </button>
+        ))}
+        {!ev?.length && <p className="none2">Nothing on file yet.</p>}
+        <div className="tot"><i>You owe today</i><b>{inr(owed)}</b></div>
+      </div>
+    </>
+  );
+}
+
+// ── link a payment ────────────────────────────────────────────────────────────
+function Linker({ b, orgId, onClose, onDone, onFail }: {
+  b: BillRow; orgId: string | null | undefined; onClose: () => void;
+  onDone: (msg: string) => void; onFail: (m: string) => void;
+}) {
+  const need = leftOf(b);
+  const [wide, setWide] = useState(false);
+  const [picked, setPicked] = useState<string[]>([]);
+  const [step, setStep] = useState<1 | 2>(1);
+  const [busy, setBusy] = useState(false);
+
+  const { data: pool } = useQuery({
+    queryKey: ['bill_linkable', b.vendorId, wide ? null : b.projectId, need],
+    enabled: !!b.vendorId,
+    queryFn: () => loadLinkablePayments(b.vendorId!, wide ? null : b.projectId, need),
+  });
+  const { data: all } = useQuery({
+    queryKey: ['bill_linkable', b.vendorId, null, need],
+    enabled: !!b.vendorId,
+    queryFn: () => loadLinkablePayments(b.vendorId!, null, need),
+  });
+  const others = Math.max(0, (all?.length ?? 0) - (pool?.length ?? 0));
+
+  // Each ticked payment pours into the bill, in the order it was ticked; a payment bigger than what
+  // is left gives only what is needed and the rest stays free for another bill.
+  const alloc = useMemo(() => {
+    const byId: Record<string, LinkablePayment> = {};
+    (pool ?? []).forEach((t) => { byId[t.txnId] = t; });
+    return allocateAcross(picked.map((id) => byId[id]).filter(Boolean), need);
+  }, [picked, pool, need]);
+  const got = alloc.reduce((a: number, p) => a + p.use, 0);
+  const rest = need - got;
+  const used = alloc.filter((p: { use: number }) => p.use > 0);
+
+  async function link() {
+    if (!orgId || busy || !used.length) return;
+    setBusy(true);
+    try {
+      for (const p of used) {
+        await linkPaymentToBill(orgId, p.pay, allocTargetOf(b), p.use);
+      }
+      hapt([10, 40, 18]);
+      onDone(rest <= 0 ? 'Linked. This bill is paid.' : `Linked. ${inr(rest)} still left.`);
+    } catch (e) { setBusy(false); onFail(e instanceof Error ? e.message : 'Could not link that payment'); }
+  }
+
+  const head = (title: string, sub: string, n: 1 | 2) => (
+    <div className="p-head">
+      <div className="t"><h2>{title}</h2><span>{sub}</span></div>
+      <div className="steps" aria-hidden="true"><i className={n === 1 ? 'now' : 'was'} /><i className={n === 2 ? 'now' : ''} /></div>
+      {n === 1
+        ? <button type="button" className="x" aria-label="Close" onClick={onClose}>{CLOSE}</button>
+        : <button type="button" className="x" aria-label="Back" onClick={() => setStep(1)}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7" /></svg>
+          </button>}
+    </div>
+  );
+
+  if (step === 2) return (
+    <div className="wz">
+      {head('Check the link', 'Nothing new is created. These Book entries get tied to this bill.', 2)}
+      <div className="wzbody">
+        {used.map((p) => (
+          <div className="alloc" key={p.pay.txnId}>
+            <span>{day(p.pay.date)}{p.pay.mode ? ` · ${p.pay.mode}` : ''}
+              {p.use < p.pay.free && <small>{inr(p.pay.free - p.use)} of it stays free for another bill</small>}</span>
+            <b>{inr(p.use)}</b>
+          </div>
+        ))}
+        <div className="becomes"><span>{b.vendor}{b.billNo ? ` · ${b.billNo}` : ''} becomes</span>
+          {rest <= 0 ? <span className="cap paid">{TICK}Paid</span> : <span className="cap part">{inr(rest)} left</span>}</div>
+        <button type="button" className={`wzbtn${busy ? ' ok' : ''}`} disabled={busy} onClick={link}>
+          {busy ? 'Linked' : `Link ${used.length === 1 ? 'this payment' : `${used.length} payments`}`}
+        </button>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="wz">
+      {head('Which payments paid this?', `${b.vendor} · ${short(b.site)} · in Book, not linked to any bill`, 1)}
+      <div className="wzbody">
+        <div className="target">
+          <div className="fig"><span>₹</span>{Math.round(need).toLocaleString('en-IN')}<small>to cover{b.billNo ? ` · bill ${b.billNo}` : ''}</small></div>
+          <div className="pour"><i style={{ width: `${need ? Math.min(100, (got / need) * 100) : 0}%` }} /></div>
+          <p className={rest <= 0 && got > 0 ? 'full' : ''}>
+            {!got ? 'Tick what paid it. One payment or several.'
+              : rest <= 0 ? 'Covered in full.'
+              : <><b>{inr(got)}</b> picked · <b>{inr(rest)}</b> still to cover</>}
+          </p>
+        </div>
+        {pool?.length ? (
+          <div className="cands">
+            {pool.map((t, i) => {
+              const a = alloc.find((x) => x.pay.txnId === t.txnId);
+              const why = a && a.use < t.free
+                ? <span className="why part">{a.use ? `${inr(a.use)} used · ${inr(t.free - a.use)} stays free` : 'not needed'}</span>
+                : Math.abs(t.free - need) < 0.5 ? <span className="why">same amount</span>
+                : i === 0 && pool.every((x) => Math.abs(x.free - need) >= 0.5) ? <span className="why part">closest date</span> : null;
+              return (
+                <button key={t.txnId} type="button" className="cand" aria-pressed={picked.includes(t.txnId)}
+                  style={{ animationDelay: `${i * 45}ms` }}
+                  onClick={() => { setPicked((p) => (p.includes(t.txnId) ? p.filter((x) => x !== t.txnId) : [...p, t.txnId])); hapt(4); }}>
+                  <span className="pick">{TICK}</span>
+                  <span className="m">
+                    <b>{day(t.date)}{t.mode ? ` · ${t.mode}` : ''}</b>
+                    <span>{[t.note, !t.sameProject && t.projectId ? short(t.projectId) : '', t.free < t.total ? `${inr(t.total - t.free)} already on another bill` : ''].filter(Boolean).join(' · ') || 'In Book'}</span>
+                    <span className="tagslot">{why}</span>
+                  </span>
+                  <span className="r"><em>{inr(t.free)}</em></span>
+                </button>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="nonefound"><b>Nothing to link yet</b>No payment to {b.vendor} at {short(b.site)} is waiting without a bill.
+            {others ? '' : ' When one is entered in Book, it will show up here.'}</div>
+        )}
+        {(others > 0 || wide) && (
+          <button type="button" className="widen" aria-pressed={wide}
+            onClick={() => { setWide((w) => !w); setPicked([]); hapt(4); }}>
+            <span>Also look at {b.vendor.split(' ')[0]}&apos;s other sites{wide ? '' : ` · ${others} more`}</span><i className="sw" />
+          </button>
+        )}
+        <button type="button" className="wzbtn" disabled={!used.length} onClick={() => { hapt(6); setStep(2); }}>
+          {used.length ? `Next · ${inr(got)} from ${used.length} ${used.length === 1 ? 'payment' : 'payments'}` : 'Pick a payment'}
+        </button>
+      </div>
+    </div>
   );
 }
