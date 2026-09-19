@@ -145,11 +145,12 @@ export const BMX_CSS = `.bmx{
 .bmx .bigsheet{position:relative;display:block;width:calc(100% - 32px);margin:18px 16px 0;height:230px;padding:0;border:0;border-radius:16px;background:var(--sheet);overflow:hidden;box-shadow:0 18px 36px -22px rgba(43,33,26,.55),0 0 0 1px rgba(43,33,26,.07)}
 .bmx .bigsheet{background:#E9E2D5}
 .bmx .bigsheet .pp{position:absolute;left:50%;top:20px;width:176px;height:234px;margin-left:-88px;border-radius:6px;overflow:hidden;background:var(--sheet);transform:rotate(-1.6deg);box-shadow:0 16px 30px -14px rgba(43,33,26,.55),0 0 0 1px rgba(43,33,26,.06)}
+.bmx .bigsheet .pp .doc{position:absolute;inset:0;display:block}
 .bmx .bigsheet .pp svg,.bmx .bigsheet .pp img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
 .bmx .bigsheet::after{content:'';position:absolute;left:0;right:0;bottom:0;height:80px;background:linear-gradient(rgba(233,226,213,0),rgba(233,226,213,.97))}
-.bmx .bigsheet span{position:absolute;left:0;right:0;bottom:12px;z-index:1;text-align:center;font-size:13px;font-weight:600;color:var(--ink-2)}
+.bmx .bigsheet > span{position:absolute;left:0;right:0;bottom:12px;z-index:1;text-align:center;font-size:13px;font-weight:600;color:var(--ink-2)}
 .bmx .bigsheet.none{height:96px;background:none;box-shadow:none;border:1.5px dashed var(--line-2)}
-.bmx .bigsheet.none::after{display:none}.bmx .bigsheet.none span{bottom:36px}
+.bmx .bigsheet.none::after{display:none}.bmx .bigsheet.none > span{bottom:36px}
 .bmx .blk{margin:14px 16px 0;background:var(--paper);border:1px solid var(--line);border-radius:22px;overflow:hidden}
 .bmx .blk h3{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin:0;padding:15px 18px 11px;font-size:15px;font-weight:600}
 .bmx .blk h3 span{font-size:13px;font-weight:400;color:var(--ink-3)}
@@ -299,7 +300,8 @@ export const BMX_CSS = `.bmx{
 .bmx .viewer{position:fixed;inset:0;z-index:60;background:rgba(12,9,7,.95);display:grid;place-items:center;opacity:0;visibility:hidden;transition:opacity .3s,visibility 0s .3s}
 .bmx .viewer.on{opacity:1;visibility:visible;transition:opacity .3s,visibility 0s}
 .bmx .viewer .big{position:relative;width:min(88%,360px);aspect-ratio:3/4;border-radius:12px;background:var(--sheet);overflow:hidden}
-.bmx .viewer .big svg{position:absolute;inset:0;width:100%;height:100%}
+.bmx .viewer .big .doc{position:absolute;inset:0;display:block}
+.bmx .viewer .big svg,.bmx .viewer .big img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
 .bmx .viewer button{position:absolute;top:16px;right:16px;width:44px;height:44px;border:0;border-radius:22px;background:rgba(var(--cream),.12);color:rgb(var(--cream));display:grid;place-items:center}
 @media (prefers-reduced-motion:reduce){.bmx,.bmx *{transition-duration:.01ms!important;animation-duration:.01ms!important}}
 `;

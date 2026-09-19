@@ -21,7 +21,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useOrgId } from '../../lib/auth/AuthProvider';
-import { useSignedDocUrl } from '../../lib/storage';
+import { useSignedDocUrl, openDoc } from '../../lib/storage';
 import { useSheetDrag } from '../../lib/sheetDrag';
 import { useSheetFlag } from '../../lib/sheetFlag';
 import { usePullToRefresh, useLiveCount } from '../../lib/usePullToRefresh';
@@ -47,6 +47,8 @@ const monthName = (k: string) => (k === '0000-00' ? 'Undated'
 /** Whole days since the bill's date — what "due · 12 days" counts. */
 const ageOf = (b: BillRow) => (b.billDate ? Math.max(0, Math.round((Date.now() - new Date(b.billDate).getTime()) / 86400000)) : 0);
 const leftOf = (b: BillRow) => Math.max(0, b.amount - b.paid);
+/** A stored doc that is a PDF — it is opened, never rendered into an <img>. */
+const isPdfDoc = (u: string | null | undefined) => /\.pdf(\?|$)/i.test(u || '');
 const bucketOf = (b: BillRow) => { const a = ageOf(b); return a <= 7 ? 0 : a <= 30 ? 1 : 2; };
 
 const TICK = <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5" /></svg>;
@@ -75,10 +77,43 @@ function SheetArt({ seed }: { seed: string }) {
   );
 }
 
-/** The paper itself — the filed photograph when there is one, the drawing otherwise. */
+/** A PDF cannot be an <img>. It is still a paper, so it is drawn as one — the same sheet, its corner
+ *  turned, wearing the format's name. At 44px that reads as a red tag; at reading size it says PDF. */
+function PdfArt() {
+  return (
+    <svg viewBox="0 0 128 170" preserveAspectRatio="xMidYMin slice" aria-hidden="true">
+      <rect width="128" height="170" fill="#F4EFE6" />
+      <path d="M92 0h36L92 36z" fill="#E4DACA" />
+      <path d="M92 36h36V0z" fill="#EFE8DC" />
+      <rect x="12" y="14" width="48" height="7" rx="2" fill="#2B211A" opacity=".6" />
+      <rect x="12" y="27" width="30" height="4" rx="2" fill="#2B211A" opacity=".26" />
+      <rect x="12" y="44" width="104" height="6" fill="#2B211A" opacity=".1" />
+      {/* the format, named, high enough on the sheet to clear the caption a bill page lays over it */}
+      <rect x="12" y="60" width="62" height="26" rx="6" fill="#B5472A" />
+      <text x="43" y="78" textAnchor="middle" fontFamily="'DM Mono', ui-monospace, monospace" fontSize="15"
+        fontWeight="500" letterSpacing="1.4" fill="#F7F2EA">PDF</text>
+      {[100, 112, 124].map((y, i) => (
+        <g key={y}><rect x="12" y={y} width={48 + i * 14} height="3.5" rx="1.75" fill="#2B211A" opacity=".18" />
+          <rect x="94" y={y} width="22" height="3.5" rx="1.75" fill="#2B211A" opacity=".18" /></g>
+      ))}
+    </svg>
+  );
+}
+
+/** The paper itself — the filed photograph when there is one, the drawing otherwise.
+ *  A PDF never resolves into an <img> (that is the blank box the detail page used to show), and a
+ *  photograph that will not load falls back to the drawing rather than to nothing. */
 function Paper({ b, className }: { b: { id: string; docUrl: string | null }; className?: string }) {
-  const url = useSignedDocUrl(b.docUrl);
-  return <span className={className ?? 'sheet'}>{url ? <img src={url} alt="" /> : <SheetArt seed={b.id} />}</span>;
+  const pdf = isPdfDoc(b.docUrl);
+  const url = useSignedDocUrl(pdf ? null : b.docUrl);
+  const [badUrl, setBadUrl] = useState<string | null>(null);
+  return (
+    <span className={className ?? 'sheet'}>
+      {pdf ? <PdfArt />
+        : url && url !== badUrl ? <img src={url} alt="" onError={() => setBadUrl(url)} />
+          : <SheetArt seed={b.id} />}
+    </span>
+  );
 }
 
 type Lens = 'bills' | 'vendors';
@@ -206,7 +241,6 @@ export default function BillsMobile() {
 
   const bill = openBill ? B.find((b) => b.id === openBill) ?? null : null;
   const pageOn = !!bill || !!openVendor;
-  const payable = !!bill && leftOf(bill) > 0;
 
   function statusOf(b: BillRow) {
     const l = leftOf(b), a = ageOf(b);
@@ -219,7 +253,7 @@ export default function BillsMobile() {
   const billRow = (b: BillRow) => (
     <button key={b.id} type="button" className={`bill${b.id === litId ? ' lit' : ''}`}
       onClick={() => { setOpenBill(b.id); setLitId(''); hapt(6); }}>
-      <Paper b={b} className={`sheet${b.docUrl ? '' : ''}`} />
+      <Paper b={b} />
       <span className="bx">
         <span className="b1"><b>{b.vendor}</b><span className="amt">{inr(b.amount)}</span></span>
         <span className="b2">
@@ -337,20 +371,16 @@ export default function BillsMobile() {
 
       <div className={`viewer${zoom ? ' on' : ''}`} {...(zoom ? { role: 'dialog' as const, 'aria-modal': true } : {})} aria-label="The bill"
         onClick={(e) => { if (e.target === e.currentTarget) setZoom(null); }}>
-        <div className="big">{zoom && <Paper b={zoom} className="" />}</div>
+        <div className="big">{zoom && <Paper b={zoom} className="doc" />}</div>
         <button type="button" aria-label="Close" onClick={() => setZoom(null)}>{CLOSE}</button>
       </div>
 
-      <button type="button" data-page-cta className={`fab${folded ? ' folded' : ''}${(pageOn && !payable) || panel ? ' away' : ''}`}
-        style={{ ['--w' as string]: payable ? '170px' : '120px' }}
-        aria-label={payable ? 'Link a payment' : 'Add a bill'}
-        onClick={() => { if (bill && payable) setPanel({ kind: 'link', billId: bill.id }); else setParams({ new: '1' }); }}>
-        <span className="ic">
-          {payable
-            ? <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1" /><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" /></svg>
-            : <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>}
-        </span>
-        <span className="lbl">{payable ? 'Link a payment' : 'Bill'}</span>
+      {/* One button, one job: a new bill. Linking a payment lives on the bill page itself, where the
+          money it is being linked to is — a second, floating copy of it only asked the same question twice. */}
+      <button type="button" data-page-cta className={`fab${folded ? ' folded' : ''}${pageOn || panel ? ' away' : ''}`}
+        style={{ ['--w' as string]: '120px' }} aria-label="Add a bill" onClick={() => setParams({ new: '1' })}>
+        <span className="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg></span>
+        <span className="lbl">Bill</span>
       </button>
 
       <div className={`toast${toast ? ' on' : ''}`} role="status"><span>{toast?.text ?? ''}</span></div>
@@ -462,8 +492,9 @@ function BillPage({ b, backTo, fit, orgId, onBack, onSay, onZoom, onLink, onLink
       )}
 
       <button type="button" className={`bigsheet${b.docUrl ? '' : ' none'}`}
-        onClick={() => (b.docUrl ? onZoom() : onSay('Opens the camera to add the paper'))}>
-        {b.docUrl ? <><i className="pp"><Paper b={b} className="" /></i><span>Tap to see the whole bill</span></>
+        onClick={() => (!b.docUrl ? onSay('Opens the camera to add the paper') : isPdfDoc(b.docUrl) ? void openDoc(b.docUrl) : onZoom())}>
+        {b.docUrl ? <><i className="pp"><Paper b={b} className="doc" /></i>
+          <span>{isPdfDoc(b.docUrl) ? 'A PDF — tap to open it' : 'Tap to see the whole bill'}</span></>
           : <span>No photo. Typed in by hand. Add the paper</span>}
       </button>
 

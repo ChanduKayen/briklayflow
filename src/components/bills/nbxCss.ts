@@ -10,6 +10,10 @@ export const NBX_CSS = `
   --cream:#FAF7F0; --paper:#FFFDF7; --ink:#2A241C; --walnut:#6E5F4C; --soft:#9A8C77;
   --rule:#E6DECD; --terra:#C0603F; --terra-soft:#F7E9E2; --sage:#6E8260; --sage-soft:#E4EADD;
   --amber:#9A6A1F; --amber-soft:#F5EDDA;
+  /* the drawer the phone wears — the same night the transactions slide-up is cut from */
+  --night:#170E08; --night-bg:linear-gradient(180deg,#191009,#140D07); --night-edge:#302014;
+  --lift:0 24px 50px -16px rgba(20,13,7,.72), 0 0 0 1px rgba(245,240,231,.10), inset 0 1px 0 rgba(245,240,231,.34);
+  --cream:250,248,243; --clay:#B5472A; --clay-hi:#D4633E; --ease:cubic-bezier(.22,.8,.24,1);
   --serif:'Playfair Display', Georgia, serif;
   --sans:'DM Sans', -apple-system, sans-serif;
   --mono:'DM Mono', 'SF Mono', Consolas, monospace;
@@ -119,23 +123,79 @@ export const NBX_CSS = `
 .nbx .btn:disabled{opacity:.35; transform:none; cursor:not-allowed}
 .nbx .btn.ok{background:var(--sage)}
 
-/* ---------- the phone: it came up from the bottom, it goes back that way ---------- */
+/* ---------- the phone: the night drawer ----------
+   Not a page-wide card with square shoulders, but the drawer every other sheet on the phone is:
+   inset from all three edges, cut from the same night as the transactions slide-up, lifted off the
+   page rather than pasted to its bottom. Everything below re-inks the daylight form for that ground. */
 .nbx.sheet{place-items:end center; padding:0}
-.nbx.sheet .modal{width:100%; max-width:none; max-height:92vh; border-radius:22px 22px 0 0;
-  animation:nbx-rise .34s cubic-bezier(.2,.9,.3,1.05); transition:transform .28s cubic-bezier(.2,.9,.3,1)}
-@keyframes nbx-rise{from{transform:translateY(100%)}to{transform:none}}
-.nbx.sheet .grab{width:38px; height:4px; border-radius:99px; background:var(--rule); margin:9px auto 0; flex:none}
-.nbx.sheet .m-head{padding:12px 20px 12px}
-.nbx.sheet .m-body{padding:2px 20px 8px; -webkit-overflow-scrolling:touch}
-.nbx.sheet .m-foot{padding:14px 20px calc(16px + env(safe-area-inset-bottom,0px)); flex-wrap:wrap}
-.nbx.sheet .consequence{flex:1 1 100%; order:1; margin-bottom:2px}
-.nbx.sheet .actions{order:2; flex:1 1 100%; gap:12px}
-.nbx.sheet .btn,.nbx.sheet .btn-quiet{flex:1; padding:14px 18px; min-height:48px}
-.nbx.sheet .btn{flex:1.4}
-.nbx.sheet .f2{gap:16px}
-.nbx.sheet .dropzone{padding:30px 18px}
+.nbx.sheet .backdrop{background:rgba(9,6,3,.52); backdrop-filter:saturate(.8) blur(1.5px); -webkit-backdrop-filter:saturate(.8) blur(1.5px)}
+.nbx.sheet .modal{width:calc(100% - 24px); max-width:406px; margin:0 0 calc(12px + env(safe-area-inset-bottom,0px));
+  max-height:calc(100dvh - 24px); border-radius:32px; background:var(--night-bg); color:rgb(var(--cream));
+  box-shadow:var(--lift); animation:nbx-lift .46s var(--ease);
+  transition:transform .28s var(--ease), opacity .28s}
+@keyframes nbx-lift{from{transform:translateY(24px) scale(.96); opacity:0}to{transform:none; opacity:1}}
+.nbx.sheet .modal.leaving{transition:transform .32s var(--ease), opacity .3s; transform:translateY(24px) scale(.96); opacity:0}
+.nbx.sheet .grab{width:36px; height:4px; border-radius:2px; background:rgba(var(--cream),.18); margin:8px auto 0}
+.nbx.sheet .m-head{padding:8px 18px 10px}
+.nbx.sheet .m-head b{font-size:21px; color:rgb(var(--cream))}
+.nbx.sheet .m-head .qn{color:rgba(var(--cream),.56)}
+.nbx.sheet .m-x{width:40px; height:40px; margin:-4px -8px 0 0; border-radius:20px; color:rgba(var(--cream),.7); font-size:16px}
+.nbx.sheet .m-x:hover{background:rgba(var(--cream),.08); color:rgb(var(--cream))}
+.nbx.sheet .m-body{padding:2px 18px 8px; -webkit-overflow-scrolling:touch}
+
+/* the drop */
+.nbx.sheet .dropzone{border:1.5px dashed rgba(var(--cream),.22); border-radius:20px; background:rgba(var(--cream),.04);
+  color:rgb(var(--cream)); padding:28px 18px}
+.nbx.sheet .dropzone:hover,.nbx.sheet .dropzone.over{border-color:rgba(var(--cream),.45); background:rgba(var(--cream),.08)}
+.nbx.sheet .dropzone .dz-ic{color:rgba(var(--cream),.6)}
+.nbx.sheet .dropzone span{color:rgba(var(--cream),.56)}
+.nbx.sheet .orline{color:rgba(var(--cream),.52)}
+.nbx.sheet .orline::before,.nbx.sheet .orline::after{background:rgba(var(--cream),.12)}
+.nbx.sheet .manual-link{color:rgba(var(--cream),.82)}
+.nbx.sheet .manual-link:hover{color:rgb(var(--cream))}
+.nbx.sheet .reading{border-color:rgba(var(--cream),.14)}
+.nbx.sheet .reading b{color:rgb(var(--cream))}
+.nbx.sheet .reading span{color:rgba(var(--cream),.56)}
+.nbx.sheet .rd-doc{border-color:rgba(var(--cream),.16); background:rgba(var(--cream),.06)}
+.nbx.sheet .readfail{border-color:rgba(212,99,62,.32); background:rgba(212,99,62,.14); color:#EFAE93}
+
+/* the form */
+.nbx.sheet .flabel{color:rgba(var(--cream),.56)}
+.nbx.sheet .flabel .opt{color:rgba(var(--cream),.45)}
+.nbx.sheet .ftick{background:rgba(143,199,154,.2); color:#A9D6B1}
 /* 16px floor: anything smaller and the phone zooms the page on focus */
-.nbx.sheet .finput{font-size:16.5px}
+.nbx.sheet .finput{font-size:16.5px; color:rgb(var(--cream)); border-bottom-color:rgba(var(--cream),.16); caret-color:var(--clay-hi)}
+.nbx.sheet .finput:focus{border-bottom-color:rgba(var(--cream),.5)}
+.nbx.sheet .finput::placeholder{color:rgba(var(--cream),.45)}
+/* the OS paints the option list itself — it needs daylight ink of its own or it comes out unreadable */
+.nbx.sheet select.finput{color-scheme:dark}
+.nbx.sheet select.finput option{color:var(--ink); background:var(--paper)}
+.nbx.sheet input[type="date"]::-webkit-calendar-picker-indicator{filter:invert(1); opacity:.5}
+.nbx.sheet .frow.inked .finput{animation:none}
+.nbx.sheet .locked{color:rgb(var(--cream)); border-bottom-color:rgba(var(--cream),.16)}
+.nbx.sheet .locked em{color:rgba(var(--cream),.56)}
+.nbx.sheet .ta{background:#1F150E; border-color:rgba(var(--cream),.12); box-shadow:0 22px 44px -22px rgba(0,0,0,.8)}
+.nbx.sheet .ta-item{color:rgb(var(--cream))}
+.nbx.sheet .ta-item:hover,.nbx.sheet .ta-item.hot{background:rgba(var(--cream),.07)}
+.nbx.sheet .ta-item .ta-av{background:rgba(var(--cream),.09); border-color:transparent; color:rgba(var(--cream),.8)}
+.nbx.sheet .ta-item span{color:rgba(var(--cream),.56)}
+.nbx.sheet .ta-new{border-top-color:rgba(var(--cream),.12); color:var(--clay-hi)}
+.nbx.sheet .dupe{background:rgba(196,146,58,.15); color:#E3BE7C}
+.nbx.sheet .dupe .lnk{color:#E3BE7C}
+.nbx.sheet .dupe .anyway input{accent-color:#E3BE7C}
+
+/* the consequence, then the two buttons — the drawer's own footing */
+.nbx.sheet .m-foot{border-top-color:rgba(var(--cream),.1); padding:14px 18px calc(16px + env(safe-area-inset-bottom,0px)); flex-wrap:wrap}
+.nbx.sheet .consequence{flex:1 1 100%; order:1; margin-bottom:2px; color:rgba(var(--cream),.66)}
+.nbx.sheet .consequence b{color:rgb(var(--cream))}
+.nbx.sheet .consequence .up{color:var(--clay-hi)}
+.nbx.sheet .actions{order:2; flex:1 1 100%; gap:10px}
+.nbx.sheet .btn,.nbx.sheet .btn-quiet{flex:1; height:50px; padding:0 18px; border-radius:16px; font-size:15px}
+.nbx.sheet .btn{flex:1.4; background:var(--clay); color:#fff}
+.nbx.sheet .btn.ok{background:#4E8A5E}
+.nbx.sheet .btn-quiet{border:0; background:rgba(var(--cream),.08); color:rgba(var(--cream),.85)}
+.nbx.sheet .btn-quiet:hover{background:rgba(var(--cream),.13)}
+.nbx.sheet .f2{gap:16px}
 
 @media (prefers-reduced-motion:reduce){
   .nbx .modal,.nbx .dupe{animation:none}
