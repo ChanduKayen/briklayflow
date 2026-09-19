@@ -50,7 +50,7 @@ export const LMX_CSS = `
 .lmx-compact small{font-family:'DM Sans',system-ui,sans-serif;font-size:12px;color:rgba(250,248,243,.5);margin-left:6px}
 .lmx-compact small.f{color:#D4633E}
 
-.lmx .tools{position:sticky;top:52px;z-index:6;padding:12px 16px 8px;background:linear-gradient(var(--ground) 88%,rgba(250,248,243,0));
+.lmx .tools{position:sticky;top:52px;z-index:6;padding:12px 16px 10px;background:var(--ground);box-shadow:0 8px 10px -8px rgba(43,33,26,.14);
   transition:transform .34s var(--ease),opacity .25s ease}
 .lmx.selecting .tools{top:56px}
 .lmx .tools.tuck{transform:translateY(-120%);opacity:0;pointer-events:none}

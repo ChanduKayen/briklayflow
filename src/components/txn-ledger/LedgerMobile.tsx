@@ -277,6 +277,24 @@ export function LedgerMobile({ rows, wallets, categories, sites, loading, refetc
     return () => document.removeEventListener('keydown', esc);
   }, [panel, selecting, exitSelect]);
 
+  // Hardware / browser BACK closes whatever is open — a peek, a panel, the selection, a wallet ledger —
+  // instead of leaving the page. One guard history entry is pushed while any layer is open, and consumed
+  // again when the layer closes by other means (tap X, scrim), so back stays in step with the screen.
+  const layer = peek ? 'peek' : panel ? 'panel' : selecting ? 'sel' : ledger ? 'ledger' : '';
+  const guardRef = useRef(false);
+  useEffect(() => {
+    if (layer && !guardRef.current) { guardRef.current = true; try { window.history.pushState({ lmxLayer: true }, ''); } catch { /* ignore */ } }
+    else if (!layer && guardRef.current) { guardRef.current = false; try { if ((window.history.state as { lmxLayer?: boolean } | null)?.lmxLayer) window.history.back(); } catch { /* ignore */ } }
+  }, [layer]);
+  useEffect(() => {
+    const onPop = () => {
+      guardRef.current = false;            // our guard entry was just popped
+      if (peek) setPeek(null); else if (panel) setPanel(null); else if (selecting) exitSelect(); else if (ledger) setLedger('');
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, [peek, panel, selecting, ledger, exitSelect]);
+
   // ── rows ──
   const openWallet = (name: string) => {
     setLedger(name); setCut('all'); setUnlinkedOnly(false); setQuery(''); setF({ site: '', clip: false, min: 0 }); setPanel(null);
