@@ -8,6 +8,7 @@
 import { supabase } from './supabase';
 import { billDateOf, BILL_DATE_COLUMNS } from './partyLedger';
 import { removeCredit } from './ledgerWrite';
+import { isWageSettleNote, WAGE_SETTLE_NOTE } from './attendanceApi';
 
 export type EntryKind = 'payment' | 'certified' | 'wage' | 'bill' | 'adjustment' | 'opening' | 'start' | 'consolidated';
 export interface LedgerEntry {
@@ -102,12 +103,12 @@ export async function loadWorkerWageEntries(stakeholderId: string): Promise<Omit
     };
     const catIds = Object.keys(catRate);
     if (catIds.length) {
-      const aR = await supabase.from('labour_attendance').select('category_id, value, work_date').eq('subject_type', 'crew_category').in('category_id', catIds);
+      const aR = await supabase.from('labour_attendance').select('category_id, value, work_date').eq('subject_type', 'crew_category').in('category_id', catIds).is('settled_at', null);
       (aR.data ?? []).forEach((a: any) => { const c = catRate[a.category_id]; if (!c) return; addWage(`crew-${c.crewId}`, a.work_date, crewProj[c.crewId] ?? null, num(a.value) * c.rate); });
     }
     const directIds = directs.map((w: any) => w.id);
     if (directIds.length) {
-      const aR = await supabase.from('labour_attendance').select('direct_worker_id, value, work_date').eq('subject_type', 'direct').in('direct_worker_id', directIds);
+      const aR = await supabase.from('labour_attendance').select('direct_worker_id, value, work_date').eq('subject_type', 'direct').in('direct_worker_id', directIds).is('settled_at', null);
       (aR.data ?? []).forEach((a: any) => { const m = directMeta[a.direct_worker_id]; if (!m) return; addWage(`direct-${a.direct_worker_id}`, a.work_date, m.projectId, num(a.value) * m.rate); });
     }
     return Object.entries(wageByKey).map(([k, w]) => ({
@@ -131,7 +132,7 @@ export async function loadPartyLedger(stakeholderId: string): Promise<PartyLedge
     supabase.from('party_adjustments').select('*').eq('stakeholder_id', stakeholderId),
     supabase.from('consolidated_bills').select('*').eq('stakeholder_id', stakeholderId).order('period_to'),
     // Approved work certifications = the governed certified obligation (replaces raw stage readings).
-    supabase.from('work_certifications').select('id, wo_id, milestone_id, reading_kind, computed_amount, reading_date, project_id, status, source, txn_id').eq('stakeholder_id', stakeholderId).eq('status', 'approved'),
+    supabase.from('work_certifications').select('id, wo_id, milestone_id, reading_kind, computed_amount, reading_date, project_id, status, source, txn_id, note').eq('stakeholder_id', stakeholderId).eq('status', 'approved'),
     // The single-source balance (cutover-applied) — authoritative for the hero's to_pay / advance.
     supabase.from('v_party_balance').select('billed, paid, without_bills, to_pay, advance').eq('stakeholder_id', stakeholderId).maybeSingle(),
     // Bill LINES from the SAME view the balance sums — so headline and rows are two projections of one
@@ -237,9 +238,14 @@ export async function loadPartyLedger(stakeholderId: string): Promise<PartyLedge
       const amt = num(wc.computed_amount);
       if (amt <= 0.5) continue;
       const pid = wc.project_id ?? null;
+      // A fold of day wages into the contract reads as exactly that — the days were worked and paid as
+      // wages, and the contract carries them instead of a second amount owed.
+      const fromWages = isWageSettleNote(wc.note);
       entries.push({
         id: `cert-${wc.id}`, date: wc.reading_date, kind: 'certified',
-        particulars: 'Contract certified work', projectId: pid, projectName: pid ? (projName[pid] || pid) : null,
+        particulars: fromWages ? 'Wages, set against the contract' : 'Contract certified work',
+        detail: fromWages ? (String(wc.note).slice(WAGE_SETTLE_NOTE.length + 1) || undefined) : undefined,
+        projectId: pid, projectName: pid ? (projName[pid] || pid) : null,
         contractId: wc.wo_id ?? null, paid: 0, cert: amt,
       });
       if (wc.wo_id) contractCert[wc.wo_id] = (contractCert[wc.wo_id] || 0) + amt;
@@ -295,11 +301,11 @@ export async function loadPartyLedger(stakeholderId: string): Promise<PartyLedge
         (wageByKey[k] ||= { date, projectId, amount: 0, label }).amount += amount;
       };
       if (catIds.length) {
-        const aR = await supabase.from('labour_attendance').select('category_id, value, work_date').eq('subject_type', 'crew_category').in('category_id', catIds);
+        const aR = await supabase.from('labour_attendance').select('category_id, value, work_date').eq('subject_type', 'crew_category').in('category_id', catIds).is('settled_at', null);
         (aR.data ?? []).forEach((a: any) => { const c = catRate[a.category_id]; if (!c) return; addWage(`crew-${c.crewId}`, a.work_date, crewProj[c.crewId] ?? null, num(a.value) * c.rate, 'Wages'); });
       }
       if (directIds.length) {
-        const aR = await supabase.from('labour_attendance').select('direct_worker_id, value, work_date').eq('subject_type', 'direct').in('direct_worker_id', directIds);
+        const aR = await supabase.from('labour_attendance').select('direct_worker_id, value, work_date').eq('subject_type', 'direct').in('direct_worker_id', directIds).is('settled_at', null);
         (aR.data ?? []).forEach((a: any) => { const m = directMeta[a.direct_worker_id]; if (!m) return; addWage(`direct-${a.direct_worker_id}`, a.work_date, m.projectId, num(a.value) * m.rate, 'Wages'); });
       }
       for (const [k, w] of Object.entries(wageByKey)) {

@@ -356,7 +356,7 @@ export default function PartyLedgerMobile(p: PartyLedgerMobileProps) {
                 <span className="dt">{shortDate(e.date)}</span>
                 <span>
                   <span className="what" style={{ display: 'block' }}>{e.particulars}</span>
-                  {(e.mode || e.projectName) && <span className="who" style={{ display: 'block' }}>{[e.mode, e.projectName].filter(Boolean).join(' · ')}</span>}
+                  {(e.mode || e.projectName || e.detail) && <span className="who" style={{ display: 'block' }}>{[e.mode, e.detail, e.projectName].filter(Boolean).join(' · ')}</span>}
                   {e.contractId && <span className="po-ref" style={{ display: 'block' }}>for {e.contractId}</span>}
                   {e.kind === 'payment' && !e.unbilled && e.contractId && (
                     <span className="tagline" style={{ display: 'block' }}><span className="tag">{isVendor ? 'Billed on a PO' : 'On a contract'}</span></span>

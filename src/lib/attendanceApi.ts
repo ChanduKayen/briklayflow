@@ -295,15 +295,18 @@ export async function addCategory(orgId: string, crewId: string, category: strin
   const { error } = await supabase.from('labour_crew_categories').insert({ org_id: orgId, crew_id: crewId, category, rate });
   if (error) throw error;
 }
-export async function addDirectWorker(orgId: string, projectId: string, name: string, category: string, rate: number, stakeholderId?: string): Promise<void> {
+export async function addDirectWorker(orgId: string, projectId: string, name: string, category: string, rate: number, stakeholderId?: string): Promise<string> {
   // A single worker added here is a day-wage engagement (confirmed basis).
-  const { error } = await supabase.from('labour_direct_workers').insert({ org_id: orgId, project_id: projectId, name, category, rate, stakeholder_id: stakeholderId ?? null, accrual_basis: 'day', basis_confirmed: true });
+  const { data, error } = await supabase.from('labour_direct_workers')
+    .insert({ org_id: orgId, project_id: projectId, name, category, rate, stakeholder_id: stakeholderId ?? null, accrual_basis: 'day', basis_confirmed: true })
+    .select('id').single();
   if (error) throw error;
+  return data!.id as string;
 }
 export async function addCrew(
   orgId: string, projectId: string, name: string, trade: string | null,
   cats: { category: string; rate: number }[], stakeholderId?: string,
-): Promise<void> {
+): Promise<string> {
   const { data, error } = await supabase.from('labour_crews')
     .insert({ org_id: orgId, project_id: projectId, name, trade, description: trade || 'Labour', stakeholder_id: stakeholderId ?? null, accrual_basis: 'day', basis_confirmed: true })
     .select('crew_id').single();
@@ -312,6 +315,7 @@ export async function addCrew(
     const { error: e2 } = await supabase.from('labour_crew_categories').insert(cats.map(c => ({ org_id: orgId, crew_id: data!.crew_id, category: c.category, rate: c.rate })));
     if (e2) throw e2;
   }
+  return data!.crew_id as string;
 }
 
 // Starter rate card — sensible regional defaults for a fresh org (from the reference).
@@ -529,13 +533,32 @@ export async function loadCrewSettlement(crewId: string): Promise<CrewSettlement
 }
 
 export interface SettlementStep { milestoneId: string; applied: number }
-/** Commit a settlement: certify each step's amount to its phase (governed), then stamp the covered
- *  attendance rows settled_at so they no longer mint a day-wage credit. rowIds should cover Σ applied. */
+/** What a settlement actually did. `approved` is the ₹ that became an approved certification (and so
+ *  left the wage column); `pending` is the ₹ that went for someone else's approval — that wage STAYS
+ *  owed as a wage until it is approved, so nothing ever falls between the two columns. */
+export interface SettlementResult { approved: number; pending: number; settledRows: number }
+
+/** The note every wages-settlement certification carries — the durable record that this ₹ of contract
+ *  work was not measured on site but set against the day wages. The ledger and the contract page read
+ *  this prefix to word the line; don't change it without changing them. */
+export const WAGE_SETTLE_NOTE = 'Wages set against';
+export const wageSettleNote = (phaseName: string) => `${WAGE_SETTLE_NOTE} ${phaseName}`;
+export const isWageSettleNote = (note: string | null | undefined) => !!note && note.startsWith(WAGE_SETTLE_NOTE);
+
+/** Commit a settlement: certify each step's amount to its phase (governed), then stamp the attendance
+ *  rows that the APPROVED certifications cover so they no longer mint a day-wage credit.
+ *
+ *  A certification beyond the submitter's authority comes back `pending` — it is not owed yet (same
+ *  discipline as a pending PO). Stamping its days settled would delete the wage from the ledger while
+ *  no contract credit stands in its place, so those days are deliberately left unsettled: the wage
+ *  keeps standing until the approval lands, and the next save folds them again. Steps are consumed in
+ *  phase order, so coverage stops at the first step that is not approved. */
 export async function commitCrewSettlement(p: {
   orgId: string; crewId: string; projectId: string | null; woId: string; stakeholderId: string | null;
   phases: SettlementPhase[]; steps: SettlementStep[]; rowIds: string[]; settleDate: string;
-}): Promise<void> {
+}): Promise<SettlementResult> {
   const byId: Record<string, SettlementPhase> = {}; p.phases.forEach(ph => { byId[ph.milestoneId] = ph; });
+  let covered = 0, pending = 0, stillCovering = true;
   for (const st of p.steps) {
     if (!(st.applied > 0)) continue;
     const ph = byId[st.milestoneId]; if (!ph) continue;
@@ -548,42 +571,131 @@ export async function commitCrewSettlement(p: {
       readingValue = ph.rate ? st.applied / ph.rate : 0;     // measured: the INCREMENTAL qty (Σ approved = total)
       computedAmount = Math.round(st.applied);
     }
-    await submitWorkCertification({
+    const res = await submitWorkCertification({
       orgId: p.orgId, projectId: p.projectId || '', woId: p.woId, milestoneId: st.milestoneId,
       crewId: p.crewId, stakeholderId: p.stakeholderId, readingKind: ph.kind,
-      readingValue, computedAmount, readingDate: p.settleDate, note: `Attendance settled to ${ph.name}`,
+      readingValue, computedAmount, readingDate: p.settleDate, note: wageSettleNote(ph.name),
     });
+    if (res.status === 'approved' && stillCovering) covered += st.applied;
+    else { stillCovering = false; pending += st.applied; }
   }
-  if (p.rowIds.length) {
-    const { error } = await supabase.from('labour_attendance').update({ settled_at: p.settleDate }).in('id', p.rowIds);
+  // Only the whole days the approved ₹ covers are stamped settled.
+  let settle: string[] = [];
+  if (covered > 0 && p.rowIds.length) {
+    const amountOf = await rowAmounts(p.rowIds);
+    settle = daysCovered(p.rowIds.map(id => ({ id, amount: amountOf[id] ?? 0 })), covered);
+  }
+  if (settle.length) {
+    const { error } = await supabase.from('labour_attendance').update({ settled_at: p.settleDate }).in('id', settle);
     if (error) throw error;
   }
+  return { approved: Math.round(covered), pending: Math.round(pending), settledRows: settle.length };
 }
 
-/** Auto-fold a wages-mode crew's unsettled day-wages into its chosen phases (stage_ids order, capped,
- *  rolling to the next). Certifies against each phase (reduces its value) and stamps the covered
- *  attendance settled. No-op when nothing is unsettled or no phase has room. Runs on each attendance save. */
-export async function autoSettleCrewWages(crewId: string, orgId: string): Promise<void> {
-  const s = await loadCrewSettlement(crewId);
-  if (!s.woId || s.unsettled.amount <= 0 || !s.phases.length) return;
-  let left = s.unsettled.amount;
+/** The leading whole days an approved ₹ pays for. A day is never half-settled: a row is stamped only
+ *  when the approved amount reaches all the way past it, and the first row it cannot reach stops the
+ *  run — the days after it keep standing as wages. Pure. */
+export function daysCovered(rows: { id: string; amount: number }[], covered: number): string[] {
+  const out: string[] = []; let cum = 0;
+  for (const r of rows) {
+    if (cum + r.amount > covered + 0.5) break;
+    cum += r.amount; out.push(r.id);
+  }
+  return out;
+}
+
+/** Plan a fold: which phases the unsettled wages come off — in order, each capped at the room it has
+ *  left, the remainder rolling to the next — and the whole days that plan covers. The last step is
+ *  trimmed to the last whole day so what is certified and what is settled are always the same ₹.
+ *  Pure: the same muster and the same phases always give the same plan. */
+export function planWageFold(rows: SettlementRow[], phases: SettlementPhase[]): { steps: SettlementStep[]; rowIds: string[] } {
+  const none = { steps: [], rowIds: [] };
+  const total = rows.reduce((a, r) => a + r.amount, 0);
+  if (total <= 0) return none;
+  let left = total;
   const steps: SettlementStep[] = [];
-  for (const ph of s.phases) {                       // phases are in seq order
+  for (const ph of phases) {                          // phases are in seq order
     if (left <= 0) break;
     if (ph.remaining <= 0) continue;
     const applied = Math.min(left, ph.remaining);
     steps.push({ milestoneId: ph.milestoneId, applied });
     left -= applied;
   }
-  if (!steps.length) return;
+  if (!steps.length) return none;
   const placed = steps.reduce((a, b) => a + b.applied, 0);
   let cum = 0; const rowIds: string[] = [];
-  for (const r of s.rows) { if (cum + r.amount <= placed) { cum += r.amount; rowIds.push(r.id); } else break; }
-  let over = placed - cum;                            // trim the last step(s) so certified == settled (whole days)
+  for (const r of rows) { if (cum + r.amount <= placed) { cum += r.amount; rowIds.push(r.id); } else break; }
+  let over = placed - cum;
   for (let k = steps.length - 1; k >= 0 && over > 0; k--) { const cut = Math.min(steps[k].applied, over); steps[k].applied -= cut; over -= cut; }
-  const finalSteps = steps.filter((st) => st.applied > 0);
-  if (!finalSteps.length || !rowIds.length) return;
-  await commitCrewSettlement({ orgId, crewId, projectId: s.projectId, woId: s.woId, stakeholderId: s.stakeholderId, phases: s.phases, steps: finalSteps, rowIds, settleDate: new Date().toISOString().slice(0, 10) });
+  const kept = steps.filter((st) => st.applied > 0);
+  if (!kept.length || !rowIds.length) return none;
+  return { steps: kept, rowIds };
+}
+
+/** ₹ of each attendance row, by id — the settle step re-reads them so it never stamps a day the
+ *  approved certification does not actually cover. */
+async function rowAmounts(ids: string[]): Promise<Record<string, number>> {
+  const out: Record<string, number> = {};
+  const { data } = await supabase.from('labour_attendance').select('id, value, category_id').in('id', ids);
+  const rows = (data ?? []) as { id: string; value: number | null; category_id: string | null }[];
+  const catIds = [...new Set(rows.map(r => r.category_id).filter((c): c is string => !!c))];
+  const rate: Record<string, number> = {};
+  if (catIds.length) {
+    const { data: cats } = await supabase.from('labour_crew_categories').select('id, rate').in('id', catIds);
+    (cats ?? []).forEach((c: { id: string; rate: number | null }) => { rate[c.id] = Number(c.rate) || 0; });
+  }
+  rows.forEach(r => { out[r.id] = Math.round((Number(r.value) || 0) * (rate[r.category_id ?? ''] || 0)); });
+  return out;
+}
+
+/** Auto-fold a wages-mode crew's unsettled day-wages into its chosen phases (stage_ids order, capped,
+ *  rolling to the next). Certifies against each phase (reduces what is left to certify on it) and
+ *  stamps the covered attendance settled. No-op when nothing is unsettled, no phase has room, or a
+ *  previous fold is still waiting for someone to approve it (folding again would double-submit).
+ *  Runs on each attendance save for a crew on wages-against-contract. */
+export function autoSettleCrewWages(crewId: string, orgId: string): Promise<SettlementResult | null> {
+  // One fold at a time per crew. A single edit can write several wage-type rows at once, and each one
+  // asks for a fold; run them together and both read the same "unsettled" figure and certify it twice.
+  // Queued, the second run sees the first's writes and finds nothing left to do.
+  const prev = foldQueue.get(crewId) ?? Promise.resolve();
+  const next = prev.catch(() => {}).then(() => foldCrewWages(crewId, orgId));
+  foldQueue.set(crewId, next.then(() => {}, () => {}));
+  return next;
+}
+const foldQueue = new Map<string, Promise<void>>();
+
+async function foldCrewWages(crewId: string, orgId: string): Promise<SettlementResult | null> {
+  const s = await loadCrewSettlement(crewId);
+  if (!s.woId || s.unsettled.amount <= 0 || !s.phases.length) return null;
+  const { data: waiting } = await supabase.from('work_certifications')
+    .select('id').eq('crew_id', crewId).eq('status', 'pending').limit(1);
+  if (waiting && waiting.length) return { approved: 0, pending: 0, settledRows: 0 };
+  const { steps, rowIds } = planWageFold(s.rows, s.phases);
+  if (!steps.length) return null;
+  return commitCrewSettlement({ orgId, crewId, projectId: s.projectId, woId: s.woId, stakeholderId: s.stakeholderId, phases: s.phases, steps, rowIds, settleDate: new Date().toISOString().slice(0, 10) });
+}
+
+/** A contract's day-wages already set against it, per phase — what the contract page shows as work
+ *  accounted for without a site measurement. Only APPROVED certifications count (a pending one is not
+ *  owed yet), and lump phases read their latest, exactly as the ledger does. */
+export async function wagesSetAgainstContract(woId: string): Promise<{ byMilestone: Record<string, number>; total: number }> {
+  const out: Record<string, number> = {};
+  const { data } = await supabase.from('work_certifications')
+    .select('milestone_id, reading_kind, computed_amount, reading_date, note, status')
+    .eq('wo_id', woId).eq('status', 'approved');
+  type CertRow = { milestone_id: string | null; reading_kind: string; computed_amount: number | null; reading_date: string | null; note: string | null };
+  const rows = ((data ?? []) as CertRow[]).filter((r): r is CertRow & { milestone_id: string } => isWageSettleNote(r.note) && !!r.milestone_id);
+  const latestLump: Record<string, { d: string; amt: number }> = {};
+  rows.forEach(r => {
+    const amt = Number(r.computed_amount) || 0;
+    if (r.reading_kind === 'lump') {
+      const cur = latestLump[r.milestone_id];
+      if (!cur || (r.reading_date || '') > cur.d) latestLump[r.milestone_id] = { d: r.reading_date || '', amt };
+    } else out[r.milestone_id] = (out[r.milestone_id] || 0) + amt;
+  });
+  Object.entries(latestLump).forEach(([mid, v]) => { out[mid] = (out[mid] || 0) + v.amt; });
+  const total = Object.values(out).reduce((a, b) => a + b, 0);
+  return { byMilestone: out, total: Math.round(total) };
 }
 
 /** Remove a crew from the sheet (cascades its categories + attendance). */

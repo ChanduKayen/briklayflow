@@ -14,13 +14,15 @@ import {
   loadWeek, loadParties, mondayOf, weekDates, weekLabel,
   saveCell, saveRate, setCategoryRate, setDirectRate, setCrewBasis, addCrew,
   accruedDayWagesForCrew, accruedDayWagesForDirect, removeCrew, removeDirectWorker,
-  cardIsEmpty, seedRateCard, SUPERVISOR_KEY,
+  cardIsEmpty, seedRateCard, SUPERVISOR_KEY, autoSettleCrewWages,
   type SiteRow, type RateCard, type Cell, type CrewRow, type StageRow,
 } from '../../lib/attendanceApi';
 import { searchPayees } from '../../lib/payeeSearch';
 import { createParty } from '../day-book/fileEntry';
 import { CertifyDialog, type CertifyCrewCtx } from './CertifyDialog';
 import { PutOnContractDialog, type PocCtx } from './PutOnContractDialog';
+import { WagesOnContractDialog, type WagesAskCtx } from './WagesOnContractDialog';
+import { loadWageContracts, wagesAgainstLabel, type WageContract } from './wagesOnContract';
 
 const inr = (n: number) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');
 const fmtQ = (n: number) => (+n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 });
@@ -64,6 +66,9 @@ export default function AttendanceSheet({ session }: { session: Session }) {
   const [err, setErr] = useState<string | null>(null);
   const [certCtx, setCertCtx] = useState<CertifyCrewCtx | null>(null);
   const [pocCtx, setPocCtx] = useState<PocCtx | null>(null);
+  // The one question a wages engagement leaves open — asked only when the party actually holds a
+  // contract on this site, so it never appears where there is nothing to set the wages against.
+  const [wagesAsk, setWagesAsk] = useState<{ ctx: WagesAskCtx; contracts: WageContract[] } | null>(null);
 
   const dates = weekDates(monday);
   const todayISO = isoOf(new Date());
@@ -175,7 +180,7 @@ export default function AttendanceSheet({ session }: { session: Session }) {
       }
       const wages = crew.basis === 'contract' && crew.accrualBasis === 'day';
       const target = crew.stages[0];
-      const trade = wages && target ? `${crew.trade || crew.d || 'Labour'} · wages → ${target.n}` : (crew.trade || crew.d || 'Labour');
+      const trade = wages && target ? `${crew.trade || crew.d || 'Labour'} · ${wagesAgainstLabel(target.n)}` : (crew.trade || crew.d || 'Labour');
       workers.push({
         id: `c${si}.${ci}`, siteId: site.site, name: crew.n, trade,
         contractWages: wages, crew,
@@ -351,8 +356,24 @@ export default function AttendanceSheet({ session }: { session: Session }) {
   }
 
   // ── persistence ──────────────────────────────────────────────────────────────
-  async function persistCell(subject: PersistSubject, projectId: string, i: number, value: number) {
-    try { await saveCell(orgId, projectId, dates[i], subject, value, byName); } catch (e) { fail(e); }
+  async function persistCell(subject: PersistSubject, projectId: string, i: number, value: number, row?: WorkerRow) {
+    try {
+      await saveCell(orgId, projectId, dates[i], subject, value, byName);
+      if (row?.contractWages && row.crew) await foldWages([row.crew.crewId]);
+    } catch (e) { fail(e); }
+  }
+  // A crew whose wages come off a contract settles as the days are marked: each new day's wage is
+  // certified against the contract's next phase (so what is left to certify falls by that much) and
+  // the day stops accruing a wage of its own. Only what an approval actually covers is settled.
+  async function foldWages(crewIds: string[]) {
+    const ids = [...new Set(crewIds)];
+    if (!ids.length) return;
+    let any = false;
+    for (const id of ids) {
+      try { const r = await autoSettleCrewWages(id, orgId); if (r && (r.approved > 0 || r.pending > 0)) any = true; }
+      catch { /* the contract keeps its own record — a failed fold just leaves the day as wages */ }
+    }
+    if (any) await load();
   }
   const deriveRates = () => {
     const C = CARD.current; if (!C) return;
@@ -382,15 +403,20 @@ export default function AttendanceSheet({ session }: { session: Session }) {
   // Click a past day header → mark every empty labour cell present (1). Only fills gaps.
   function fillDay(i: number) {
     if (locked || i < 0 || i > 6) return;
-    let marked = 0; const saves: Promise<void>[] = [];
+    let marked = 0; const saves: Promise<void>[] = []; const folds: string[] = [];
     DATA.current.forEach(site => {
       if (filterRef.current !== 'all' && filterRef.current !== site.site) return;
       const mark = (cells: Cell[], subject: PersistSubject) => { const c = cells[i]; if (c === 'off' || c) return; cells[i] = { v: 1, src: 'office', by: byName, at: 'just now' }; marked++; saves.push(saveCell(orgId, site.site, dates[i], subject, 1, byName)); };
-      site.crews.forEach(crew => { if (isContractRow(crew)) return; crew.cats.forEach(cat => mark(cat.cells, { type: 'crew_category', category_id: cat.id })); });
+      site.crews.forEach(crew => {
+        if (isContractRow(crew)) return;
+        const before = marked;
+        crew.cats.forEach(cat => mark(cat.cells, { type: 'crew_category', category_id: cat.id }));
+        if (marked > before && crew.basis === 'contract' && crew.accrualBasis === 'day') folds.push(crew.crewId);
+      });
       site.direct.forEach(w => mark(w.cells, { type: 'direct', direct_worker_id: w.id }));
     });
     render();
-    Promise.all(saves).catch(fail);
+    Promise.all(saves).then(() => foldWages(folds)).catch(fail);
     const dayName = new Date(dates[i]).toLocaleString('en-US', { weekday: 'long' });
     toast(marked ? `Marked ${marked} present on ${dayName} — tap any cell to adjust` : `Everyone already marked on ${dayName}`);
   }
@@ -418,7 +444,7 @@ export default function AttendanceSheet({ session }: { session: Session }) {
     const setLine = (j: number, v: number) => {
       const l = r.lines[j]; v = Math.max(0, v);
       l.cells[i] = v > 0 ? { v, src: 'office', by: byName, at: 'just now' } : null;
-      persistCell(l.subject, r.siteId, i, v);
+      persistCell(l.subject, r.siteId, i, v, r);
     };
     const commitAll = () => {
       [...el.querySelectorAll('input')].forEach((inp, j) => setLine(j, parseFloat((inp as HTMLInputElement).value) || 0));
@@ -436,7 +462,7 @@ export default function AttendanceSheet({ session }: { session: Session }) {
       (inp as HTMLInputElement).onchange = commitAll;
       (inp as HTMLInputElement).onkeydown = (e) => { if (e.key === 'Enter') { commitAll(); closeAll(); focusCell(r.id, i); } };
     });
-    (el.querySelector('[data-clear]') as HTMLElement).onclick = (e) => { e.stopPropagation(); r.lines.forEach(l => { l.cells[i] = null; persistCell(l.subject, r.siteId, i, 0); }); render(); closeAll(); };
+    (el.querySelector('[data-clear]') as HTMLElement).onclick = (e) => { e.stopPropagation(); r.lines.forEach(l => { l.cells[i] = null; persistCell(l.subject, r.siteId, i, 0, r); }); render(); closeAll(); };
     if (!keep) { const first = el.querySelector('input') as HTMLInputElement; first?.focus(); first?.select(); }
   }
 
@@ -497,7 +523,7 @@ export default function AttendanceSheet({ session }: { session: Session }) {
   function setCell(r: WorkerRow, i: number, n: number) {
     const l = r.lines[0]; if (!l) return;
     l.cells[i] = n > 0 ? { v: n, src: 'office', by: byName, at: 'just now' } : null;
-    persistCell(l.subject, r.siteId, i, n); render(); focusCell(r.id, i);
+    persistCell(l.subject, r.siteId, i, n, r); render(); focusCell(r.id, i);
   }
 
   // ── delegated interactions ────────────────────────────────────────────────────
@@ -572,14 +598,21 @@ export default function AttendanceSheet({ session }: { session: Session }) {
     const cats = mixFor(trade).map(c => ({ category: c, rate: rateFor(trade, c) }));
     A.site = null; A.picked = null; A.exp = false;
     try {
-      await addCrew(orgId, siteId, p.name, trade, cats, p.stakeholder_id || undefined);
+      const newCrewId = await addCrew(orgId, siteId, p.name, trade, cats, p.stakeholder_id || undefined);
       await load();
+      const site = DATA.current.find(s => s.site === siteId);
+      const crew = site && site.crews.find(c => c.crewId === newCrewId);
       if (mode === 'contract') {
-        const site = DATA.current.find(s => s.site === siteId);
-        const crew = site && [...site.crews].reverse().find(c => c.n === p.name && (!p.stakeholder_id || c.stakeholderId === p.stakeholder_id));
         if (crew) {
           const accrued = await accruedDayWagesForCrew(crew.crewId).catch(() => ({ days: 0, amount: 0 }));
           setPocCtx({ kind: 'crew', orgId, projectId: siteId, stakeholderId: crew.stakeholderId ?? null, crewId: crew.crewId, name: crew.n, accrued });
+        }
+      } else if (crew) {
+        // Wages — but this party may already hold a contract here, and then it matters whether the
+        // day's wage comes off it or stands beside it. Ask only when there is something to ask about.
+        const contracts = await loadWageContracts(siteId, crew.stakeholderId ?? null).catch(() => []);
+        if (contracts.length) {
+          setWagesAsk({ ctx: { orgId, projectId: siteId, stakeholderId: crew.stakeholderId ?? null, crewId: crew.crewId, name: crew.n }, contracts });
         }
       }
     } catch (e) { fail(e); }
@@ -631,6 +664,7 @@ export default function AttendanceSheet({ session }: { session: Session }) {
       <style>{ATDX_CSS}</style>
       {certCtx && <CertifyDialog ctx={certCtx} onClose={() => setCertCtx(null)} onDone={() => { setCertCtx(null); load(); }} onToast={toast} />}
       {pocCtx && <PutOnContractDialog ctx={pocCtx} onClose={() => setPocCtx(null)} onDone={() => { setPocCtx(null); load(); }} onError={(m) => { setPocCtx(null); fail(new Error(m)); }} onToast={toast} />}
+      {wagesAsk && <WagesOnContractDialog ctx={wagesAsk.ctx} contracts={wagesAsk.contracts} onClose={() => setWagesAsk(null)} onDone={() => { setWagesAsk(null); load(); }} onError={(m) => { setWagesAsk(null); fail(new Error(m)); }} onToast={toast} />}
 
       <div className="page">
         <header className="top">

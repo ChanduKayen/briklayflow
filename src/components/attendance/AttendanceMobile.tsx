@@ -29,9 +29,10 @@ import {
   renameCrew, updateCategory, updateDirectWorker,
   loadWorkOrdersForProject, linkCrewToWorkOrder, promoteDirectToCrew,
   removeCrew, removeDirectWorker, removeCategory,
-  cardIsEmpty, seedRateCard,
+  cardIsEmpty, seedRateCard, autoSettleCrewWages,
   type SiteRow, type CrewRow, type DirectRow, type RateCard, type Cell, type StageRow,
 } from '../../lib/attendanceApi';
+import { WAGES_ASK, loadWageContracts, setWagesAgainstContract, wagesAgainstLabel, type WageContract } from './wagesOnContract';
 import { searchPayees } from '../../lib/payeeSearch';
 import { createParty } from '../day-book/fileEntry';
 import { CertificationWizard, type CertifyContext } from './CertificationWizard';
@@ -70,10 +71,15 @@ function workersOf(site: SiteRow, si: number): MWorker[] {
   const out: MWorker[] = [];
   site.crews.forEach((crew, ci) => {
     const types: WType[] = crew.cats.map(cat => ({ t: cat.n, rate: cat.rate, cells: cat.cells, catId: cat.id }));
-    const onContract = crew.basis === 'contract';
+    // A contract crew paid by certified stages has no headcount — but one whose WAGES come off the
+    // contract is still mustered day by day; only what it is owed changes. (Desktop draws the same line.)
+    const wagesOnContract = crew.basis === 'contract' && crew.accrualBasis === 'day';
+    const onContract = crew.basis === 'contract' && !wagesOnContract;
     out.push({
       si, wi: ci, key: `c${ci}`, name: crew.n,
-      trade: onContract ? `${crew.d || crew.trade || 'Contract'} · contract` : crewTrade(crew, types),
+      trade: onContract ? `${crew.d || crew.trade || 'Contract'} · contract`
+        : wagesOnContract ? `${crewTrade(crew, types)} · ${wagesAgainstLabel(crew.stages[0]?.n)}`
+        : crewTrade(crew, types),
       types, onContract, crew, stages: crew.stages, projectId: site.site,
     });
   });
@@ -385,7 +391,15 @@ export default function AttendanceMobile({ session }: { session: Session }) {
     const subject = t.catId
       ? { type: 'crew_category' as const, category_id: t.catId }
       : { type: 'direct' as const, direct_worker_id: w.direct!.id };
-    try { await saveCell(orgId, w.projectId, dates[di], subject, value, byName); } catch (e) { fail(e); }
+    try {
+      await saveCell(orgId, w.projectId, dates[di], subject, value, byName);
+      // Wages that come off a contract settle as the days are marked: the new wage is certified
+      // against the contract's next phase and the day stops accruing a wage of its own.
+      if (w.crew && w.crew.basis === 'contract' && w.crew.accrualBasis === 'day') {
+        const r = await autoSettleCrewWages(w.crew.crewId, orgId).catch(() => null);
+        if (r && (r.approved > 0 || r.pending > 0)) await load();
+      }
+    } catch (e) { fail(e); }
   }
 
   /* ---------- the sheet ---------- */
@@ -560,18 +574,85 @@ export default function AttendanceMobile({ session }: { session: Session }) {
       const btn = sheet.querySelector('#ng-add') as HTMLButtonElement;
       btn.disabled = true; btn.textContent = 'Adding…';
       try {
+        let made: MadeWorker;
         if (mode === 'solo') {
-          await addDirectWorker(orgId, site.site, party.name, clean[0].t, clean[0].rate, party.stakeholder_id || undefined);
+          const id = await addDirectWorker(orgId, site.site, party.name, clean[0].t, clean[0].rate, party.stakeholder_id || undefined);
+          made = { kind: 'direct', id, category: clean[0].t, rate: clean[0].rate, trade: resolveTrade(clean[0].t) };
         } else {
-          await addCrew(orgId, site.site, party.name, resolveTrade(clean[0].t),
+          const crewId = await addCrew(orgId, site.site, party.name, resolveTrade(clean[0].t),
             clean.map(c => ({ category: c.t, rate: c.rate })), party.stakeholder_id || undefined);
+          made = { kind: 'crew', id: crewId };
         }
         hapt([10, 30, 10]);
+        await load();
+        // Only ask where there is something to ask about — this party holding a contract on this site.
+        const contracts = await loadWageContracts(site.site, party.stakeholder_id || null).catch(() => []);
+        if (contracts.length) { wagesAskSheet(si, party, made, contracts); return; }
         closeSheet();
         toast(party.name + ' added — tap the row to mark today');
-        await load();
       } catch (e) { btn.disabled = false; btn.textContent = `Add to ${site.label.split(' ')[0]}`; fail(e); }
     });
+  }
+
+  /* ---------- "these wages — against the contract, or on their own?" ----------
+     Asked once, at the moment the worker is added, and only when the party already holds a contract
+     on this site. Tapping an answer commits it; there is no second button to hunt for. The desktop
+     dialog next door asks the same thing in the same words. */
+  type MadeWorker =
+    | { kind: 'crew'; id: string }
+    | { kind: 'direct'; id: string; category: string; rate: number; trade: string | null };
+
+  function wagesAskSheet(si: number, party: Party, made: MadeWorker, contracts: WageContract[]) {
+    const sheet = sheetEl(); if (!sheet) return;
+    const site = DATA.current[si];
+    const head = `<div class="grab"></div>
+      <div class="sh-head"><b>${esc(WAGES_ASK.title)}</b><span>${esc(party.name)}</span></div>
+      <div class="wk-week">${esc(WAGES_ASK.sub(party.name))}</div>`;
+
+    const finishKeep = () => { closeSheet(); toast(WAGES_ASK.doneKeep(party.name)); };
+    const commitOff = async (c: WageContract) => {
+      sheet.innerHTML = head + `<div class="siteempty">Setting the wages against ${esc(c.label)}…</div>`;
+      try {
+        if (made.kind === 'crew') {
+          await setWagesAgainstContract({ crewId: made.id, orgId, projectId: site.site, stakeholderId: party.stakeholder_id || null, woId: c.woId });
+        } else {
+          // A lone worker becomes a one-person crew so the contract has something to settle against —
+          // the muster is unchanged, they are still marked day by day.
+          await promoteDirectToCrew(orgId, site.site,
+            { id: made.id, name: party.name, category: made.category, rate: made.rate, stakeholderId: party.stakeholder_id || null },
+            c.woId, made.trade, null, { mode: 'keep_wages', measure: 'wages' });
+        }
+        hapt([10, 30, 10]); closeSheet();
+        toast(WAGES_ASK.doneOff(party.name, c.label));
+        await load();
+      } catch (e) { fail(e); closeSheet(); }
+    };
+
+    const pickContract = () => {
+      sheet.innerHTML = head + `<div class="f-lab">${esc(WAGES_ASK.which)}</div>
+        <div class="picklist">${contracts.map((c, i) => `<div class="pick" data-c="${i}">
+          <div class="wav">${CONTRACT_IC.replace('<svg', '<svg style="width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.7"')}</div>
+          <div class="pm"><b>${esc(c.label)}</b><span>${inr(c.left)} still to certify</span></div>
+          <span class="prate">${c.value ? inr(c.value) : ''}</span></div>`).join('')}</div>`;
+      sheet.querySelectorAll('.pick[data-c]').forEach(el => el.addEventListener('click', () => {
+        void commitOff(contracts[+(el as HTMLElement).dataset.c!]);
+      }));
+    };
+
+    sheet.innerHTML = head + `<div class="picklist">
+      <div class="pick tall" id="wa-off"><div class="wav">₹</div>
+        <div class="pm"><b>${esc(WAGES_ASK.offLabel)}</b><span>${esc(WAGES_ASK.offDesc(contracts[0]))}</span></div>
+        <span class="prate">›</span></div>
+      <div class="pick tall" id="wa-keep"><div class="wav">·</div>
+        <div class="pm"><b>${esc(WAGES_ASK.keepLabel)}</b><span>${esc(WAGES_ASK.keepDesc)}</span></div>
+        <span class="prate">›</span></div>
+    </div>`;
+    showSheet();
+    (sheet.querySelector('#wa-off') as HTMLElement).addEventListener('click', () => {
+      hapt(6);
+      if (contracts.length > 1) pickContract(); else void commitOff(contracts[0]);
+    });
+    (sheet.querySelector('#wa-keep') as HTMLElement).addEventListener('click', () => { hapt(6); finishKeep(); });
   }
 
   /* ---------- worker action sheet ---------- */

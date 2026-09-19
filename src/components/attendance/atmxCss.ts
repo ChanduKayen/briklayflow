@@ -83,6 +83,10 @@ export const ATMX_CSS = `
 .atmx .pick .pm span{font-size:12px; color:var(--soft)}
 .atmx .pick .prate{font-family:var(--mono); font-size:12px; color:var(--walnut); flex:none}
 .atmx .pick.onsite{opacity:.45; pointer-events:none}
+/* a choice row that carries a sentence, not a subtitle — the answer reads before it is tapped */
+.atmx .pick.tall{align-items:flex-start; padding:14px 2px}
+.atmx .pick.tall .pm span{display:block; line-height:1.5; margin-top:3px}
+.atmx .pick.tall .prate{margin-top:2px}
 .atmx .pick.newrow{color:var(--clay); font-weight:700; border-bottom:0}
 .atmx .pick.newrow .wav{color:var(--clay); background:var(--clay-soft); border-color:var(--clay-soft); font-family:var(--sans)}
 .atmx .picklist{max-height:290px; overflow-y:auto; margin-top:4px}

@@ -9,6 +9,7 @@ import { useUserProfile } from '../App';
 import { useOrgId } from '../lib/auth/AuthProvider';
 import type { StatusHistoryEntry, PaymentMode } from '../types';
 import StakeholderLedgerDrawer from '../components/StakeholderLedgerDrawer';
+import { wagesSetAgainstContract } from '../lib/attendanceApi';
 import {
   fmtDate as pdfFmtDate, fmtRupee,
   MARGIN, CONTENT, RIGHT, C,
@@ -139,6 +140,9 @@ const CDX_CSS = `
 .cdx .money .mono{font-size:22px;font-weight:500;letter-spacing:-.01em}
 .cdx .money .sub{font-size:12px;color:var(--ink-3);margin-top:2px}
 .cdx .money .gap .mono{color:var(--gold)}
+.cdx .money.w5{grid-template-columns:repeat(5,1fr)}
+.cdx .money>div.wage::before{background:var(--clay,#C4552D)}
+.cdx .stg .name .fromwage{display:block;color:var(--ink-3);font-size:12px;margin-top:1px}
 .cdx .stg td{height:64px}
 .cdx .stg .name b{display:block;font-weight:600;letter-spacing:-.005em}
 .cdx .stg .name small{display:block;color:var(--ink-3);font-size:12px;margin-top:1px}
@@ -291,6 +295,16 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
     },
     enabled: !!woId,
   });
+
+  // Day wages already set against this contract — work accounted for without a site measurement.
+  // Only approved certifications count, exactly as the party's account counts them.
+  const { data: wageSettled } = useQuery({
+    queryKey: ['wo_wage_settled', woId],
+    queryFn: () => wagesSetAgainstContract(woId!),
+    enabled: !!woId,
+  });
+  const settledByMs = wageSettled?.byMilestone ?? {};
+  const settledTotal = wageSettled?.total ?? 0;
 
   const { data: allocations, isLoading: loadingAllocs } = useQuery({
     queryKey: ['wo_allocations', woId],
@@ -467,14 +481,17 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
     const bal = agreed - paid;
     const done = bal <= SETTLE_TOLERANCE && agreed > 0;
     const workDone = DONE_STATUSES.has(m.status);
-    const estP = workDone ? 1 : (agreed > 0 ? Math.min(1, paid / agreed) : 0);
+    // Wages set against this stage are work already accounted for on it — they count towards done
+    // just as a payment does, and never past the stage's own value.
+    const settled = Math.round(settledByMs[m.milestone_id] || 0);
+    const estP = workDone ? 1 : (agreed > 0 ? Math.min(1, Math.max(paid, settled) / agreed) : 0);
     const measured = m.unit_type && m.unit_type !== 'LS';
     const measText = measured && (m.quantity || m.rate)
       ? `${m.quantity ?? ''}${m.unit_type ? ' ' + m.unit_type : ''}${m.rate ? ' @ ₹' + Number(m.rate).toLocaleString('en-IN') : ''}`.trim()
       : '';
     const name = singlePhaseFill ? 'Full contract' : (cleanText(m.name) || 'Stage');
     const note = singlePhaseFill ? 'single payment on completion of the work' : (cleanText(m.trigger_condition) || cleanText(m.description));
-    return { m, name, note, agreed, paid, bal, done, estP, measured, measText };
+    return { m, name, note, agreed, paid, bal, done, estP, measured, measText, settled };
   });
   // A contract with no stages settles as one payment for the whole agreed value — a synthetic
   // "Full contract" stage stands in, releasable like any other (its payment allocates with no milestone).
@@ -485,7 +502,7 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
         name: 'Full contract', note: 'single payment on completion of the work',
         agreed: orderValue, paid: totalPaid, bal: orderValue - totalPaid,
         done: orderValue - totalPaid <= SETTLE_TOLERANCE, estP: totalPaid > 0 ? Math.min(1, totalPaid / orderValue) : 0,
-        measured: false, measText: '',
+        measured: false, measText: '', settled: 0,
       }]
     : baseRows;
   const workDoneEst = stageRows.reduce((a, r) => a + r.estP * r.agreed, 0);
@@ -722,8 +739,12 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
 
         {/* MONEY FIGURES */}
         {!editMode && (
-          <div className="money">
+          <div className={`money${settledTotal > 0 ? ' w5' : ''}`}>
             <div><small>Agreed</small><span className="mono">{fmt(orderValue)}</span><div className="sub">across {milestones.length} stage{milestones.length !== 1 ? 's' : ''}</div></div>
+            {settledTotal > 0 && (
+              <div className="wage"><small>Set against day wages</small><span className="mono">{fmt(settledTotal)}</span>
+                <div className="sub">wages already taken off this contract</div></div>
+            )}
             <div><small>Work done (est.)</small><span className="mono">{workDoneEst > 0 ? '~' + fmt(workDoneEst) : '—'}</span><div className="sub">from stage status — an aid, not a bill</div></div>
             <div><small>Paid</small><span className="mono" id="cdx-total-paid">{fmt(totalPaid)}</span><div className="sub">{releaseCount ? `${releaseCount} release${releaseCount > 1 ? 's' : ''}` : 'nothing released yet'}</div></div>
             <div className="gap"><small>{workAhead > SETTLE_TOLERANCE ? 'Work ahead of payment' : 'Outstanding'}</small><span className="mono">{workAhead > SETTLE_TOLERANCE ? '~' + fmt(workAhead) : fmt(Math.max(0, balance))}</span><div className="sub">{workAhead > SETTLE_TOLERANCE ? 'estimated work not yet paid for' : 'agreed value still to pay'}</div></div>
@@ -778,13 +799,14 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
                     <td className="name">
                       <b>{r.name}{r.measured && <span className="meas">MEASURED</span>}</b>
                       {(r.measText || r.note) && <small>{r.measText ? r.measText + (r.note ? ' · ' : '') : ''}{r.note}</small>}
+                      {r.settled > 0 && <small className="fromwage">{fmt(r.settled)} of day wages set against this stage</small>}
                     </td>
                     <td className="prog">
                       <div className="bar"><span className="est" style={{ width: `${Math.round(r.estP * 100)}%` }} /><span className="paid" style={{ width: `${Math.min(100, paidPct)}%` }} /></div>
                       <div className="lbl">
                         {r.done ? <span className="hint">settled in full</span>
                           : r.estP > 0 ? <>{pct}% done{ahead > 1000 ? <> · <span className="ahead">~{fmt(ahead)} ahead of payment</span></> : ''}</>
-                          : <span className="hint">{r.note || 'not started'}</span>}
+                          : <span className="hint">{r.settled > 0 ? 'work accounted for in wages' : (r.note || 'not started')}</span>}
                       </div>
                     </td>
                     <td className="num">{fmt(r.agreed)}</td>
