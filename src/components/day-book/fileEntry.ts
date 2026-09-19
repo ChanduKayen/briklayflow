@@ -157,7 +157,23 @@ export function gapsOf(r: ResolvedFields): Gap[] {
 /** The DB enum public.payment_mode — the RPC casts to it, so anything else throws. */
 const PAYMENT_MODES = ['Cash', 'NEFT', 'UPI', 'Cheque'] as const;
 
+/**
+ * Idempotency floor: never file an entry that is already filed. A card offers two ways to file one
+ * entry — Approve (a single txn) and Split (N children) — and if both fire, the entry is double-counted
+ * (and a wallet-holder's cash double-debited). The card now locks its actions while a split is filing,
+ * but this is the money-safe backstop for any path: re-read the entry's live status and refuse a second
+ * write when it is already POSTED. A read error does not block (returns without throwing) — filing must
+ * survive a transient read hiccup; only a POSITIVE "already filed" aborts.
+ */
+async function assertNotAlreadyFiled(entryId: string): Promise<void> {
+  const { data } = await supabase.from('rough_entries').select('status, resolved_txn_id').eq('id', entryId).maybeSingle();
+  if (data && (data as { status?: string }).status === 'POSTED' && (data as { resolved_txn_id?: string }).resolved_txn_id) {
+    throw new Error('This entry was already filed — refresh to see it.');
+  }
+}
+
 export async function fileRoughEntry(entry: RoughEntry, orgId: string, resolved: ResolvedFields): Promise<string> {
+  await assertNotAlreadyFiled(entry.id);
   const ai = entry.ai_extracted || {};
   const newTxnId = genTxnId();
 
@@ -254,6 +270,7 @@ export async function fileRoughEntrySplit(
   base: Omit<ResolvedFields, 'projectId'>,
   splits: ProjectSplit[],
 ): Promise<string[]> {
+  await assertNotAlreadyFiled(entry.id);
   const ai = entry.ai_extracted || {};
   const mode = PAYMENT_MODES.includes(ai.mode as typeof PAYMENT_MODES[number]) ? ai.mode! : 'Cash';
   const date = /^\d{4}-\d{2}-\d{2}$/.test(ai.date || '') ? ai.date! : new Date().toISOString().slice(0, 10);

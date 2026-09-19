@@ -229,7 +229,11 @@ export function ReviewCard({
    * second, lookalike "confirm" dialog — that was two cards pretending to be one product.
    */
   const tapApprove = () => {
-    if (leaving) return;
+    // While the Split panel is open (and until it finishes filing), Approve must not fire — otherwise a
+    // click during the split's network round-trip files the full-amount single txn ALONGSIDE the split
+    // children (a double count; a double wallet debit for a wallet-holder). Split and Approve are the
+    // two ways to file one entry; only one may run.
+    if (leaving || splitOpen) return;
     if (ready) { void runFile(); return; }
     onConfirm(gaps);
   };
@@ -617,14 +621,15 @@ export function ReviewCard({
                 It is NEVER disabled. If we know everything, it files. If we do not, it asks. */}
             <button
               onClick={(e) => { e.stopPropagation(); tapApprove(); }}
-              disabled={!!leaving}
-              title={ready ? 'Approve & file' : 'A couple of details to confirm first'}
+              disabled={!!leaving || splitOpen}
+              title={splitOpen ? 'Finish or cancel the split first' : ready ? 'Approve & file' : 'A couple of details to confirm first'}
               className="inline-flex items-center gap-1.5 rounded-[10px] transition-[background,color,box-shadow,transform] duration-150 active:scale-[.96]"
               style={{
-                ...font, fontWeight: 600, fontSize: 13.5, padding: '8px 15px', border: 'none', cursor: 'pointer',
-                color: apHover ? '#FFF6EF' : V.terra,
-                background: apHover ? V.terra : V.terraWash,
-                boxShadow: apHover ? '0 2px 10px rgba(188,75,39,.28)' : 'none',
+                ...font, fontWeight: 600, fontSize: 13.5, padding: '8px 15px', border: 'none', cursor: splitOpen ? 'not-allowed' : 'pointer',
+                color: apHover && !splitOpen ? '#FFF6EF' : V.terra,
+                background: apHover && !splitOpen ? V.terra : V.terraWash,
+                boxShadow: apHover && !splitOpen ? '0 2px 10px rgba(188,75,39,.28)' : 'none',
+                opacity: splitOpen ? 0.4 : 1,
               }}
               onMouseEnter={() => setApHover(true)}
               onMouseLeave={() => setApHover(false)}
@@ -636,12 +641,14 @@ export function ReviewCard({
                 longer has to double as a beacon pointing at what is missing: Approve handles missing.
                 Two buttons, two jobs, neither apologising for the other. */}
             <button
-              onClick={(e) => { e.stopPropagation(); onFix(); }}
+              onClick={(e) => { e.stopPropagation(); if (leaving || splitOpen) return; onFix(); }}
+              disabled={!!leaving || splitOpen}
               className="inline-flex items-center gap-1.5 rounded-[10px] transition-[background,box-shadow,color] duration-150 active:scale-[.96] hover:bg-[#FCF9F2]"
               style={{
-                ...font, fontWeight: 600, fontSize: 13.5, padding: '8px 15px', cursor: 'pointer', border: 'none',
+                ...font, fontWeight: 600, fontSize: 13.5, padding: '8px 15px', cursor: splitOpen ? 'not-allowed' : 'pointer', border: 'none',
                 color: V.inkSoft, background: 'transparent',
                 boxShadow: `inset 0 0 0 1px ${V.line}`,
+                opacity: splitOpen ? 0.4 : 1,
               }}
             >
               <Pencil size={12} /> Edit
@@ -667,11 +674,12 @@ export function ReviewCard({
                 sitting in the open beside the two things you do all day. */}
             <div className="relative">
               <button
-                onClick={(e) => { e.stopPropagation(); setMenu((m) => !m); }}
+                onClick={(e) => { e.stopPropagation(); if (leaving || splitOpen) return; setMenu((m) => !m); }}
+                disabled={!!leaving || splitOpen}
                 aria-label="More"
                 aria-expanded={menu}
                 className="grid place-items-center rounded-[10px] transition-colors duration-150"
-                style={{ width: 34, height: 34, border: 'none', background: menu ? V.field : 'transparent', color: V.faint, cursor: 'pointer', fontSize: 17, lineHeight: 1 }}
+                style={{ width: 34, height: 34, border: 'none', background: menu ? V.field : 'transparent', color: V.faint, cursor: splitOpen ? 'not-allowed' : 'pointer', fontSize: 17, lineHeight: 1, opacity: splitOpen ? 0.4 : 1 }}
               >
                 ···
               </button>
