@@ -145,6 +145,7 @@ export default function BillsMobile() {
   const [openVendor, setOpenVendor] = useState<string | null>(null);
   const [panel, setPanel] = useState<null | { kind: 'menu' } | { kind: 'link'; billId: string }>(null);
   const [zoom, setZoom] = useState<BillRow | null>(null);
+  const [billMenu, setBillMenu] = useState(false);   // the bill page's ⋯ — held here so Back can reach it
   const [toast, setToast] = useState<{ text: string } | null>(null);
   const [litId, setLitId] = useState('');
   const qRef = useRef<HTMLInputElement>(null);
@@ -222,6 +223,41 @@ export default function BillsMobile() {
     window.addEventListener('scroll', onScroll, { passive: true });
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
+
+  // ── BACK belongs to this page, not to the app ──────────────────────────────
+  // A bill, a vendor, the paper, a panel: each is a layer ON Bills, not a page of its own. The
+  // phone's Back button knew nothing about that, so it left Bills entirely and landed you back on
+  // whatever you were reading before — Transactions. So every open layer now keeps one history
+  // entry of its own, and Back spends that entry closing the innermost layer instead.
+  const depth = (openVendor ? 1 : 0) + (openBill ? 1 : 0) + (panel ? 1 : 0) + (billMenu ? 1 : 0) + (zoom ? 1 : 0);
+  const guardRef = useRef(0);
+  const selfPop = useRef(0);   // a pop WE asked for (a layer closed by tap), not one the user pressed
+  useEffect(() => {
+    if (depth > guardRef.current) {
+      try { for (let i = guardRef.current; i < depth; i++) window.history.pushState({ bmxLayer: true }, ''); } catch { /* ignore */ }
+      guardRef.current = depth;
+    } else if (depth < guardRef.current) {
+      const n = guardRef.current - depth;
+      guardRef.current = depth;
+      if ((window.history.state as { bmxLayer?: boolean } | null)?.bmxLayer) {
+        selfPop.current += 1;
+        try { window.history.go(-n); } catch { /* ignore */ }
+      }
+    }
+  }, [depth]);
+  useEffect(() => {
+    const onPop = () => {
+      if (selfPop.current > 0) { selfPop.current -= 1; return; }
+      guardRef.current = Math.max(0, guardRef.current - 1);   // the entry we pushed is the one just spent
+      if (zoom) setZoom(null);
+      else if (billMenu) setBillMenu(false);
+      else if (panel) setPanel(null);
+      else if (openBill) setOpenBill(null);
+      else if (openVendor) setOpenVendor(null);
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, [zoom, billMenu, panel, openBill, openVendor]);
 
   const closePanel = useCallback(() => setPanel(null), []);
   const panelDrag = useSheetDrag<HTMLElement>(closePanel, !!panel);
@@ -338,10 +374,11 @@ export default function BillsMobile() {
       <section className={`page${pageOn ? ' on' : ''}`} aria-live="polite">
         {bill ? (
           <BillPage b={bill} backTo={openVendor} fit={fitFor(bill)} orgId={orgId}
-            onBack={() => { if (openVendor) setOpenBill(null); else { setOpenBill(null); setLitId(bill.id); } }}
+            menu={billMenu} onMenu={() => setBillMenu(true)} onCloseMenu={() => setBillMenu(false)}
+            onBack={() => { setBillMenu(false); if (openVendor) setOpenBill(null); else { setOpenBill(null); setLitId(bill.id); } }}
             onSay={say} onZoom={() => setZoom(bill)} onLink={() => setPanel({ kind: 'link', billId: bill.id })}
             onLinked={() => { refresh(); }}
-            onDeleted={() => { setOpenBill(null); setOpenVendor(null); refresh(); say('Bill deleted · ' + inr(bill.amount)); }}
+            onDeleted={() => { setBillMenu(false); setOpenBill(null); setOpenVendor(null); refresh(); say('Bill deleted · ' + inr(bill.amount)); }}
             onVendor={() => navigate(`/stakeholders/${encodeURIComponent(bill.vendorId ?? '')}`)} />
         ) : openVendor ? (
           <VendorPage name={openVendor} bills={B.filter((b) => b.vendor === openVendor)}
@@ -433,13 +470,13 @@ const PBar = ({ back, name, onBack, onMenu }: { back: string; name?: string; onB
 );
 
 // ── a bill ────────────────────────────────────────────────────────────────────
-function BillPage({ b, backTo, fit, orgId, onBack, onSay, onZoom, onLink, onLinked, onDeleted, onVendor }: {
+function BillPage({ b, backTo, fit, orgId, menu, onMenu, onCloseMenu, onBack, onSay, onZoom, onLink, onLinked, onDeleted, onVendor }: {
   b: BillRow; backTo: string | null; fit: LinkablePayment | null; orgId: string | null | undefined;
+  menu: boolean; onMenu: () => void; onCloseMenu: () => void;
   onBack: () => void; onSay: (s: string) => void; onZoom: () => void; onLink: () => void;
   onLinked: () => void; onDeleted: () => void; onVendor: () => void;
 }) {
   const { data: d } = useQuery({ queryKey: ['bill', b.id], queryFn: () => loadBillDetail(b.id) });
-  const [menu, setMenu] = useState(false);
   const [noHint, setNoHint] = useState(false);
   const [held, setHeld] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -473,7 +510,7 @@ function BillPage({ b, backTo, fit, orgId, onBack, onSay, onZoom, onLink, onLink
 
   return (
     <>
-      <PBar back={backTo ? backTo.split(' ')[0] : 'Bills'} name={b.vendor} onBack={onBack} onMenu={() => setMenu(true)} />
+      <PBar back={backTo ? backTo.split(' ')[0] : 'Bills'} name={b.vendor} onBack={onBack} onMenu={onMenu} />
       <div className="phead">
         <h1>{b.vendor}</h1>
         <p>{b.billNo ? `Bill no. ${b.billNo}` : <><i className="ring" />No bill number</>} · {day(b.billDate)} · {b.site || 'no site'}</p>
@@ -534,11 +571,11 @@ function BillPage({ b, backTo, fit, orgId, onBack, onSay, onZoom, onLink, onLink
 
       {menu && (
         <>
-          <div className="scrim on" onClick={() => setMenu(false)} />
+          <div className="scrim on" onClick={onCloseMenu} />
           <section className="panel on" role="dialog" aria-modal="true">
             <div className="grab" aria-hidden="true"><i /></div>
             <div className="p-head"><div className="t"><h2>This bill</h2></div>
-              <button type="button" className="x" aria-label="Close" onClick={() => setMenu(false)}>{CLOSE}</button></div>
+              <button type="button" className="x" aria-label="Close" onClick={onCloseMenu}>{CLOSE}</button></div>
             <button type="button" className={`opt danger${held ? ' hold' : ''}`}
               onContextMenu={(e) => e.preventDefault()} onPointerDown={startHold}
               onPointerUp={stopHold} onPointerLeave={stopHold} onPointerCancel={stopHold}>
