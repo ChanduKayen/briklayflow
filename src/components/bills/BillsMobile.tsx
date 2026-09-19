@@ -24,6 +24,7 @@ import { useOrgId } from '../../lib/auth/AuthProvider';
 import { useSignedDocUrl } from '../../lib/storage';
 import { useSheetDrag } from '../../lib/sheetDrag';
 import { useSheetFlag } from '../../lib/sheetFlag';
+import { usePullToRefresh, useLiveCount } from '../../lib/usePullToRefresh';
 import { allocateAcross } from '../../lib/billPayMath';
 import {
   loadBills, loadBillDetail, deleteBill, loadLinkablePayments, loadLoosePaymentsByVendor,
@@ -112,6 +113,7 @@ export default function BillsMobile() {
   const [toast, setToast] = useState<{ text: string } | null>(null);
   const [litId, setLitId] = useState('');
   const qRef = useRef<HTMLInputElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
 
   const newOpen = params.get('new') === '1';
   useSheetFlag(!!panel || !!zoom);
@@ -195,6 +197,13 @@ export default function BillsMobile() {
     qc.invalidateQueries({ queryKey: ['bill'] });
   }, [qc]);
 
+  // Pull the drawer down from the top and it reads the register again.
+  const liveCount = useLiveCount(B.length);
+  const { view: pullView } = usePullToRefresh({
+    attachTo: rootRef, noun: 'bill', count: liveCount,
+    onRefresh: () => qc.refetchQueries({ type: 'active' }),
+  });
+
   const bill = openBill ? B.find((b) => b.id === openBill) ?? null : null;
   const pageOn = !!bill || !!openVendor;
   const payable = !!bill && leftOf(bill) > 0;
@@ -222,8 +231,9 @@ export default function BillsMobile() {
   );
 
   return (
-    <div className={`bmx${pageOn ? ' deep' : ''}`}>
+    <div className={`bmx${pageOn ? ' deep' : ''}`} ref={rootRef}>
       <style>{BMX_CSS}</style>
+      {pullView}
 
       <div className={`compact${compact && !pageOn ? ' on' : ''}`}><b>Bills</b><span>{inr(totalOwed)}<small>owed</small></span></div>
 
@@ -306,7 +316,10 @@ export default function BillsMobile() {
       </section>
 
       <div className={`scrim${panel ? ' on' : ''}`} onClick={closePanel} />
-      <section className={`panel${panel ? ' on' : ''}`} role="dialog" aria-modal="true" ref={panelDrag}>
+      {/* A sheet that is parked off-screen is not a dialog, and must not read as one: the pull-to-
+          refresh gate treats any on-screen [role="dialog"] as something covering the page, so a
+          closed sheet that kept the role silently killed pull-to-refresh for the whole page. */}
+      <section className={`panel${panel ? ' on' : ''}`} {...(panel ? { role: 'dialog' as const, 'aria-modal': true } : {})} ref={panelDrag}>
         <div className="grab" aria-hidden="true"><i /></div>
         {panel?.kind === 'menu' && (
           <>
@@ -322,13 +335,13 @@ export default function BillsMobile() {
         )}
       </section>
 
-      <div className={`viewer${zoom ? ' on' : ''}`} role="dialog" aria-modal="true" aria-label="The bill"
+      <div className={`viewer${zoom ? ' on' : ''}`} {...(zoom ? { role: 'dialog' as const, 'aria-modal': true } : {})} aria-label="The bill"
         onClick={(e) => { if (e.target === e.currentTarget) setZoom(null); }}>
         <div className="big">{zoom && <Paper b={zoom} className="" />}</div>
         <button type="button" aria-label="Close" onClick={() => setZoom(null)}>{CLOSE}</button>
       </div>
 
-      <button type="button" className={`fab${folded ? ' folded' : ''}${(pageOn && !payable) || panel ? ' away' : ''}`}
+      <button type="button" data-page-cta className={`fab${folded ? ' folded' : ''}${(pageOn && !payable) || panel ? ' away' : ''}`}
         style={{ ['--w' as string]: payable ? '170px' : '120px' }}
         aria-label={payable ? 'Link a payment' : 'Add a bill'}
         onClick={() => { if (bill && payable) setPanel({ kind: 'link', billId: bill.id }); else setParams({ new: '1' }); }}>

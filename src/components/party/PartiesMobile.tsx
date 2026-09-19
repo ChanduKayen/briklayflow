@@ -24,6 +24,7 @@ import { usePartyMoney, paidOf, outstandingOf, creditOf } from '../../lib/partyM
 import { useSoftKeyboard } from '../../lib/useSoftKeyboard';
 import { useSheetDrag } from '../../lib/sheetDrag';
 import { useSheetFlag } from '../../lib/sheetFlag';
+import { usePullToRefresh, useLiveCount } from '../../lib/usePullToRefresh';
 import { renameWalletHolder } from '../../lib/walletApi';
 import type { Stakeholder, StakeholderType } from '../../types';
 import { PMX_CSS } from './pmxCss';
@@ -103,6 +104,13 @@ export default function PartiesMobile() {
   const rootRef = useRef<HTMLDivElement>(null);
   const qRef = useRef<HTMLInputElement>(null);
   const holdToolsRef = useRef(0);
+
+  // Pull the book down from the top and it reads the directory again.
+  const liveCount = useLiveCount(PARTIES.length);
+  const { view: pullView } = usePullToRefresh({
+    attachTo: rootRef, noun: 'party', count: liveCount,
+    onRefresh: () => qc.refetchQueries({ type: 'active' }),
+  });
 
   const say = useCallback((text: string, undo?: () => void) => setToast({ text, undo }), []);
   useEffect(() => {
@@ -255,6 +263,7 @@ export default function PartiesMobile() {
   return (
     <div className={`pmx${kb.open ? ' kb' : ''}`} ref={rootRef}>
       <style>{PMX_CSS}</style>
+      {pullView}
 
       <div className={`compact${compact ? ' on' : ''}`}><b>Parties</b><span>{inr(totalOwed)}<small>you owe</small></span></div>
 
@@ -308,7 +317,10 @@ export default function PartiesMobile() {
       <div className={`letter${railLetter ? ' on' : ''}`} aria-hidden="true">{railLetter}</div>
 
       <div className={`scrim${panel ? ' on' : ''}`} onClick={closePanel} />
-      <section className={`panel${panel ? ' on' : ''}`} role="dialog" aria-modal="true" ref={panelDrag}>
+      {/* A sheet that is parked off-screen is not a dialog, and must not read as one: the pull-to-
+          refresh gate treats any on-screen [role="dialog"] as something covering the page, so a
+          closed sheet that kept the role silently killed pull-to-refresh for the whole page. */}
+      <section className={`panel${panel ? ' on' : ''}`} {...(panel ? { role: 'dialog' as const, 'aria-modal': true } : {})} ref={panelDrag}>
         <div className="grab" aria-hidden="true"><i /></div>
         {panel?.kind === 'menu' && <MenuBody onSay={say} onClose={closePanel} />}
         {panel?.kind === 'new' && (
@@ -328,7 +340,7 @@ export default function PartiesMobile() {
         )}
       </section>
 
-      <button type="button" className={`fab${folded ? ' folded' : ''}${panel ? ' away' : ''}`} aria-label="New party"
+      <button type="button" data-page-cta className={`fab${folded ? ' folded' : ''}${panel ? ' away' : ''}`} aria-label="New party"
         onClick={() => setPanel({ kind: 'new' })}>
         <span className="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg></span>
         <span className="lbl">Party</span>
