@@ -88,6 +88,13 @@ export const ATMX_CSS = `
 .atmx .pick.tall .pm span{display:block; line-height:1.5; margin-top:3px}
 .atmx .pick.tall .prate{margin-top:2px}
 /* a line the crew does not carry yet: offered, quiet, and real the moment it is marked */
+/* the trade step: the org's own card, as chips, before anybody is created */
+.atmx .tgrid{display:flex; flex-wrap:wrap; gap:8px; margin-top:4px}
+.atmx .tchip{display:inline-flex; align-items:center; gap:7px; height:40px; padding:0 15px; border-radius:20px;
+  border:1px solid var(--rule); background:var(--card); font-size:14.5px; font-weight:600; color:var(--ink)}
+.atmx .tchip:active{background:var(--bg); border-color:var(--clay)}
+.atmx .tchip em{font-style:normal; font-family:var(--mono); font-size:11.5px; font-weight:400; color:var(--soft)}
+.atmx .tgrid.roles .tchip{background:none; border-style:dashed; font-weight:500}
 .atmx .srow.offer .t{color:var(--soft)}
 .atmx .srow.offer .step b{color:var(--soft)}
 .atmx .srow.offer .step button[disabled]{opacity:.3}

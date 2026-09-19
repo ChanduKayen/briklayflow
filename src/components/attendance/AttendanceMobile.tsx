@@ -34,6 +34,7 @@ import {
 } from '../../lib/attendanceApi';
 import { WAGES_ASK, loadWageContracts, setWagesAgainstContract, shortContract, wagesContractStanding, type WageContract } from './wagesOnContract';
 import { musterLines, type MusterLine } from './musterRows';
+import { tradeChoices, TRADE_ASK } from './tradeList';
 import { searchPayees } from '../../lib/payeeSearch';
 import { createParty } from '../day-book/fileEntry';
 import { CertificationWizard, type CertifyContext } from './CertificationWizard';
@@ -467,7 +468,6 @@ export default function AttendanceMobile({ session }: { session: Session }) {
     window.setTimeout(() => qEl.focus(), 380);
 
     const onSite = workersOf(site, si).map(w => w.name.toLowerCase());
-    let busy = false;
     function renderPicks() {
       const query = qEl.value.trim();
       const hits = (query ? searchPayees(PARTIES.current, query) : PARTIES.current).slice(0, 30);
@@ -492,18 +492,54 @@ export default function AttendanceMobile({ session }: { session: Session }) {
         if (p) engagementForm(si, p);
       }));
       const nw = listEl.querySelector('#aw-new');
-      if (nw) nw.addEventListener('click', async () => {
-        if (busy) return; busy = true;
-        try {
-          const c = await createParty(query, 'Worker', orgId);
-          PARTIES.current = [...PARTIES.current, { stakeholder_id: c.id, name: c.name, category: null }];
-          busy = false;
-          engagementForm(si, { stakeholder_id: c.id, name: c.name, category: null });
-        } catch (e) { busy = false; fail(e); }
-      });
+      if (nw) nw.addEventListener('click', () => tradeSheet(si, query));
     }
     qEl.addEventListener('input', renderPicks);
     renderPicks();
+  }
+
+  /* step 1½ — what do they do? A party minted with no trade has no rate, so the muster would offer
+     helpers where a mason should be and the week would price him at nothing. The card is the list;
+     a trade nobody has written down yet can still be typed. Nobody is created until this is answered. */
+  function tradeSheet(si: number, name: string) {
+    const sheet = sheetEl(); if (!sheet) return;
+    const site = DATA.current[si];
+    const { trades, roles } = tradeChoices(CARD.current);
+    const chip = (c: { label: string; rate: number | null }) =>
+      `<button type="button" class="tchip" data-trade="${esc(c.label)}">${esc(c.label)}${c.rate ? `<em>${inr(c.rate)}</em>` : ''}</button>`;
+    sheet.innerHTML = `<div class="grab"></div>
+      <div class="sh-head"><b>${esc(TRADE_ASK.title(name))}</b><span>${esc(site.label.split(' ')[0])}</span></div>
+      <div class="wk-week">${esc(TRADE_ASK.sub)}</div>
+      <div class="tgrid">${trades.map(chip).join('') || `<div class="siteempty">${esc(TRADE_ASK.none)}</div>`}</div>
+      <div class="f-lab">Not a trade</div>
+      <div class="tgrid roles">${roles.map(chip).join('')}</div>
+      <div class="f-lab">${esc(TRADE_ASK.otherLabel)}</div>
+      <input class="f-in" id="t-other" placeholder="${esc(TRADE_ASK.otherPlaceholder)}" autocomplete="off" autocapitalize="words">
+      <button class="sh-done" id="t-go" disabled>Pick what they do</button>`;
+    showSheet();
+
+    let busy = false;
+    const go = async (trade: string) => {
+      const t = trade.trim(); if (!t || busy) return;
+      busy = true;
+      try {
+        const c = await createParty(name, 'Worker', orgId, t);
+        PARTIES.current = [...PARTIES.current, { stakeholder_id: c.id, name: c.name, category: t }];
+        busy = false;
+        hapt(8);
+        engagementForm(si, { stakeholder_id: c.id, name: c.name, category: t });
+      } catch (e) { busy = false; fail(e); }
+    };
+    sheet.querySelectorAll('.tchip').forEach(b => b.addEventListener('click', () => { hapt(6); void go((b as HTMLElement).dataset.trade!); }));
+    const other = sheet.querySelector('#t-other') as HTMLInputElement;
+    const goBtn = sheet.querySelector('#t-go') as HTMLButtonElement;
+    other.addEventListener('input', () => {
+      const v = other.value.trim();
+      goBtn.disabled = !v;
+      goBtn.textContent = v ? `Add ${esc(name)} as ${v}` : 'Pick what they do';
+    });
+    goBtn.addEventListener('click', () => void go(other.value));
+    other.addEventListener('keydown', (e) => { if ((e as KeyboardEvent).key === 'Enter') void go(other.value); });
   }
 
   /* step 2 — the engagement: wage types for THIS site. The party's stakeholder category carries

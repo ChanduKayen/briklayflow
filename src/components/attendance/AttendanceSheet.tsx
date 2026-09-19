@@ -24,6 +24,7 @@ import { PutOnContractDialog, type PocCtx } from './PutOnContractDialog';
 import { WagesOnContractDialog, type WagesAskCtx } from './WagesOnContractDialog';
 import { loadWageContracts, shortContract, WAGES_ASK, type WageContract } from './wagesOnContract';
 import { musterLines } from './musterRows';
+import { tradeChoices, TRADE_ASK } from './tradeList';
 
 const inr = (n: number) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');
 const fmtQ = (n: number) => (+n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 });
@@ -62,7 +63,9 @@ export default function AttendanceSheet({ session }: { session: Session }) {
   const seededRef = useRef(false);
   const WROWS = useRef<Map<string, WorkerRow>>(new Map());
   const CROWS = useRef<Map<string, ContractRow>>(new Map());
-  const addState = useRef<{ site: string | null; picked: any | null; exp: boolean }>({ site: null, picked: null, exp: false });
+  // `newName` is a name typed that nobody in Parties answers to yet: the trade is asked before the
+  // party is minted, so it is never created without one.
+  const addState = useRef<{ site: string | null; picked: any | null; exp: boolean; newName: string | null }>({ site: null, picked: null, exp: false, newName: null });
 
   const [monday, setMonday] = useState<Date>(() => mondayOf(new Date()));
   const [rcOpen, setRcOpen] = useState(false);
@@ -282,7 +285,16 @@ export default function AttendanceSheet({ session }: { session: Session }) {
       });
 
       // add-worker row
-      if (A.site === site.site && A.picked) {
+      if (A.site === site.site && A.newName) {
+        const { trades, roles } = tradeChoices(CARD.current);
+        const chip = (c: { label: string; rate: number | null }) =>
+          `<button type="button" class="tchip" data-trade="${escapeHtml(c.label)}">${escapeHtml(c.label)}${c.rate ? `<em>${inr(c.rate)}</em>` : ''}</button>`;
+        html += `<tr class="addrow"><td colspan="8"><div class="ask trade"><div class="askhd">${escapeHtml(TRADE_ASK.title(A.newName))} <span>· ${TRADE_ASK.sub}</span></div>
+          <div class="tgrid">${trades.map(chip).join('') || `<span class="tnone">${TRADE_ASK.none}</span>`}</div>
+          <div class="tgrid roles">${roles.map(chip).join('')}</div>
+          <div class="tother"><input id="tradeother" placeholder="${TRADE_ASK.otherPlaceholder}" autocomplete="off"><button type="button" data-tradeother>${TRADE_ASK.otherLabel}</button></div>
+          <button class="cancel" data-addcancel>cancel</button></div></td><td class="tot days sum ${sd ? '' : 'zero'}">${sd ? fmtQ(sd) : '—'}</td><td class="tot sum ${sm ? '' : 'zero'}">${sm ? inr(sm) : '—'}</td><td class="menu"></td></tr>`;
+      } else if (A.site === site.site && A.picked) {
         const p = A.picked;
         html += `<tr class="addrow"><td colspan="8"><div class="ask"><div class="askhd">Add <b>${escapeHtml(p.name)}</b> <span>· ${escapeHtml(p.category || 'Worker')}</span></div><div class="cards">
           <button class="card" data-mode="wages"><span class="ci">₹</span><span class="ct">On daily wages</span><span class="cs">Days × rate from the rate card. Helpers counted alongside.</span></button>
@@ -359,8 +371,8 @@ export default function AttendanceSheet({ session }: { session: Session }) {
   function collapseAdd() {
     const A = addState.current;
     const m = q('.morph.exp');
-    if (m && !A.picked) { m.classList.remove('exp'); m.querySelector('.picker')?.remove(); setTimeout(() => { A.site = null; A.picked = null; A.exp = false; render(); }, 260); }
-    else { A.site = null; A.picked = null; A.exp = false; render(); }
+    if (m && !A.picked) { m.classList.remove('exp'); m.querySelector('.picker')?.remove(); setTimeout(() => { A.site = null; A.picked = null; A.newName = null; A.exp = false; render(); }, 260); }
+    else { A.site = null; A.picked = null; A.newName = null; A.exp = false; render(); }
   }
 
   // ── persistence ──────────────────────────────────────────────────────────────
@@ -589,11 +601,13 @@ export default function AttendanceSheet({ session }: { session: Session }) {
       const root = rootRef.current; if (!root) return;
       const t = e.target as HTMLElement;
       if (!root.contains(t) && !t.closest('.editor,.rowmenu')) { return; }
-      const pill = t.closest('[data-f]'); if (pill) { filterRef.current = (pill as HTMLElement).dataset.f!; addState.current = { site: null, picked: null, exp: false }; render(); return; }
-      const add = t.closest('[data-add]'); if (add) { e.preventDefault(); const s = (add as HTMLElement).dataset.add!; const A = addState.current; if (A.site === s) return; A.site = s; A.picked = null; A.exp = false; render(); return; }
+      const pill = t.closest('[data-f]'); if (pill) { filterRef.current = (pill as HTMLElement).dataset.f!; addState.current = { site: null, picked: null, exp: false, newName: null }; render(); return; }
+      const add = t.closest('[data-add]'); if (add) { e.preventDefault(); const s = (add as HTMLElement).dataset.add!; const A = addState.current; if (A.site === s) return; A.site = s; A.picked = null; A.newName = null; A.exp = false; render(); return; }
       if (t.closest('[data-addcancel]')) { collapseAdd(); return; }
       const pick = t.closest('[data-pick]'); if (pick) { const id = (pick as HTMLElement).dataset.pick!; addState.current.picked = PARTIES.current.find(x => x.stakeholder_id === id) || null; render(); (q('.card[data-mode="wages"]'))?.focus(); return; }
-      if (t.closest('[data-new]')) { void createNewParty(); return; }
+      if (t.closest('[data-new]')) { askTrade(); return; }
+      const tc = t.closest('[data-trade]'); if (tc) { void createNewParty((tc as HTMLElement).dataset.trade!); return; }
+      if (t.closest('[data-tradeother]')) { void createNewParty((q('#tradeother') as HTMLInputElement | null)?.value || ''); return; }
       const md = t.closest('[data-mode]'); if (md) { void chooseMode((md as HTMLElement).dataset.mode as 'wages' | 'contract'); return; }
       const cell = t.closest('.cell[data-w]'); if (cell) { e.stopPropagation(); closeAll(); const r = WROWS.current.get((cell as HTMLElement).dataset.w!); if (r) openEditor(r, +(cell as HTMLElement).dataset.i!, cell as HTMLElement); return; }
       const mc = t.closest('button[data-menu-c]'); if (mc) { e.stopPropagation(); closeAll(); const c = CROWS.current.get((mc as HTMLElement).dataset.menuC!); if (c) openContractMenu(c, mc as HTMLElement); return; }
@@ -628,11 +642,23 @@ export default function AttendanceSheet({ session }: { session: Session }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [monday, TODAY, locked]);
 
-  async function createNewParty() {
+  /** A name nobody answers to yet: ask what they do before anyone is created. */
+  function askTrade() {
     const A = addState.current; const inp = q('#addinput') as HTMLInputElement | null;
     const name = (inp?.value || '').trim(); if (!name) return;
-    try { const c = await createParty(name, 'Worker', orgId); A.picked = { stakeholder_id: c.id, name: c.name, category: null }; PARTIES.current.push({ stakeholder_id: c.id, name: c.name, category: null }); render(); }
-    catch (e) { fail(e); }
+    A.newName = name; A.picked = null; render();
+  }
+
+  /** The trade is chosen — NOW the party exists, carrying it, and the add goes on as before. */
+  async function createNewParty(trade: string) {
+    const A = addState.current; const name = A.newName; if (!name || !trade.trim()) return;
+    try {
+      const c = await createParty(name, 'Worker', orgId, trade.trim());
+      A.newName = null;
+      A.picked = { stakeholder_id: c.id, name: c.name, category: trade.trim() };
+      PARTIES.current.push({ stakeholder_id: c.id, name: c.name, category: trade.trim() });
+      render();
+    } catch (e) { fail(e); }
   }
 
   // Both add a crew (trade row + helpers, so the editor's per-skill steppers make sense). "On contract"
@@ -641,7 +667,7 @@ export default function AttendanceSheet({ session }: { session: Session }) {
     const A = addState.current; const p = A.picked; const siteId = A.site; if (!p || !siteId) return;
     const trade = resolveTrade(p.category);
     const cats = mixFor(trade).map(c => ({ category: c, rate: rateFor(trade, c) }));
-    A.site = null; A.picked = null; A.exp = false;
+    A.site = null; A.picked = null; A.newName = null; A.exp = false;
     try {
       const newCrewId = await addCrew(orgId, siteId, p.name, trade, cats, p.stakeholder_id || undefined);
       await load();
@@ -901,6 +927,19 @@ const ATDX_CSS = `
 .atdx .askhd{font-size:14px;color:var(--walnut);white-space:nowrap}
 .atdx .askhd b{color:var(--ink);font-weight:500}
 .atdx .askhd span{color:var(--mute)}
+/* the trade step: the org's own card, as chips, before anybody is created */
+.atdx .ask.trade{flex-direction:column;align-items:flex-start;gap:10px;padding:4px 0}
+.atdx .tgrid{display:flex;flex-wrap:wrap;gap:8px}
+.atdx .tchip{display:inline-flex;align-items:center;gap:8px;height:36px;padding:0 14px;border-radius:18px;border:1px solid var(--hair-2);
+  background:var(--paper);font-size:14px;font-weight:500;color:var(--ink);transition:border-color .15s,background .15s}
+.atdx .tchip:hover{background:var(--cream);border-color:var(--terra)}
+.atdx .tchip em{font-style:normal;font-family:'DM Mono',ui-monospace,monospace;font-size:12px;color:var(--mute)}
+.atdx .tgrid.roles .tchip{background:none;border-style:dashed}
+.atdx .tnone{font-size:13.5px;color:var(--mute)}
+.atdx .tother{display:flex;gap:8px;align-items:center}
+.atdx .tother input{height:36px;width:220px;padding:0 12px;border-radius:18px;border:1px solid var(--hair-2);background:var(--paper);font:inherit;font-size:14px;outline:0}
+.atdx .tother input:focus{border-color:var(--terra)}
+.atdx .tother button{height:36px;padding:0 14px;border-radius:18px;border:0;background:var(--terra);color:#fff;font-size:14px;font-weight:500}
 .atdx .cards{display:flex;gap:10px;flex-wrap:wrap}
 .atdx .card{display:grid;grid-template-columns:auto 1fr;grid-template-rows:auto auto;column-gap:12px;text-align:left;width:300px;padding:12px 16px 13px 14px;border-radius:14px;background:var(--cream);box-shadow:inset 0 0 0 1px transparent;transition:background .15s var(--ease),box-shadow .15s var(--ease),transform .15s var(--ease)}
 .atdx .card .ci{grid-row:1/3;align-self:start;width:28px;height:28px;border-radius:8px;background:var(--paper);display:grid;place-items:center;font-family:"DM Mono",monospace;font-size:13px;color:var(--walnut);margin-top:1px;box-shadow:var(--shadow-1)}
