@@ -12,7 +12,8 @@ import { useSnackbar } from '../components/Snackbar';
 import { type BillDraft } from '../components/bills/NewBillModal';
 import { useSearchScope } from '../components/search/searchScope';
 import { useCursorLamp } from '../components/nav/useCursorLamp';
-import BillsMobile from '../components/bills/BillsMobile';
+import MobileArtifactFrame from '../components/MobileArtifactFrame';
+import billsMobileHtml from './billsMobile.html?raw';
 import { useMintBill } from '../components/bills/useMintBill';
 import { useIsMobile } from '../lib/useIsMobile';
 import { supabase } from '../lib/supabase';
@@ -442,7 +443,9 @@ const IconDrop = () => (<svg viewBox="0 0 24 24" fill="none" stroke="currentColo
 // read through billsApi, so a bill paid on either shows up on the other.
 export default function Bills() {
   const isMobile = useIsMobile();
-  return isMobile ? <BillsMobile /> : <BillsDesktop />;
+  // Mobile Bills is the "Briklay · Bills" reference, rendered verbatim in an iframe (visual-first, on
+  // its own sample data). The wired mobile page (BillsMobile) is kept for the later real-data pass.
+  return isMobile ? <MobileArtifactFrame html={billsMobileHtml} title="Bills" /> : <BillsDesktop />;
 }
 
 function BillsDesktop() {

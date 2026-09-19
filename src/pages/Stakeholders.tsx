@@ -16,6 +16,9 @@ import { mergeStakeholders } from '../lib/stakeholderMerge';
 import { useSearchScope } from '../components/search/searchScope';
 import SearchBar from '../components/search/SearchBar';
 import { renameWalletHolder } from '../lib/walletApi';
+import { useIsMobile } from '../lib/useIsMobile';
+import MobileArtifactFrame from '../components/MobileArtifactFrame';
+import partiesMobileHtml from './partiesMobile.html?raw';
 
 // ── helpers ─────────────────────────────────────────────────────────────────────
 const GSTIN_REGEX = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][A-Z0-9]Z[A-Z0-9]$/;
@@ -77,6 +80,15 @@ const EMPTY_FORM: DrawerForm = {
 };
 
 export default function Stakeholders({ session }: { session: Session }) {
+  const isMobile = useIsMobile();
+  // Mobile Parties is the "Briklay · Parties" reference, rendered verbatim in an iframe (visual-first,
+  // on its own sample data). The desktop page below is unchanged; real data + write-actions are a
+  // later wiring pass.
+  if (isMobile) return <MobileArtifactFrame html={partiesMobileHtml} title="Parties" />;
+  return <StakeholdersDesktop session={session} />;
+}
+
+function StakeholdersDesktop({ session }: { session: Session }) {
   const queryClient = useQueryClient();
   const { data: profile } = useUserProfile(session.user.id);
   const { orgId, authState } = useAuth();
