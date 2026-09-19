@@ -32,6 +32,7 @@ import { TxComposer } from './TxComposer';
 import { BillComposer } from './BillComposer';
 import { BILL_CSS } from './billCss';
 import { TX_CSS, composer, emptyBill, emptyDraft, navTakeover, type BillState, type TxDraft } from './txDraft';
+import { useSheetFlag } from '../../lib/sheetFlag';
 
 // ── icons, exact from the reference (24×24, stroke 1.65, round caps) ──
 const I: Record<string, ReactNode> = {
@@ -175,6 +176,7 @@ export function MobileNavBar({
   // ── More: the bar opens ──
   const [moreMounted, setMoreMounted] = useState(false);
   const [moreOn, setMoreOn] = useState(false);
+  useSheetFlag(moreMounted);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const openMore = () => {
     if (closeTimer.current) { clearTimeout(closeTimer.current); closeTimer.current = null; }
@@ -409,7 +411,7 @@ export function MobileNavBar({
 
 // ── scoped CSS — the reference's own values, unchanged ──
 const CSS = `
-.mnav{--sage:#2F5D3A;--night:#15100C;--cream:250,248,243;--paper:#FFFFFF;--ink:#2B211A;--ink-2:#5C4F45;
+.mnav{--sage:#2F5D3A;--night:#170E08;--night-bg:linear-gradient(180deg,#191009,#140D07);--night-edge:#302014;--lift:0 24px 50px -16px rgba(20,13,7,.72),0 0 0 1px rgba(245,240,231,.10),inset 0 1px 0 rgba(245,240,231,0.34);--cream:250,248,243;--paper:#FFFFFF;--ink:#2B211A;--ink-2:#5C4F45;
   --clay:#B5472A;--clay-hi:#D4633E;--ease:cubic-bezier(.22,.8,.24,1);--nav-h:64px;--nav-gap:12px;
   position:fixed;inset:0;z-index:40;pointer-events:none;
   font-family:'DM Sans',system-ui,-apple-system,'Segoe UI',sans-serif}
@@ -424,8 +426,8 @@ const CSS = `
    ===================================================================== */
 .mnav .nav{pointer-events:auto;z-index:20;position:absolute;left:var(--nav-gap);right:var(--nav-gap);bottom:calc(var(--nav-gap) + env(safe-area-inset-bottom));
   max-width:406px;margin:0 auto;height:var(--nav-h);overflow:hidden;
-  border-radius:32px;background:var(--night);
-  box-shadow:0 18px 36px -14px rgba(21,16,12,.55),0 2px 0 0 rgba(var(--cream),.05) inset}
+  border-radius:32px;background:var(--night-bg);
+  box-shadow:0 18px 36px -14px rgba(20,13,7,.6),inset 0 1px 0 var(--night-edge),inset 0 2px 0 0 rgba(var(--cream),.05)}
 /* two sets in one capsule: the tabs, and whatever a page has lent it */
 .mnav .nav .set{position:absolute;inset:0;display:grid;padding:0 6px;transition:opacity .28s ease,transform .42s var(--ease)}
 .mnav .nav .acts{grid-auto-flow:column;grid-auto-columns:1fr;opacity:0;transform:translateY(14px);pointer-events:none}
@@ -499,12 +501,12 @@ const CSS = `
    MORE.  The panel is the bar's own colour and rises out of it, so it reads
    as the bar opening, not a new screen.
    ===================================================================== */
-.mnav .mnav-scrim{pointer-events:auto;position:absolute;inset:0;z-index:17;background:rgba(21,16,12,.38);opacity:0;transition:opacity .35s ease}
+.mnav .mnav-scrim{pointer-events:auto;position:absolute;inset:0;z-index:17;background:rgba(9,6,3,.52);backdrop-filter:saturate(.8) blur(1.5px);-webkit-backdrop-filter:saturate(.8) blur(1.5px);opacity:0;transition:opacity .35s ease}
 .mnav .mnav-scrim.on{opacity:1}
 .mnav .mnav-more{pointer-events:auto;
   position:absolute;left:var(--nav-gap);right:var(--nav-gap);bottom:calc(var(--nav-gap) + env(safe-area-inset-bottom));z-index:18;
   max-width:406px;margin:0 auto;padding:8px 10px calc(var(--nav-h) + 10px);
-  border-radius:32px;background:var(--night);color:rgb(var(--cream));box-shadow:0 24px 50px -16px rgba(21,16,12,.7);
+  border-radius:32px;background:var(--night-bg);color:rgb(var(--cream));box-shadow:var(--lift);
   transform-origin:50% 100%;transform:translateY(24px) scale(.96);opacity:0;max-height:calc(100% - 80px);overflow:auto;
   transition:transform .46s var(--ease),opacity .28s ease;touch-action:pan-y;-webkit-overflow-scrolling:touch}
 .mnav .mnav-more.on{transform:none;opacity:1;transition:transform .5s var(--ease),opacity .3s ease}

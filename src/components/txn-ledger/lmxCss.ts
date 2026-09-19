@@ -4,7 +4,7 @@
  */
 export const LMX_CSS = `
 .lmx{--ground:#FAF8F3;--paper:#FFFFFF;--ink:#2B211A;--ink-2:#5C4F45;--ink-3:#8A7B6E;--line:#E9E1D6;--line-2:#DCD2C4;--rule:#F0E9DF;
-  --night:#15100C;--cream:250,248,243;--clay:#B5472A;--clay-hi:#D4633E;--clay-wash:#FBEDE6;--sage:#2F5D3A;
+  --night:#170E08;--night-bg:linear-gradient(180deg,#191009,#140D07);--night-edge:#302014;--lift:0 24px 50px -16px rgba(20,13,7,.72),0 0 0 1px rgba(245,240,231,.10),inset 0 1px 0 rgba(245,240,231,0.34);--cream:250,248,243;--clay:#B5472A;--clay-hi:#D4633E;--clay-wash:#FBEDE6;--sage:#2F5D3A;
   --serif:'Playfair Display',Georgia,'Times New Roman',serif;--sans:'DM Sans',system-ui,-apple-system,sans-serif;--mono:'DM Mono',ui-monospace,Menlo,monospace;
   --ease:cubic-bezier(.22,.8,.24,1);--nav-h:64px;--nav-gap:12px;
   background:var(--ground);color:var(--ink);font-family:var(--sans);font-size:16px;line-height:1.4;
@@ -16,7 +16,7 @@ export const LMX_CSS = `
 /* =====================================================================
    TRANSACTIONS. The header answers one question: how much went out, lately.
    ===================================================================== */
-.lmx .hero{background:var(--night);color:rgb(var(--cream));padding:20px 20px 18px}
+.lmx .hero{background:var(--night-bg);color:rgb(var(--cream));padding:20px 20px 18px}
 .lmx .hero-top{display:flex;align-items:center;justify-content:space-between;gap:12px}
 .lmx .hero h1{margin:0;font-family:var(--serif);font-weight:600;font-size:32px;letter-spacing:-.01em;line-height:1.1}
 .lmx .icb{width:40px;height:40px;border:0;border-radius:20px;background:rgba(var(--cream),.07);color:rgba(var(--cream),.85);display:grid;place-items:center}
@@ -43,7 +43,7 @@ export const LMX_CSS = `
 .lmx .pill[aria-pressed="true"]{background:rgb(var(--cream));color:var(--night);border-color:transparent}
 
 .lmx-compact{position:fixed;left:0;right:0;top:0;z-index:12;max-width:430px;margin:0 auto;height:52px;padding:0 20px;display:flex;align-items:center;justify-content:space-between;gap:12px;
-  background:#15100C;color:rgb(250,248,243);font-family:'DM Sans',system-ui,sans-serif;transform:translateY(-100%);transition:transform .35s cubic-bezier(.22,.8,.24,1)}
+  background:linear-gradient(180deg,#191009,#140D07);color:rgb(250,248,243);font-family:'DM Sans',system-ui,sans-serif;transform:translateY(-100%);transition:transform .35s cubic-bezier(.22,.8,.24,1)}
 .lmx-compact.on{transform:none}
 .lmx-compact b{font-family:'Playfair Display',Georgia,serif;font-weight:600;font-size:19px}
 .lmx-compact span{font-family:'DM Mono',ui-monospace,monospace;font-size:14px;color:rgba(250,248,243,.85)}
@@ -148,7 +148,7 @@ export const LMX_CSS = `
 .lmx-peek .pk-seg{display:flex;padding:3px;border-radius:16px;background:rgba(250,248,243,.08)}
 .lmx-peek .pk-seg button{height:32px;padding:0 16px;border:0;border-radius:13px;background:none;color:rgba(250,248,243,.7);font:inherit;font-size:13.5px;font-weight:600;
   transition:background .25s,color .25s}
-.lmx-peek .pk-seg button[aria-pressed="true"]{background:rgb(250,248,243);color:#15100C}
+.lmx-peek .pk-seg button[aria-pressed="true"]{background:rgb(250,248,243);color:#170E08}
 .lmx-peek .pk-cap{display:flex;flex-direction:column;align-items:center;gap:2px;text-align:center}
 .lmx-peek .pk-cap .what{font-size:14.5px;color:rgba(250,248,243,.9);max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .lmx-peek .pk-cap .what b{font-weight:600}
@@ -156,7 +156,7 @@ export const LMX_CSS = `
 .lmx-peek .pk-acts{display:flex;gap:8px;width:100%}
 .lmx-peek .pk-acts button,.lmx-peek .pk-acts a{flex:1;height:48px;border:0;border-radius:16px;background:rgba(250,248,243,.1);color:rgb(250,248,243);
   font:inherit;font-size:14.5px;font-weight:600;display:grid;place-items:center;text-decoration:none}
-.lmx-peek .pk-acts a{background:rgb(250,248,243);color:#15100C}
+.lmx-peek .pk-acts a{background:rgb(250,248,243);color:#170E08}
 .lmx .close{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;padding:13px 18px 15px;border-top:1px solid var(--rule)}
 .lmx .close em{font-family:var(--serif);font-style:italic;font-size:15.5px;color:var(--ink-2)}
 .lmx .close b{font-family:var(--mono);font-weight:500;font-size:15px;padding:0 0 5px 28px;border-bottom:3px double var(--ink)}
@@ -176,11 +176,13 @@ export const LMX_CSS = `
 
 /* select mode: the top counts and sums */
 .lmx-selbar{position:fixed;left:0;right:0;top:0;z-index:30;max-width:430px;margin:0 auto;height:56px;padding:0 8px 0 6px;display:flex;align-items:center;gap:4px;
-  background:#15100C;color:rgb(250,248,243);font-family:'DM Sans',system-ui,sans-serif;transform:translateY(-100%);transition:transform .38s cubic-bezier(.22,.8,.24,1)}
+  background:linear-gradient(180deg,#191009,#140D07);color:rgb(250,248,243);font-family:'DM Sans',system-ui,sans-serif;transform:translateY(-100%);transition:transform .38s cubic-bezier(.22,.8,.24,1)}
 .lmx-selbar.on{transform:none}
 .lmx-selbar .x{width:44px;height:44px;border:0;border-radius:22px;background:none;color:rgb(250,248,243);display:grid;place-items:center}
 .lmx-selbar .n{flex:1;min-width:0;display:flex;align-items:baseline;gap:10px;font-size:16px;font-weight:600}
 .lmx-selbar .n span{font-family:'DM Mono',ui-monospace,monospace;font-weight:500;font-size:14px;color:rgba(250,248,243,.65)}
+/* a card is up: the page's dark headers leave, so a dark card never lands on a dark header */
+:root[data-sheet] .lmx-compact,:root[data-sheet] .lmx-selbar{transform:translateY(-100%)}
 .lmx-selbar .all{height:36px;padding:0 12px;border:0;border-radius:18px;background:rgba(250,248,243,.1);font-size:13px;font-weight:600;color:rgb(250,248,243)}
 
 /* the void action, in the bar the page borrowed. Held, never tapped. */
@@ -191,16 +193,16 @@ export const LMX_CSS = `
 
 /* toast, panel */
 .lmx-toast{position:fixed;left:16px;right:16px;top:66px;z-index:70;width:fit-content;max-width:calc(100% - 32px);margin-inline:auto;transform:translateY(-16px);opacity:0;pointer-events:none;
-  display:flex;align-items:center;gap:10px;padding:11px 8px 11px 16px;border-radius:16px;background:#15100C;color:rgb(250,248,243);font-family:'DM Sans',system-ui,sans-serif;font-size:14px;
+  display:flex;align-items:center;gap:10px;padding:11px 8px 11px 16px;border-radius:16px;background:linear-gradient(180deg,#191009,#140D07);color:rgb(250,248,243);font-family:'DM Sans',system-ui,sans-serif;font-size:14px;
   box-shadow:0 18px 40px -16px rgba(21,16,12,.6);transition:transform .4s cubic-bezier(.22,.8,.24,1),opacity .3s}
 .lmx-toast.on{transform:none;opacity:1;pointer-events:auto}
 .lmx-toast button{min-height:34px;padding:0 12px;border:0;border-radius:10px;background:rgba(250,248,243,.14);color:#fff;font-size:13.5px;font-weight:600}
-.lmx-scrim{position:fixed;inset:0;z-index:57;background:rgba(21,16,12,.38);opacity:0;transition:opacity .35s}
+.lmx-scrim{position:fixed;inset:0;z-index:57;background:rgba(9,6,3,.52);backdrop-filter:saturate(.8) blur(1.5px);-webkit-backdrop-filter:saturate(.8) blur(1.5px);opacity:0;transition:opacity .35s}
 .lmx-scrim.on{opacity:1}
-.lmx-panel{--cream:250,248,243;--clay:#B5472A;--clay-hi:#D4633E;--night:#15100C;--ease:cubic-bezier(.22,.8,.24,1);--nav-h:64px;--nav-gap:12px;
+.lmx-panel{--cream:250,248,243;--clay:#B5472A;--clay-hi:#D4633E;--night:#170E08;--night-bg:linear-gradient(180deg,#191009,#140D07);--night-edge:#302014;--lift:0 24px 50px -16px rgba(20,13,7,.72),0 0 0 1px rgba(245,240,231,.10),inset 0 1px 0 rgba(245,240,231,0.34);--ease:cubic-bezier(.22,.8,.24,1);--nav-h:64px;--nav-gap:12px;
   position:fixed;left:var(--nav-gap);right:var(--nav-gap);bottom:calc(var(--nav-gap) + env(safe-area-inset-bottom));z-index:58;max-width:406px;margin:0 auto;
-  max-height:calc(100dvh - 24px);padding:8px 16px calc(var(--nav-h) + 14px);display:flex;flex-direction:column;border-radius:32px;background:var(--night);color:rgb(var(--cream));
-  font-family:'DM Sans',system-ui,sans-serif;box-shadow:0 24px 50px -16px rgba(21,16,12,.7);
+  max-height:calc(100dvh - 24px);padding:8px 16px calc(var(--nav-h) + 14px);display:flex;flex-direction:column;border-radius:32px;background:var(--night-bg);color:rgb(var(--cream));
+  font-family:'DM Sans',system-ui,sans-serif;box-shadow:var(--lift);
   transform:translateY(24px) scale(.96);transform-origin:50% 100%;opacity:0;overflow:auto;transition:transform .46s var(--ease),opacity .28s}
 .lmx-panel *{box-sizing:border-box}
 .lmx-panel.on{transform:none;opacity:1;transition:transform .5s var(--ease),opacity .3s}
@@ -235,7 +237,7 @@ export const LMX_CSS = `
 /* the paper again, at reading size: a sheet with its corner turned */
 .lmx-panel .sh{position:relative;display:grid;place-items:center;width:74px;height:94px;border-radius:8px 0 8px 8px;background:#F4EFE6;overflow:hidden;
   box-shadow:0 8px 20px -10px rgba(0,0,0,.6),inset 0 0 0 1px rgba(21,16,12,.12);transition:transform .18s var(--ease)}
-.lmx-panel .sh::after{content:'';position:absolute;top:0;right:0;width:16px;height:16px;background:var(--night);
+.lmx-panel .sh::after{content:'';position:absolute;top:0;right:0;width:16px;height:16px;background:#191009;
   border-left:1px solid rgba(21,16,12,.12);border-bottom:1px solid rgba(21,16,12,.12);border-bottom-left-radius:3px;z-index:1}
 .lmx-panel .sh img{width:100%;height:100%;object-fit:cover}
 .lmx-panel .sh .pdf{font-family:'DM Mono',ui-monospace,monospace;font-size:12px;font-weight:500;color:#8A7B6E;letter-spacing:.06em}

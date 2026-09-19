@@ -4,7 +4,7 @@
  */
 export const PYM_CSS = `
 .pym{--ground:#FAF8F3;--paper:#FFFFFF;--ink:#2B211A;--ink-2:#5C4F45;--ink-3:#8A7B6E;--line:#E9E1D6;--line-2:#DCD2C4;--rule:#F0E9DF;
-  --night:#15100C;--cream:250,248,243;--clay:#B5472A;--clay-hi:#D4633E;--sage:#2F5D3A;--sage-hi:#8FC79A;
+  --night:#170E08;--night-bg:linear-gradient(180deg,#191009,#140D07);--night-edge:#302014;--lift:0 24px 50px -16px rgba(20,13,7,.72),0 0 0 1px rgba(245,240,231,.10),inset 0 1px 0 rgba(245,240,231,0.34);--cream:250,248,243;--clay:#B5472A;--clay-hi:#D4633E;--sage:#2F5D3A;--sage-hi:#8FC79A;
   --serif:'Playfair Display',Georgia,'Times New Roman',serif;--sans:'DM Sans',system-ui,-apple-system,sans-serif;--mono:'DM Mono',ui-monospace,Menlo,monospace;
   --ease:cubic-bezier(.22,.8,.24,1);--nav-h:64px;--nav-gap:12px;
   position:relative;background:var(--ground);color:var(--ink);font-family:var(--sans);font-size:16px;line-height:1.4;
@@ -17,7 +17,7 @@ export const PYM_CSS = `
 /* =====================================================================
    PAYABLES.  A weekly run is a pipeline, so the page is one: approve → pay → paid
    ===================================================================== */
-.pym .hero{background:var(--night);color:rgb(var(--cream));padding:24px 20px 22px}
+.pym .hero{background:var(--night-bg);color:rgb(var(--cream));padding:24px 20px 22px}
 .pym .hero-top{display:flex;align-items:center;justify-content:space-between;gap:12px}
 .pym .hero h1{margin:0;font-family:var(--serif);font-weight:600;font-size:34px;letter-spacing:-.01em;line-height:1.1}
 .pym .week{display:flex;align-items:center;gap:6px;height:36px;padding:0 12px;border-radius:18px;border:1px solid rgba(var(--cream),.16);background:none;
@@ -124,18 +124,18 @@ export const PYM_CSS = `
 /* toast, with the undo that every move earns */
 .pym-toast{position:fixed;left:16px;right:16px;top:14px;z-index:70;width:fit-content;max-width:calc(100% - 32px);margin-inline:auto;
   transform:translateY(-16px);opacity:0;pointer-events:none;display:flex;align-items:center;gap:10px;padding:11px 8px 11px 16px;border-radius:16px;
-  background:#15100C;color:rgb(250,248,243);font-family:'DM Sans',system-ui,sans-serif;font-size:14px;
+  background:linear-gradient(180deg,#191009,#140D07);color:rgb(250,248,243);font-family:'DM Sans',system-ui,sans-serif;font-size:14px;
   box-shadow:0 18px 40px -16px rgba(21,16,12,.6);transition:transform .4s cubic-bezier(.22,.8,.24,1),opacity .3s}
 .pym-toast.on{transform:none;opacity:1;pointer-events:auto}
 .pym-toast button{min-height:34px;padding:0 12px;border:0;border-radius:10px;background:rgba(250,248,243,.14);color:#fff;font-size:13.5px;font-weight:600;cursor:pointer}
 
 /* the panel: the bar opens, as everywhere else */
-.pym-scrim{position:fixed;inset:0;z-index:57;background:rgba(21,16,12,.38);opacity:0;transition:opacity .35s}
+.pym-scrim{position:fixed;inset:0;z-index:57;background:rgba(9,6,3,.52);backdrop-filter:saturate(.8) blur(1.5px);-webkit-backdrop-filter:saturate(.8) blur(1.5px);opacity:0;transition:opacity .35s}
 .pym-scrim.on{opacity:1}
-.pym-panel{--ease:cubic-bezier(.22,.8,.24,1);--cream:250,248,243;--clay:#B5472A;--clay-hi:#D4633E;--sage:#2F5D3A;--night:#15100C;--nav-h:64px;--nav-gap:12px;
+.pym-panel{--ease:cubic-bezier(.22,.8,.24,1);--cream:250,248,243;--clay:#B5472A;--clay-hi:#D4633E;--sage:#2F5D3A;--night:#170E08;--night-bg:linear-gradient(180deg,#191009,#140D07);--night-edge:#302014;--lift:0 24px 50px -16px rgba(20,13,7,.72),0 0 0 1px rgba(245,240,231,.10),inset 0 1px 0 rgba(245,240,231,0.34);--nav-h:64px;--nav-gap:12px;
   position:fixed;left:var(--nav-gap);right:var(--nav-gap);bottom:calc(var(--nav-gap) + env(safe-area-inset-bottom));z-index:58;max-width:406px;margin:0 auto;
   height:var(--h,520px);max-height:calc(100dvh - 24px);padding:8px 14px calc(var(--nav-h) + 12px);display:flex;flex-direction:column;border-radius:32px;
-  background:var(--night);color:rgb(var(--cream));font-family:'DM Sans',system-ui,sans-serif;box-shadow:0 24px 50px -16px rgba(21,16,12,.7);
+  background:var(--night-bg);color:rgb(var(--cream));font-family:'DM Sans',system-ui,sans-serif;box-shadow:var(--lift);
   transform:translateY(24px) scale(.96);transform-origin:50% 100%;opacity:0;overflow:hidden;
   transition:transform .46s var(--ease),opacity .28s,height .5s var(--ease)}
 .pym-panel *{box-sizing:border-box}

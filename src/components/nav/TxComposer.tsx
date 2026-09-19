@@ -25,6 +25,7 @@ import { useOrgId } from '../../lib/auth/AuthProvider';
 import { navAction } from './navAction';
 import { useSheetDrag } from '../../lib/sheetDrag';
 import { VIA, emptyDraft, genStkId, genTxnId, fmt, initials, words, today, shift, type PayMode, type TxDraft } from './txDraft';
+import { useSheetFlag } from '../../lib/sheetFlag';
 
 const ARROW = <path d="M15 5l-7 7 7 7" />;
 const CROSS = <path d="M6 6l12 12M18 6 6 18" />;
@@ -44,6 +45,7 @@ export function TxComposer({ draft, onDraft, onClose }: {
   const qc = useQueryClient();
   const orgId = useOrgId();
   const open = !!draft;
+  useSheetFlag(open);   // the page's dark headers step aside while the card is up
   const T = draft ?? emptyDraft();
   const set = (patch: Partial<TxDraft>) => onDraft({ ...T, ...patch });
 

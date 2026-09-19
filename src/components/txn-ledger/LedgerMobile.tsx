@@ -28,6 +28,7 @@ import { LMX_CSS } from './lmxCss';
 import { DocPeek } from './DocPeek';
 import { useSignedDocs, isPdf, type Paper } from './docSigning';
 import { useSheetDrag } from '../../lib/sheetDrag';
+import { useSheetFlag } from '../../lib/sheetFlag';
 import { toEntry, type Entry, type LedgerRaw } from './toEntry';
 
 const inr = (n: number) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');
@@ -73,6 +74,7 @@ export function LedgerMobile({ rows, wallets, categories, sites, loading, refetc
   const [ledger, setLedger] = useState('');              // a wallet holder's own ledger
   const [F, setF] = useState<{ site: string; clip: boolean; min: number }>({ site: '', clip: false, min: 0 });
   const [panel, setPanel] = useState<Panel>(null);
+  useSheetFlag(!!panel);   // the page's dark headers step aside while a card is up
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [selecting, setSelecting] = useState(false);
   const [gone, setGone] = useState<Set<string>>(new Set());

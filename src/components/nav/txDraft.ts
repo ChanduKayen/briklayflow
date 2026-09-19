@@ -81,13 +81,13 @@ export const TX_CSS = `
    NEW TRANSACTION.  The bar opens, exactly as it does for More: same panel,
    same colour, same size. One question at a time.
    ===================================================================== */
-.mnav .tx-scrim{pointer-events:auto;position:absolute;inset:0;z-index:17;background:rgba(21,16,12,.38);opacity:0;transition:opacity .35s ease}
+.mnav .tx-scrim{pointer-events:auto;position:absolute;inset:0;z-index:17;background:rgba(9,6,3,.52);backdrop-filter:saturate(.8) blur(1.5px);-webkit-backdrop-filter:saturate(.8) blur(1.5px);opacity:0;transition:opacity .35s ease}
 .mnav .tx-scrim.on{opacity:1}
 .mnav .tx{pointer-events:auto;position:absolute;left:var(--nav-gap);right:var(--nav-gap);bottom:calc(var(--nav-gap) + env(safe-area-inset-bottom) + max(0px, var(--kb,0px) - 12px));
   z-index:18;max-width:406px;margin:0 auto;height:var(--h,548px);padding:8px 14px calc(var(--nav-h) + 12px);
   /* riding above the keyboard must not push the question off the top */
   max-height:calc(100% - 24px - max(0px, var(--kb,0px) - 12px));
-  display:flex;flex-direction:column;border-radius:32px;background:var(--night);color:rgb(var(--cream));box-shadow:0 24px 50px -16px rgba(21,16,12,.7);
+  display:flex;flex-direction:column;border-radius:32px;background:var(--night-bg);color:rgb(var(--cream));box-shadow:var(--lift);
   transform-origin:calc(100% - 60px) 100%;transform:translateY(24px) scale(.96);opacity:0;overflow:hidden;
   transition:transform .46s var(--ease),opacity .28s ease,bottom .25s ease,padding-bottom .25s ease,height .5s var(--ease)}
 .mnav .tx.on{transform:none;opacity:1;transition:transform .5s var(--ease),opacity .3s ease,bottom .25s ease,padding-bottom .25s ease,height .5s var(--ease)}

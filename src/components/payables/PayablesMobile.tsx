@@ -25,6 +25,7 @@ import { recordWeeklyPayment, settleWeeklyPaymentOnLedger, undoWeeklyPayment, mo
 import { approve as approveRow, unapprove as unapproveRow, isMissingTable, type Approval } from '../../lib/paymentApprovals';
 import { PYM_CSS } from './pymCss';
 import { useSheetDrag } from '../../lib/sheetDrag';
+import { useSheetFlag } from '../../lib/sheetFlag';
 
 const inr = (n: number) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');
 const grouped = (n: number) => Math.round(Number(n) || 0).toLocaleString('en-IN');
@@ -75,6 +76,7 @@ export function PayablesMobile({
   const [stage, setStage] = useState<'all' | Stage>('all');
   const [foldOpen, setFoldOpen] = useState(false);
   const [panel, setPanel] = useState<Panel | null>(null);
+  useSheetFlag(!!panel);
   const [busy, setBusy] = useState<string | null>(null);
   const [folded, setFolded] = useState(false);
   const [fab, setFab] = useState<{ cls: string; label: string } | null>(null);

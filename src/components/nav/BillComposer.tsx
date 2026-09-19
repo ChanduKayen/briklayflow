@@ -29,6 +29,7 @@ import { navAction } from './navAction';
 import { useSheetDrag } from '../../lib/sheetDrag';
 import { fmt, initials, type BillState } from './txDraft';
 import { unsureOf } from './billUnsure';
+import { useSheetFlag } from '../../lib/sheetFlag';
 
 const CHEV = <svg className="c" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>;
 const CAM = <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8.5A1.5 1.5 0 0 1 5.5 7h2l1.2-2h6.6l1.2 2h2A1.5 1.5 0 0 1 20 8.5v9A1.5 1.5 0 0 1 18.5 19h-13A1.5 1.5 0 0 1 4 17.5v-9Z" /><circle cx="12" cy="13" r="3.2" /></svg>;
@@ -66,6 +67,7 @@ export function BillComposer({ bill, onBill, onClose }: {
   const qc = useQueryClient();
   const { show } = useSnackbar();
   const open = !!bill;
+  useSheetFlag(open);   // the page's dark headers step aside while the card is up
   const B = bill;
 
   const slipRef = useRef<HTMLDivElement | null>(null);
