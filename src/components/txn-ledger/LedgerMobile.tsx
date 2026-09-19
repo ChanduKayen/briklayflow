@@ -287,7 +287,10 @@ export function LedgerMobile({ rows, wallets, categories, sites, loading, refetc
     const front = e.src === 'topup'
       ? <span className="f move"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h14M13 7l5 5-5 5" /></svg></span>
       : e.party ? <span className="f">{initials(e.name)}</span> : <span className="f none" title="No party named" />;
-    const meta = e.src === 'topup' ? 'Moved, not spent' : shortSite(e.site) + (e.note ? ` · ${e.note}` : '');
+    // a wallet transfer names its direction (a recharge vs a settlement), not just "moved"
+    const meta = e.src === 'topup'
+      ? (e.walletDir === 'out' ? 'Wallet → Bank · returned' : 'Bank → Wallet · advance')
+      : shortSite(e.site) + (e.note ? ` · ${e.note}` : '');
     const amt = ledger ? (e.src === 'topup' ? '+' : '−') + inr(e.amt) : inr(e.amt);
     const amtCls = ledger ? (e.src === 'topup' ? ' in' : '') : e.src === 'topup' ? ' move' : e.dir === 'in' ? ' in' : '';
     return (
@@ -315,14 +318,18 @@ export function LedgerMobile({ rows, wallets, categories, sites, loading, refetc
             <span className="meta">{meta}</span>
             <span className="tags">
               {e.clip && (
-                <span className="clipx" role="button" tabIndex={-1} aria-label={`See the ${papersOf(e)[0].kind.toLowerCase()}`}>
+                <span className="clipx" role="button" tabIndex={-1} aria-label={`See the ${papersOf(e)[0].kind.toLowerCase()}`}
+                  onPointerDownCapture={(ev) => ev.stopPropagation()}
+                  onClick={(ev) => { ev.stopPropagation(); if (!selecting) { buzz(5); setPeek({ e, at: 0 }); } }}>
                   {papersOf(e).length > 1 && <i className="sheet back" />}
                   <i className="sheet" />
                 </span>
               )}
               {ledger
                 ? <span className="bal">left {inr(leftAfter[e.id] ?? 0)}</span>
-                : e.src === 'wallet' && e.wallet ? <span className="wtag" role="button" tabIndex={-1}>{WALLET_ICON}{e.wallet}</span> : null}
+                : e.src === 'wallet' && e.wallet ? <span className="wtag" role="button" tabIndex={-1}
+                    onPointerDownCapture={(ev) => ev.stopPropagation()}
+                    onClick={(ev) => { ev.stopPropagation(); if (!selecting) openWallet(e.wallet); }}>{WALLET_ICON}{e.wallet}</span> : null}
             </span>
           </span>
         </span>

@@ -14,6 +14,8 @@ export type Entry = {
   name: string; site: string; siteId: string; note: string; wa: string;
   amt: number; dir: 'in' | 'out';
   src: 'direct' | 'wallet' | 'topup';
+  /** for a wallet transfer (src 'topup'): 'in' = a float (Bank → wallet), 'out' = a return (Wallet → bank) */
+  walletDir: 'in' | 'out' | '';
   party: boolean; clip: boolean; linked: boolean; wallet: string; walletId: string; via: string; cat: string;
   /** the paper this entry carries, as stored — signed only when it is looked at */
   bill: string; proof: string;
@@ -41,6 +43,7 @@ export function toEntry(t: LedgerRaw): Entry {
     name: payeeLabel(t), site: a0?.projects?.name ?? '', siteId: a0?.project_id ?? '', note, wa,
     amt: Number(t.total_amount) || 0, dir: deriveDirection(t),
     src: isWalletTransfer(t) ? 'topup' : isWalletSpend(t) ? 'wallet' : 'direct',
+    walletDir: (t.wallet_dir === 'in' || t.wallet_dir === 'out') ? t.wallet_dir : '',
     party: !!t.stakeholder_id, clip: !!t.bill_doc_url || !!t.proof_document_url, linked: !isNotLinked(t),
     bill: String(t.bill_doc_url ?? ''), proof: String(t.proof_document_url ?? ''),
     wallet: (t.wallets as { holder_name?: string } | null)?.holder_name ?? '', walletId: String(t.wallet_id ?? ''),
