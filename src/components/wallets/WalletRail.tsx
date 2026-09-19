@@ -7,7 +7,7 @@ import { createPortal } from 'react-dom';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  loadWallets, loadWalletLedger, loadAssignableMembers, ensureWallet, issueFloat, returnCash, removeWallet,
+  loadWallets, loadWalletLedger, loadAssignableMembers, ensureWallet, issueFloat, returnCash, removeWallet, linkHolderToParty,
   notifyWalletRecharge, type WalletBalance, type WalletLedgerLine,
 } from '../../lib/walletApi';
 import { supabase } from '../../lib/supabase';
@@ -187,6 +187,9 @@ function GiveTile({ members, existing, orgId, forming, setForming, onGiven }: {
     const m = options.find(o => o.userId === pick)!;
     try {
       const w = await ensureWallet({ orgId, holderUserId: m.userId, holderName: m.name });
+      // cement the durable party↔member link so a Day Book payment to this person resolves the wallet
+      // by identity (not a fragile name match) — best-effort, never blocks the give
+      void linkHolderToParty(orgId, m.userId, w.walletId);
       await issueFloat({ orgId, walletId: w.walletId, amount: v, date: new Date().toISOString().slice(0, 10), mode: 'Cash', note: 'Wallet opened' });
       void notifyWalletRecharge({ orgId, wallet: { walletId: w.walletId, holderName: m.name, holderUserId: m.userId, holderPhone: w.holderPhone }, amount: v, newBalance: v });
       setDone({ name: m.name, v });

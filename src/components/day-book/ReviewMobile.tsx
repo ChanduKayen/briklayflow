@@ -18,7 +18,8 @@ import { resolveEntry, type ProjectLite, type StakeholderLite } from './resolveE
 import { BillRowCard } from './BillRowCard';
 import { NatureChip, natureOf } from './atoms';
 import DragSheet from '../DragSheet';
-import { loadWallets, walletForSender, type WalletBalance } from '../../lib/walletApi';
+import { loadWalletsWithParty, walletForSender, type WalletBalance } from '../../lib/walletApi';
+import { loadTeamCandidates, resolveTeammateParty, type TeamCandidate } from '../../lib/teamPayees';
 import { searchGenHeads, isCompanyHead } from '../../lib/costCodes';
 import { usePullToRefresh, useLiveCount } from '../../lib/usePullToRefresh';
 
@@ -330,8 +331,8 @@ function suggestionsOf(entry: RoughEntry): string[] {
   return names;
 }
 
-/** One line of the payee picker: a party, an overhead head, or the name about to be added. */
-interface NameRow { name: string; id: string | null; head?: string; tag?: string; create?: boolean }
+/** One line of the payee picker: a party, an overhead head, a teammate, or the name about to be added. */
+interface NameRow { name: string; id: string | null; head?: string; tag?: string; create?: boolean; member?: TeamCandidate }
 
 /**
  * Who this money went to — parties first, then the overhead heads underneath.
@@ -341,32 +342,35 @@ interface NameRow { name: string; id: string | null; head?: string; tag?: string
  * contact list fills with things that are not people. The desktop editor has always offered the heads
  * in its payee search; this is the same list, in the phone's own picker.
  */
-function nameRows(q: string, suggestions: string[], stakeholders: StakeholderLite[]): NameRow[] {
+function nameRows(q: string, suggestions: string[], stakeholders: StakeholderLite[], team: TeamCandidate[] = []): NameRow[] {
   const t = q.trim(), ql = t.toLowerCase();
   const hit = (n: string) => n.toLowerCase().includes(ql);
   const sugNames = suggestions.filter(hit);
   const rest = stakeholders.filter(s => !sugNames.includes(s.name) && hit(s.name)).slice(0, 4);
   const heads = searchGenHeads(t);
+  // teammates without a linked party yet — paying one reuses their single record (no duplicate)
+  const teamHits = team.filter(m => !m.stakeholderId && hit(m.name)).slice(0, 4);
   const rows: NameRow[] = [];
   const exact = [...sugNames, ...rest.map(r => r.name), ...heads.map(h => h.name)].some(n => n.toLowerCase() === ql);
   if (t && !exact) rows.push({ name: t, id: null, tag: 'new party', create: true });
   sugNames.forEach(n => rows.push({ name: n, id: stakeholders.find(s => s.name === n)?.stakeholder_id ?? null, tag: 'suggested' }));
   rest.forEach(s => rows.push({ name: s.name, id: s.stakeholder_id }));
+  teamHits.forEach(m => rows.push({ name: m.name, id: null, tag: 'teammate', member: m }));
   heads.forEach(h => rows.push({ name: h.name, id: null, head: h.code, tag: 'overhead' }));
   return rows;
 }
 
 /** The picker itself: one search box over one list. The card opens it under "To"; the edit sheet
  *  keeps it open under "Paid to". */
-function NameList({ q, setQ, suggestions, stakeholders, onPick, inputRef, armed }: {
+function NameList({ q, setQ, suggestions, stakeholders, team = [], onPick, inputRef, armed }: {
   q: string; setQ: (v: string) => void;
-  suggestions: string[]; stakeholders: StakeholderLite[];
+  suggestions: string[]; stakeholders: StakeholderLite[]; team?: TeamCandidate[];
   onPick: (r: NameRow) => void;
   inputRef?: React.RefObject<HTMLInputElement | null>;
   /** The picker was just opened: wear the cursor, but leave the keyboard alone until it is tapped. */
   armed?: boolean;
 }) {
-  const rows = nameRows(q, suggestions, stakeholders);
+  const rows = nameRows(q, suggestions, stakeholders, team);
   const [typing, setTyping] = useState(false);
   const waiting = !!armed && !typing && !q;
   return (
@@ -394,13 +398,15 @@ function NameList({ q, setQ, suggestions, stakeholders, onPick, inputRef, armed 
 
 /** One entry's card. Its own open/closed state lives here so a long list stays independent. */
 function Card({
-  entry, draft, projects, stakeholders, busy, payeeWallet, senderWallet,
+  entry, draft, projects, stakeholders, team, orgId, busy, payeeWallet, senderWallet,
   onPatch, onMenu, onSplit, onFile, register,
 }: {
   entry: RoughEntry;
   draft: Draft;
   projects: ProjectLite[];
   stakeholders: StakeholderLite[];
+  team: TeamCandidate[];
+  orgId: string;
   busy: boolean;
   /** the wallet the money would land in — the payee holds one */
   payeeWallet: WalletBalance | null;
@@ -442,6 +448,15 @@ function Card({
 
   /** What a pick means: an overhead head files party-less; anything else is a party (or a new name). */
   const pick = (r: NameRow) => {
+    // a teammate resolves to their ONE canonical party (linked, or created-and-linked now) — no duplicate
+    if (r.member) {
+      void (async () => {
+        try { const { id, name } = await resolveTeammateParty(orgId, r.member!); onPatch({ payeeName: name, payeeId: id, genHead: null }); }
+        catch { /* keep the picker open; the pick simply didn't take */ }
+      })();
+      setSug(null); setDdq('');
+      return;
+    }
     onPatch(r.head ? { payeeName: r.name, payeeId: null, genHead: r.head } : { payeeName: r.name, payeeId: r.id, genHead: null });
     setSug(null); setDdq('');
   };
@@ -503,7 +518,7 @@ function Card({
             </button>
             <div className={`sug${sug === 'to' ? ' open' : ''}`}>
               <div className="sug-w">
-                <NameList q={ddq} setQ={setDdq} suggestions={suggestions} stakeholders={stakeholders}
+                <NameList q={ddq} setQ={setDdq} suggestions={suggestions} stakeholders={stakeholders} team={team}
                   onPick={pick} inputRef={ddRef} armed={sug === 'to'} />
               </div>
             </div>
@@ -619,10 +634,12 @@ export default function ReviewMobile(p: ReviewMobileProps) {
   // sender (to know what the money would be drawn from). Senders repeat across a deck, so they are
   // resolved once each, not once per card.
   const { data: wallets = [] } = useQuery({
-    queryKey: ['wallets', p.orgId],
-    queryFn: () => loadWallets(p.orgId),
+    queryKey: ['wallets_party', p.orgId],
+    queryFn: () => loadWalletsWithParty(p.orgId),
     enabled: !!p.orgId,
   });
+  // Teammates as payees (and the party↔member link that resolves their wallet by identity, not name).
+  const { data: teamAll = [] } = useQuery({ queryKey: ['team_payees', p.orgId], queryFn: () => loadTeamCandidates(p.orgId), enabled: !!p.orgId });
   const senderNums = useMemo(
     () => [...new Set(p.entries.map(e => e.sender_number).filter(Boolean) as string[])].sort(),
     [p.entries]);
@@ -637,11 +654,18 @@ export default function ReviewMobile(p: ReviewMobileProps) {
   // has been retired.
   const payeeWalletOf = (d: Draft): WalletBalance | null => {
     if (d.genHead) return null;                       // an overhead is a head, not a person with a wallet
+    // 1) identity — the payee IS a member who holds a wallet. The teammate link (party → user_id, via
+    //    teamAll) resolves it by identity, name-independent; the bridge stakeholderId is the second key.
+    if (d.payeeId) {
+      const linkedUser = teamAll.find(m => m.stakeholderId === d.payeeId)?.userId;
+      if (linkedUser) { const byUser = wallets.find(w => w.active && w.holderUserId && w.holderUserId === linkedUser); if (byUser) return byUser; }
+      const byBridge = wallets.find(w => w.active && w.stakeholderId && w.stakeholderId === d.payeeId);
+      if (byBridge) return byBridge;
+    }
+    // 2) last resort — an EXACT full-name match (a first-name match once refilled the wrong Raju).
     const norm = (x: string) => (x || '').trim().toLowerCase();
     const nm = norm((d.payeeId ? p.stakeholders.find(x => x.stakeholder_id === d.payeeId)?.name : null) ?? d.payeeName ?? '');
     if (!nm) return null;
-    // EXACT full-name match only. A first-name match ("Raju" → "Raju Kojjavarapu") wrongly offered to
-    // refill one Raju's wallet for a payment to a different Raju — a wallet is one person's cash.
     return wallets.find(w => w.active && norm(w.holderName) === nm) ?? null;
   };
   /** What this entry would do as it stands: a refill, and/or a spend out of the sender's wallet. */
@@ -869,6 +893,8 @@ export default function ReviewMobile(p: ReviewMobileProps) {
               draft={draftOf(e)}
               projects={projects}
               stakeholders={p.stakeholders}
+              team={teamAll}
+              orgId={p.orgId}
               busy={busy}
               payeeWallet={payeeWalletOf(draftOf(e))}
               senderWallet={senderWalletOf(e)}
@@ -944,8 +970,17 @@ export default function ReviewMobile(p: ReviewMobileProps) {
             {ed.genHead && <span className="ovh">overhead</span>}
           </div>
           <NameList q={ed.q} setQ={(q) => setEd(v => ({ ...v, q }))}
-            suggestions={active ? suggestionsOf(active) : []} stakeholders={p.stakeholders}
-            onPick={(r) => setEd(v => ({ ...v, payee: r.name, payeeId: r.head ? null : r.id, genHead: r.head ?? null, q: '' }))} />
+            suggestions={active ? suggestionsOf(active) : []} stakeholders={p.stakeholders} team={teamAll}
+            onPick={(r) => {
+              if (r.member) {
+                void (async () => {
+                  try { const { id, name } = await resolveTeammateParty(p.orgId, r.member!); setEd(v => ({ ...v, payee: name, payeeId: id, genHead: null, q: '' })); }
+                  catch { /* keep editing; the pick simply didn't take */ }
+                })();
+                return;
+              }
+              setEd(v => ({ ...v, payee: r.name, payeeId: r.head ? null : r.id, genHead: r.head ?? null, q: '' }));
+            }} />
         </div>
         <div className="field"><label>For</label><input value={ed.forr} onChange={e => setEd(v => ({ ...v, forr: e.target.value }))} /></div>
         <div className="sitechips">

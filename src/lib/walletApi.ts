@@ -109,6 +109,31 @@ export async function loadWallets(orgId: string): Promise<WalletBalance[]> {
   return rows.map(r => ({ ...r, holderName: now.get(r.walletId) ?? r.holderName }));
 }
 
+/**
+ * Every live wallet, each tagged with the stakeholder (party) its holder IS, when the two are the same
+ * person. A supervisor is one human in two records — a member who holds the wallet (holder_user_id) and
+ * a party who gets paid (a stakeholders row) — bridged by their WhatsApp number in wa_registered_numbers.
+ *
+ * The Day Book / New Transaction resolver picks a PARTY; to know "this payee holds a wallet" it must
+ * match by that identity, not by the name string (two records' names drift — spelling, a middle name,
+ * an un-healed snapshot — and an exact-name match then misses the wallet, so the top-up never shows).
+ * `stakeholderId` here is the durable key for that match; the name stays only as a fallback.
+ */
+export async function loadWalletsWithParty(orgId: string): Promise<(WalletBalance & { stakeholderId: string | null })[]> {
+  const wallets = await loadWallets(orgId);
+  const userIds = [...new Set(wallets.map(w => w.holderUserId).filter(Boolean) as string[])];
+  const stkByUser = new Map<string, string>();
+  if (userIds.length) {
+    try {
+      const { data: regs } = await supabase
+        .from('wa_registered_numbers').select('user_id, stakeholder_id').eq('org_id', orgId).in('user_id', userIds);
+      ((regs ?? []) as { user_id: string | null; stakeholder_id: string | null }[])
+        .forEach(r => { if (r.user_id && r.stakeholder_id && !stkByUser.has(r.user_id)) stkByUser.set(r.user_id, r.stakeholder_id); });
+    } catch { /* bridge unreadable → no identity link, name fallback still applies */ }
+  }
+  return wallets.map(w => ({ ...w, stakeholderId: w.holderUserId ? (stkByUser.get(w.holderUserId) ?? null) : null }));
+}
+
 /** The signed-in user's OWN wallets with derived balances, via the SECURITY DEFINER my_wallets() RPC.
  *  This is the /mywallet path: it works for ANY role (a supervisor's holder view) because the RPC
  *  computes over all the caller's own transaction rows regardless of their read-RLS on transactions —
@@ -191,6 +216,35 @@ export async function renameWalletHolder(orgId: string, stakeholderId: string, n
     if (!ids.length) return;
     await supabase.from('wallets').update({ holder_name: name }).eq('org_id', orgId).in('holder_user_id', ids);
   } catch { /* the wallet keeps its old name until the next load heals it */ }
+}
+
+/**
+ * Cement the durable party↔member link the moment a wallet is given. A wallet is keyed to a member
+ * (holder_user_id); the Day Book "top up their wallet" match resolves a PARTY → that member by
+ * stakeholders.user_id. This sets that column (and the wallet's holder_phone) from the member's
+ * registered WhatsApp number, so the match is name-independent forever — closing the gap where a
+ * supervisor held a wallet but the party name had drifted from the wallet's snapshot.
+ *
+ * Best-effort + silent: a member with no registered number or no party row is the ordinary case, not
+ * an error; and if stakeholders.user_id doesn't exist yet (migration 20260921000000 unapplied) the
+ * update simply throws and is swallowed — the resolver keeps its phone-bridge + name fallbacks.
+ */
+export async function linkHolderToParty(orgId: string, userId: string, walletId?: string | null): Promise<void> {
+  try {
+    const { data: regs } = await supabase
+      .from('wa_registered_numbers').select('stakeholder_id, phone_number')
+      .eq('org_id', orgId).eq('user_id', userId);
+    const rows = (regs ?? []) as { stakeholder_id: string | null; phone_number: string | null }[];
+    const stkId = rows.find(r => r.stakeholder_id)?.stakeholder_id ?? null;
+    const phone = rows.find(r => r.phone_number)?.phone_number ?? null;
+    if (stkId) {
+      // only claim an unlinked party — never clobber an existing (possibly different) link
+      await supabase.from('stakeholders').update({ user_id: userId }).eq('stakeholder_id', stkId).is('user_id', null);
+    }
+    if (phone && walletId) {
+      await supabase.from('wallets').update({ holder_phone: phone }).eq('wallet_id', walletId).is('holder_phone', null);
+    }
+  } catch { /* column not there yet, or the bridge is thin — the resolver still has its fallbacks */ }
 }
 
 export async function createWallet(input: { orgId: string; holderUserId?: string | null; holderName: string; holderPhone?: string | null; note?: string | null }): Promise<Wallet> {

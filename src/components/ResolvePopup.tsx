@@ -5,7 +5,8 @@ import { supabase } from '../lib/supabase';
 import type { RoughEntry } from '../types';
 import { useSnackbar } from './Snackbar';
 import { useOrgId } from '../lib/auth/AuthProvider';
-import { walletForSender, loadWallets, type WalletBalance } from '../lib/walletApi';
+import { walletForSender, loadWalletsWithParty, type WalletBalance } from '../lib/walletApi';
+import { loadTeamCandidates, resolveTeammateParty, type TeamCandidate } from '../lib/teamPayees';
 import { ImageLightbox } from './ImageLightbox';
 import { WORKER_TRADE_GROUPS, VENDOR_TRADE_GROUPS, OTHER_TRADE } from '../lib/trades';
 import { searchPayees, rankPayeeName, PAYEE_SEARCH_FLOOR } from '../lib/payeeSearch';
@@ -561,7 +562,9 @@ export function ResolvePopup({ entry, onClose, onUpdated, only }: Props) {
   // bank so a spend never silently overdraws); an explicit choice always wins.
   const fromWallet = funding === 'wallet' ? true : funding === 'bank' ? false : !!(senderWallet && senderWallet.balance > 0);
   // Wallet REFILL: if the PAYEE holds a wallet, this payment can be a float (bank → their wallet).
-  const { data: rpWallets = [] } = useQuery({ queryKey: ['wallets', orgId], queryFn: () => loadWallets(orgId ?? ''), enabled: !!orgId });
+  const { data: rpWallets = [] } = useQuery({ queryKey: ['wallets_party', orgId], queryFn: () => loadWalletsWithParty(orgId ?? ''), enabled: !!orgId });
+  // Teammates as payees: a member without a linked party yet, so paying them doesn't spawn a duplicate.
+  const { data: teamAll = [] } = useQuery({ queryKey: ['team_payees', orgId], queryFn: () => loadTeamCandidates(orgId ?? ''), enabled: !!orgId });
   const [topUp, setTopUp] = useState(false);
   const [splits, setSplits] = useState<SplitRow[]>([{ id: 's1', projectId: '', amount: '' }]);
   const enableSplit = (on: boolean) => {
@@ -638,14 +641,29 @@ export function ResolvePopup({ entry, onClose, onUpdated, only }: Props) {
     },
   });
 
-  // The payee's wallet, if any (name match) — powers the "top up their wallet" option.
+  // The payee's wallet, if any — powers the "top up their wallet" option. Match by IDENTITY first:
+  // the chosen party (payeeId) IS a wallet holder when the wa_registered_numbers bridge ties them
+  // (stakeholderId on the wallet). That is name-independent, so a supervisor who also exists as a
+  // party still shows the top-up even when the two records' names have drifted. Only when there is no
+  // such link do we fall back to an EXACT full-name match (a first-name match once refilled the wrong
+  // "Raju"'s wallet — a wallet is one person's cash, so the fallback stays exact).
   const payeeWallet = useMemo(() => {
-    const nm = stakeholders.find((s: any) => s.stakeholder_id === payeeId)?.name || payeeSearch;
+    const chosen = stakeholders.find((s: any) => s.stakeholder_id === payeeId);
+    // 1) durable hard link — the party IS a member who holds a wallet (stakeholders.user_id).
+    if (chosen?.user_id) {
+      const byUser = rpWallets.find(w => (w.active ?? true) && w.holderUserId && w.holderUserId === chosen.user_id);
+      if (byUser) return byUser;
+    }
+    // 2) phone-bridge link (wa_registered_numbers), for parties not yet backfilled to user_id.
+    if (payeeId) {
+      const byId = rpWallets.find(w => (w.active ?? true) && w.stakeholderId && w.stakeholderId === payeeId);
+      if (byId) return byId;
+    }
+    // 3) last resort — an EXACT full-name match (a first-name match once refilled the wrong "Raju").
+    const nm = chosen?.name || payeeSearch;
     if (!nm) return null;
     const norm = (s: string) => s.trim().toLowerCase();
     const p = norm(nm);
-    // EXACT full-name match only — a first-name match refilled "Raju Kojjavarapu"'s wallet for a
-    // payment to "Raju Aradadi". A wallet is one person's cash; only their exact name refills it.
     return rpWallets.find(w => (w.active ?? true) && norm(w.holderName) === p) || null;
   }, [payeeId, payeeSearch, stakeholders, rpWallets]);
   // If the payee holds a wallet, DEFAULT to a refill (paying them = topping up their site cash); the user
@@ -913,7 +931,7 @@ export function ResolvePopup({ entry, onClose, onUpdated, only }: Props) {
       // back its own moment (the fly-off), so an entry approved from here leaves the list exactly as
       // one approved on the card does. Two ways in, one way out.
       setApproval('filed');
-      if (topUpId || senderWallet) { qc.invalidateQueries({ queryKey: ['wallets'] }); qc.invalidateQueries({ queryKey: ['wallet_ledger'] }); }
+      if (topUpId || senderWallet) { qc.invalidateQueries({ queryKey: ['wallets'] }); qc.invalidateQueries({ queryKey: ['wallets_party'] }); qc.invalidateQueries({ queryKey: ['wallet_ledger'] }); }
       window.setTimeout(() => {
         qc.invalidateQueries({ queryKey: ['inbox_badge'] });
         onUpdated({ ...(updatedEntry as RoughEntry), status: 'POSTED' } as RoughEntry);
@@ -971,7 +989,7 @@ export function ResolvePopup({ entry, onClose, onUpdated, only }: Props) {
     setPayeeId, setPayeeName, setPayeeSearch,
     showPayeeDrop, setShowPayeeDrop,
     genHead, genName, setGenHead, setGenName,
-    stakeholders, filteredPayees,
+    stakeholders, orgId, teamAll, filteredPayees,
     amount, setAmount,
     description, setDescription,
     projectId, setProjectId, projectRef, projects,
@@ -1067,6 +1085,7 @@ interface ContentProps {
   showPayeeDrop: boolean; setShowPayeeDrop: (v: boolean) => void;
   genHead: string; genName: string; setGenHead: (v: string) => void; setGenName: (v: string) => void;
   stakeholders: any[];
+  orgId: string | null; teamAll: TeamCandidate[];
   filteredPayees: any[];
   amount: number | ''; setAmount: (v: number | '') => void;
   description: string; setDescription: (v: string) => void;
@@ -1102,6 +1121,7 @@ function PopupContents({
   showPayeeDrop, setShowPayeeDrop,
   genHead, genName, setGenHead, setGenName,
   stakeholders,
+  orgId, teamAll,
   amount, setAmount,
   description, setDescription,
   projectId, setProjectId, projectRef, projects,
@@ -1202,11 +1222,27 @@ function PopupContents({
     advanceAfter('payee');
   };
 
+  // Pick a teammate: resolve them to their ONE canonical party (linked, or created-and-linked now) and
+  // select it like any party — so paying a teammate never spawns a duplicate, and their wallet resolves.
+  const selectTeammate = async (m: TeamCandidate) => {
+    if (!orgId) return;
+    setShowPayeeDrop(false);
+    try {
+      const { id, name } = await resolveTeammateParty(orgId, m);
+      selectPayee(id, name);
+      qc.invalidateQueries({ queryKey: ['stakeholders'] });
+      qc.invalidateQueries({ queryKey: ['team_payees'] });
+    } catch { /* keep the dropdown open; the pick simply didn't take */ }
+  };
+
   // Overhead heads matching what the owner typed, shown BELOW the party matches.
   // The heads are offered before a letter is typed, as they are on the phone: not every payment has a
   // payee, and somebody who has never typed "hamali" has no way to learn the list exists. An empty
   // query answers with the common few (searchGenHeads); typing filters all seventeen.
   const genMatches = searchGenHeads(payeeSearch);
+  // Teammates without a linked party yet — offered as a "Team" group so paying one reuses their single
+  // record instead of creating a duplicate. A teammate WITH a linked party already shows as that party.
+  const teamMatches = searchPayees(teamAll.filter((m) => !m.stakeholderId), payeeSearch);
 
   // Payee search list. TWO different questions, and they were tangled: with NO typed text the ordering
   // question is "who did the AI hear?" (sort by similarity to payee_raw); the moment he types, the question
@@ -1649,6 +1685,29 @@ function PopupContents({
                         </button>
                       );
                     })()}
+
+                    {/* ── Team — teammates offered as payees, so paying one reuses their single record
+                         instead of creating a duplicate party. Picking resolves them to that party
+                         (linked, or created-and-linked now). Only members without a linked party show
+                         here; a linked teammate already appears above as their party. ── */}
+                    {teamMatches.length > 0 && (
+                      <>
+                        <div className="px-3 pt-2 pb-1 text-[9px] font-bold uppercase tracking-widest" style={{ color: VOICE.systemFaint, borderTop: `1px solid ${VOICE.line}` }}>Team · pay a teammate</div>
+                        {teamMatches.slice(0, 6).map((m: TeamCandidate) => (
+                          <button key={m.userId} type="button"
+                            onMouseDown={(e) => { e.preventDefault(); void selectTeammate(m); }}
+                            className="w-full flex items-center gap-2.5 px-3 py-2 text-left transition-colors hover:bg-black/[0.025]"
+                            style={{ borderBottom: `1px solid ${VOICE.line}` }}
+                          >
+                            <span className="material-symbols-outlined text-[15px] shrink-0" style={{ color: VOICE.systemFaint }}>badge</span>
+                            <span className="flex-1 min-w-0">
+                              <span className="block text-[13px] font-semibold truncate" style={{ color: VOICE.user }}>{m.name}</span>
+                              <span className="block text-[11px]" style={{ color: VOICE.systemFaint }}>teammate{m.role ? ` · ${m.role}` : ''}</span>
+                            </span>
+                          </button>
+                        ))}
+                      </>
+                    )}
 
                     {/* ── General-expense heads (overheads) — shown BELOW the party matches.
                          An overhead has no party; picking a head files the entry party-less

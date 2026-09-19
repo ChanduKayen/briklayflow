@@ -10,7 +10,8 @@ import type { Session } from '@supabase/supabase-js';
 import { WORKER_TRADE_GROUPS, VENDOR_TRADE_GROUPS, OTHER_TRADE } from '../lib/trades';
 import { useSnackbar } from '../components/Snackbar';
 import { useOrgId } from '../lib/auth/AuthProvider';
-import { loadMyWallet, loadWallets } from '../lib/walletApi';
+import { loadMyWallet, loadWalletsWithParty } from '../lib/walletApi';
+import { loadTeamCandidates, resolveTeammateParty, type TeamCandidate } from '../lib/teamPayees';
 import { useUserProfile } from '../App';
 import { CostCodePicker } from '../components/CostCodePicker';
 import { GenHeadPicker } from '../components/GenHeadPicker';
@@ -653,7 +654,9 @@ export default function NewTransaction({ session: _session }: { session: Session
   });
   const [fundWallet, setFundWallet] = useState(false);
   // Refilling a holder's wallet: paying a wallet-holder can BE a float (bank → their wallet), not a spend.
-  const { data: allWallets = [] } = useQuery({ queryKey: ['wallets', orgId], queryFn: () => loadWallets(orgId!), enabled: !!orgId });
+  const { data: allWallets = [] } = useQuery({ queryKey: ['wallets_party', orgId], queryFn: () => loadWalletsWithParty(orgId!), enabled: !!orgId });
+  // Teammates as payees: members without a linked party yet, so paying one doesn't spawn a duplicate.
+  const { data: teamAll = [] } = useQuery({ queryKey: ['team_payees', orgId], queryFn: () => loadTeamCandidates(orgId!), enabled: !!orgId });
   const [topUp, setTopUp] = useState(false);
   const payeeRef = useRef<HTMLInputElement>(null);
   const stkDropRef = useRef<HTMLDivElement>(null);
@@ -690,15 +693,28 @@ export default function NewTransaction({ session: _session }: { session: Session
   });
 
   // Does the selected payee hold a wallet? If so, this payment can be a FLOAT that tops up their wallet.
-  const payeeName = stakeholders?.find((s) => s.stakeholder_id === stkId)?.name || '';
+  const chosenStk = stakeholders?.find((s) => s.stakeholder_id === stkId);
+  const payeeName = chosenStk?.name || '';
   const payeeWallet = useMemo(() => {
+    // 1) durable hard link — the party IS a member who holds a wallet (stakeholders.user_id),
+    //    name-independent, so a supervisor who is also a party shows the top-up even when the two
+    //    records' names have drifted.
+    const uid = (chosenStk as { user_id?: string } | undefined)?.user_id;
+    if (uid) {
+      const byUser = allWallets.find((w) => w.active && w.holderUserId && w.holderUserId === uid);
+      if (byUser) return byUser;
+    }
+    // 2) phone-bridge link (wa_registered_numbers), for parties not yet backfilled to user_id.
+    if (stkId) {
+      const byId = allWallets.find((w) => w.active && w.stakeholderId && w.stakeholderId === stkId);
+      if (byId) return byId;
+    }
+    // 3) last resort — an EXACT full-name match (a first-name match once linked the wrong "Raju").
     if (!payeeName) return null;
     const norm = (s: string) => s.trim().toLowerCase();
     const p = norm(payeeName);
-    // EXACT full-name match only — a first-name match wrongly linked "Raju Aradadi" to "Raju
-    // Kojjavarapu"'s wallet. A wallet is one person's cash, so only their exact name refills it.
     return allWallets.find((w) => w.active && norm(w.holderName) === p) || null;
-  }, [payeeName, allWallets]);
+  }, [stkId, chosenStk, payeeName, allWallets]);
   // If the payee holds a wallet, DEFAULT to a refill (paying them = topping up their wallet); user can undo.
   useEffect(() => { setTopUp(!!payeeWallet); }, [stkId, payeeWallet]);
   // A refill is a float (bank → the payee's wallet) — no site, so the project requirement is dropped.
@@ -826,6 +842,20 @@ export default function NewTransaction({ session: _session }: { session: Session
     ? GEN_HEADS.filter((h) => !_qCompact || _pn(h.name).replace(/\s+/g, '').includes(_qCompact) || _qTokens.every((t) => _pn(h.name).includes(t)))
     : [];
   const pickExpenseHead = (code: string, name: string) => { setTxnType('expense'); setCategory(code); setStkId(''); setStkSearch(name); setShowSug(false); setShowCreate(false); advanceAfter('payee'); };
+  // Teammates (without a linked party) offered when paying out, so paying one reuses their single record.
+  const teamMatches: TeamCandidate[] = direction === 'out'
+    ? (searchPayees(teamAll.filter((m) => !m.stakeholderId) as any, stkSearch) as unknown as TeamCandidate[])
+    : [];
+  const selectTeammate = async (m: TeamCandidate) => {
+    if (!orgId) return;
+    setShowSug(false);
+    try {
+      const { id, name } = await resolveTeammateParty(orgId, m);
+      setStkId(id); setStkSearch(name); setTxnType(typeForPayee('Worker')); advanceAfter('payee');
+      qc.invalidateQueries({ queryKey: ['stakeholders'] });
+      qc.invalidateQueries({ queryKey: ['team_payees'] });
+    } catch { /* keep the dropdown open; the pick simply didn't take */ }
+  };
   const chooseDirection = (d: 'out' | 'in') => {
     setPickingType(false);
     if (direction !== d) {
@@ -1028,7 +1058,7 @@ export default function NewTransaction({ session: _session }: { session: Session
       qc.invalidateQueries({ queryKey: ['ledger'] });
       qc.invalidateQueries({ queryKey: ['po_payment_totals'] });
       qc.invalidateQueries({ queryKey: ['purchase_orders_enhanced'] });
-      if (fundWallet || topUp) { qc.invalidateQueries({ queryKey: ['wallets'] }); qc.invalidateQueries({ queryKey: ['my_wallet'] }); qc.invalidateQueries({ queryKey: ['wallet_ledger'] }); setFundWallet(false); setTopUp(false); }
+      if (fundWallet || topUp) { qc.invalidateQueries({ queryKey: ['wallets'] }); qc.invalidateQueries({ queryKey: ['wallets_party'] }); qc.invalidateQueries({ queryKey: ['my_wallet'] }); qc.invalidateQueries({ queryKey: ['wallet_ledger'] }); setFundWallet(false); setTopUp(false); }
       if (autoCloseWoId) autoCloseWOIfFullyPaid(autoCloseWoId, qc);
       const stk = stakeholders?.find((s) => s.stakeholder_id === stkId);
       if (stk) setRecentPayees((prev) => [{ id: stk.stakeholder_id, name: stk.name, type: stk.type }, ...prev.filter((p) => p.id !== stk.stakeholder_id)].slice(0, 5));
@@ -1661,6 +1691,24 @@ export default function NewTransaction({ session: _session }: { session: Session
                             <p className="text-[11px] text-on-surface-variant/50 mt-0.5">{s.category}</p>
                           </div>
                         ))}
+                        {/* Team — teammates as payees, so paying one reuses their single record instead
+                            of creating a duplicate party. Only members without a linked party show here. */}
+                        {teamMatches.length > 0 && (
+                          <>
+                            <div className="mx-4 border-t border-outline-variant/15 my-1" />
+                            <div className="px-4 pt-2 pb-1 text-[9px] font-bold text-on-surface-variant/40 uppercase tracking-widest">Team · pay a teammate</div>
+                            {teamMatches.slice(0, 6).map((m) => (
+                              <div key={m.userId} onClick={() => void selectTeammate(m)}
+                                className="px-4 py-2.5 hover:bg-surface-container-low/60 cursor-pointer flex items-center gap-3">
+                                <span className="material-symbols-outlined text-[15px] text-on-surface-variant/40">badge</span>
+                                <span className="flex-1 min-w-0">
+                                  <span className="block text-[13px] font-medium text-on-surface truncate">{m.name}</span>
+                                  <span className="block text-[11px] text-on-surface-variant/50">teammate{m.role ? ` · ${m.role}` : ''}</span>
+                                </span>
+                              </div>
+                            ))}
+                          </>
+                        )}
                         {/* General-expense heads (overheads) — shown BELOW the party matches on money out. */}
                         {direction === 'out' && matchedHeads.length > 0 && (
                           <>
@@ -1676,7 +1724,7 @@ export default function NewTransaction({ session: _session }: { session: Session
                             ))}
                           </>
                         )}
-                        {filtStk.length === 0 && matchedHeads.length === 0 && stkSearch ? (
+                        {filtStk.length === 0 && matchedHeads.length === 0 && teamMatches.length === 0 && stkSearch ? (
                           /* Zero matches → create is the hero row (one tap to add a brand-new payee) */
                           <div onClick={() => { setShowCreate(true); setShowSug(false); setNewStkType('Vendor'); setNewStkTrade(''); }}
                             className="px-4 py-3 cursor-pointer flex items-center gap-3"
