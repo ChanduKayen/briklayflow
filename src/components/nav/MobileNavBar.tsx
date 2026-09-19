@@ -26,6 +26,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useSoftKeyboard } from '../../lib/useSoftKeyboard';
+import { useSheetDrag } from '../../lib/sheetDrag';
 import { navAction, type NavActionState } from './navAction';
 import { TxComposer } from './TxComposer';
 import { BillComposer } from './BillComposer';
@@ -131,7 +132,6 @@ export function MobileNavBar({
   const navRef = useRef<HTMLElement | null>(null);
   const fabRef = useRef<HTMLButtonElement | null>(null);
   const measureRef = useRef<HTMLSpanElement | null>(null);
-  const panelRef = useRef<HTMLElement | null>(null);
 
   const hapt = (ms: number | number[] = 6) => { try { navigator.vibrate?.(ms); } catch { /* unsupported */ } };
 
@@ -198,24 +198,9 @@ export function MobileNavBar({
   }, [moreOn, closeMore]);
   useEffect(() => () => { if (closeTimer.current) clearTimeout(closeTimer.current); }, []);
 
-  // pull the panel down to close it
-  const drag = useRef({ y0: 0, dy: 0, on: false });
-  const dragStart = (e: React.TouchEvent) => {
-    const el = panelRef.current; if (!el || el.scrollTop > 0) return;
-    drag.current = { y0: e.touches[0].clientY, dy: 0, on: true };
-    el.style.transition = 'none';
-  };
-  const dragMove = (e: React.TouchEvent) => {
-    const el = panelRef.current; if (!el || !drag.current.on) return;
-    drag.current.dy = Math.max(0, e.touches[0].clientY - drag.current.y0);
-    el.style.transform = `translateY(${drag.current.dy * 0.8}px)`;
-  };
-  const dragEnd = () => {
-    const el = panelRef.current; if (!el || !drag.current.on) return;
-    drag.current.on = false;
-    el.style.transition = ''; el.style.transform = '';
-    if (drag.current.dy > 70) closeMore();
-  };
+  // Pull it down to close it — the same gesture every sheet in the app has (sheetDrag), which knows
+  // not to take over while you are part-way down its own scroll.
+  const panelDrag = useSheetDrag<HTMLElement>(closeMore, moreMounted);
 
   // A page may take the bar for its own actions (Transactions' select mode). The tabs step down,
   // the actions step up, in the same capsule.
@@ -334,8 +319,7 @@ export function MobileNavBar({
           <>
             <div className={`mnav-scrim${moreOn ? ' on' : ''}`} onClick={closeMore} />
             <section
-              ref={panelRef} className={`mnav-more${moreOn ? ' on' : ''}`} role="dialog" aria-modal="true" aria-label="All sections"
-              onTouchStart={dragStart} onTouchMove={dragMove} onTouchEnd={dragEnd} onTouchCancel={dragEnd}
+              ref={panelDrag} className={`mnav-more${moreOn ? ' on' : ''}`} role="dialog" aria-modal="true" aria-label="All sections"
             >
               <div className="grab" aria-hidden="true"><i /></div>
               {groups.map(([title, items], gi) => (

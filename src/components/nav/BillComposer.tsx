@@ -26,6 +26,7 @@ import { extractBill, findDuplicateBill, type ExtractedBill } from '../../lib/bi
 import { intakeCommit } from '../../lib/billIntake';
 import { searchPayees } from '../../lib/payeeSearch';
 import { navAction } from './navAction';
+import { useSheetDrag } from '../../lib/sheetDrag';
 import { fmt, initials, type BillState } from './txDraft';
 import { unsureOf } from './billUnsure';
 
@@ -67,7 +68,6 @@ export function BillComposer({ bill, onBill, onClose }: {
   const open = !!bill;
   const B = bill;
 
-  const panelRef = useRef<HTMLElement | null>(null);
   const slipRef = useRef<HTMLDivElement | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const seq = useRef(0);               // which read is the live one: a retake must not be overtaken
@@ -158,10 +158,8 @@ export function BillComposer({ bill, onBill, onClose }: {
     return () => document.removeEventListener('keydown', esc);
   }, [open, onClose, B?.viewer, set]);
 
-  const drag = useRef({ y0: 0, dy: 0, on: false });
-  const dragStart = (e: React.TouchEvent) => { const el = panelRef.current; if (!el) return; drag.current = { y0: e.touches[0].clientY, dy: 0, on: true }; el.style.transition = 'none'; };
-  const dragMove = (e: React.TouchEvent) => { const el = panelRef.current; if (!el || !drag.current.on) return; drag.current.dy = Math.max(0, e.touches[0].clientY - drag.current.y0); el.style.transform = `translateY(${drag.current.dy * 0.8}px)`; };
-  const dragEnd = () => { const el = panelRef.current; if (!el || !drag.current.on) return; drag.current.on = false; el.style.transition = ''; el.style.transform = ''; if (drag.current.dy > 70) onClose(true); };
+  // Pull it down to put it away — from anywhere on the sheet, not just the handle (sheetDrag).
+  const panelDrag = useSheetDrag<HTMLElement>(() => onClose(B?.stage === 'check'), open);
 
   // ── the write ──
   const save = (d: BillState) => {
@@ -242,9 +240,9 @@ export function BillComposer({ bill, onBill, onClose }: {
   return (
     <>
       <div className="tx-scrim on" onClick={() => onClose(true)} />
-      <section ref={panelRef} className="tx on" role="dialog" aria-modal="true" aria-label="Add a bill"
+      <section ref={panelDrag} className="tx on" role="dialog" aria-modal="true" aria-label="Add a bill"
         style={{ ['--h' as string]: `${height}px` } as React.CSSProperties}>
-        <div className="grab" aria-hidden="true" onTouchStart={dragStart} onTouchMove={dragMove} onTouchEnd={dragEnd} onTouchCancel={dragEnd}><i /></div>
+        <div className="grab" aria-hidden="true"><i /></div>
         <div className="tx-head">
           <button type="button" className="ico" aria-label={B.stage === 'reading' || B.stage === 'bad' ? 'Back' : 'Close'}
             onClick={() => (B.stage === 'reading' || B.stage === 'bad' ? (seq.current++, onBill({ ...B, stage: 'capture', file: null, img: '' })) : onClose(B.stage === 'check'))}>

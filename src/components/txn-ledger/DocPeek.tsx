@@ -10,39 +10,28 @@
  * fetched when the peek opens (Supabase public-object URLs expire, so they are signed per look).
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { resolveDocUrl } from '../../lib/storage';
+import { isPdf, useSignedDocs, type Paper } from './docSigning';
 
-export type Paper = { kind: 'Bill' | 'Proof'; url: string };
-const isPdf = (u: string) => /\.pdf(\?|$)/i.test(u);
-
-export function DocPeek({ papers, title, sub, onClose, onOpenEntry }: {
+export function DocPeek({ papers, at = 0, title, sub, onClose, onOpenEntry }: {
   papers: Paper[];
+  /** which one was tapped */
+  at?: number;
   title: string; sub: string;
   onClose: () => void;
   onOpenEntry?: () => void;
 }) {
-  const [i, setI] = useState(0);
+  const [i, setI] = useState(at);
   const [on, setOn] = useState(false);
-  /** What was signed, and for which paper — so an answer that lands late can never dress the wrong one. */
-  const [doc, setDoc] = useState<{ src: string; url: string | null } | null>(null);
   const [broke, setBroke] = useState('');
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const paper = papers[i];
 
   useEffect(() => { const r = requestAnimationFrame(() => setOn(true)); return () => cancelAnimationFrame(r); }, []);
-  // Nothing is signed until it is looked at, and a public-object URL expires — so it is signed here,
-  // per look, and the paper waits rather than flashing a broken image.
+  // Signed per look, by the one signer — the paper waits rather than flashing a broken image.
   const src = paper?.url ?? '';
-  useEffect(() => {
-    let live = true;
-    void resolveDocUrl(src)
-      .then((u) => { if (live) setDoc({ src, url: u }); })
-      .catch(() => { if (live) setDoc({ src, url: null }); });
-    return () => { live = false; };
-  }, [src]);
-  const ready = doc?.src === src ? doc : null;           // an older answer is not this paper's
-  const url = ready?.url ?? null;
-  const failed = (!!ready && !ready.url) || broke === src;
+  const signed = useSignedDocs(src ? [src] : []);
+  const url = signed[src] ?? null;
+  const failed = (src in signed && !url) || broke === src;
 
   const close = useCallback(() => { setOn(false); setTimeout(onClose, 220); }, [onClose]);
   useEffect(() => {

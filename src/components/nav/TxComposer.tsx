@@ -23,6 +23,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../../lib/supabase';
 import { useOrgId } from '../../lib/auth/AuthProvider';
 import { navAction } from './navAction';
+import { useSheetDrag } from '../../lib/sheetDrag';
 import { VIA, emptyDraft, genStkId, genTxnId, fmt, initials, words, today, shift, type PayMode, type TxDraft } from './txDraft';
 
 const ARROW = <path d="M15 5l-7 7 7 7" />;
@@ -46,7 +47,6 @@ export function TxComposer({ draft, onDraft, onClose }: {
   const T = draft ?? emptyDraft();
   const set = (patch: Partial<TxDraft>) => onDraft({ ...T, ...patch });
 
-  const panelRef = useRef<HTMLElement | null>(null);
   const slipRef = useRef<HTMLDivElement | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const [back, setBack] = useState(false);   // the step moved backwards: the body slides in from the left
@@ -210,10 +210,8 @@ export function TxComposer({ draft, onDraft, onClose }: {
     document.addEventListener('keydown', esc);
     return () => document.removeEventListener('keydown', esc);
   }, [open, onClose]);
-  const drag = useRef({ y0: 0, dy: 0, on: false });
-  const dragStart = (e: React.TouchEvent) => { const el = panelRef.current; if (!el) return; drag.current = { y0: e.touches[0].clientY, dy: 0, on: true }; el.style.transition = 'none'; };
-  const dragMove = (e: React.TouchEvent) => { const el = panelRef.current; if (!el || !drag.current.on) return; drag.current.dy = Math.max(0, e.touches[0].clientY - drag.current.y0); el.style.transform = `translateY(${drag.current.dy * 0.8}px)`; };
-  const dragEnd = () => { const el = panelRef.current; if (!el || !drag.current.on) return; drag.current.on = false; el.style.transition = ''; el.style.transform = ''; if (drag.current.dy > 70) onClose(true); };
+  // Pull it down to put it away — from anywhere on the sheet, not just the handle (sheetDrag).
+  const panelDrag = useSheetDrag<HTMLElement>(() => onClose(true), open);
 
   // the body slides in from the right going forward, from the left coming back
   useEffect(() => { const b = bodyRef.current; if (!b) return; b.style.animation = 'none'; void b.offsetWidth; b.style.animation = ''; }, [T.step]);
@@ -249,9 +247,9 @@ export function TxComposer({ draft, onDraft, onClose }: {
   return (
     <>
       <div className="tx-scrim on" onClick={() => onClose(true)} />
-      <section ref={panelRef} className="tx on" role="dialog" aria-modal="true" aria-label="New transaction"
+      <section ref={panelDrag} className="tx on" role="dialog" aria-modal="true" aria-label="New transaction"
         style={{ ['--h' as string]: `${height}px` } as React.CSSProperties}>
-        <div className="grab" aria-hidden="true" onTouchStart={dragStart} onTouchMove={dragMove} onTouchEnd={dragEnd} onTouchCancel={dragEnd}><i /></div>
+        <div className="grab" aria-hidden="true"><i /></div>
         <div className="tx-head">
           <button type="button" className="ico" aria-label={T.step === 1 ? 'Close' : 'Back'}
             onClick={() => (T.step === 1 ? onClose(true) : goStep((T.step - 1) as 1 | 2))}>

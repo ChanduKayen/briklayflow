@@ -218,6 +218,31 @@ export const LMX_CSS = `
 .lmx-panel .s > span{flex:none;width:86px;font-size:14px;color:rgba(var(--cream),.55)}
 .lmx-panel .s b{flex:1;min-width:0;text-align:right;font-size:15px;font-weight:600}
 .lmx-panel .s b.warn{color:var(--clay-hi)}
+/* WHAT THIS ENTRY CARRIES. A line of its own, which opens onto the papers themselves. */
+.lmx-panel .s.sx{width:100%;border:0;background:none;color:inherit;font:inherit;text-align:left;cursor:pointer;gap:12px}
+.lmx-panel .s.sx:disabled{cursor:default}
+.lmx-panel .s.sx b.none{color:rgba(var(--cream),.45);font-weight:500}
+.lmx-panel .s.sx .c{flex:none;width:16px;height:16px;fill:none;stroke:rgba(var(--cream),.35);stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round;
+  transition:transform .35s var(--ease)}
+.lmx-panel .s.sx.open{box-shadow:none}
+.lmx-panel .s.sx.open .c{transform:rotate(90deg)}
+.lmx-panel .thumbs{display:flex;gap:12px;padding:2px 0 16px;box-shadow:0 1px 0 0 rgba(var(--cream),.08);
+  animation:lmxOpen .38s var(--ease) both}
+@keyframes lmxOpen{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
+.lmx-panel .th{display:flex;flex-direction:column;align-items:center;gap:7px;border:0;background:none;padding:0;cursor:pointer}
+.lmx-panel .th em{font-style:normal;font-size:12px;font-weight:600;color:rgba(var(--cream),.55)}
+.lmx-panel .th:active .sh{transform:scale(.96)}
+/* the paper again, at reading size: a sheet with its corner turned */
+.lmx-panel .sh{position:relative;display:grid;place-items:center;width:74px;height:94px;border-radius:8px 0 8px 8px;background:#F4EFE6;overflow:hidden;
+  box-shadow:0 8px 20px -10px rgba(0,0,0,.6),inset 0 0 0 1px rgba(21,16,12,.12);transition:transform .18s var(--ease)}
+.lmx-panel .sh::after{content:'';position:absolute;top:0;right:0;width:16px;height:16px;background:var(--night);
+  border-left:1px solid rgba(21,16,12,.12);border-bottom:1px solid rgba(21,16,12,.12);border-bottom-left-radius:3px;z-index:1}
+.lmx-panel .sh img{width:100%;height:100%;object-fit:cover}
+.lmx-panel .sh .pdf{font-family:'DM Mono',ui-monospace,monospace;font-size:12px;font-weight:500;color:#8A7B6E;letter-spacing:.06em}
+.lmx-panel .sh .load{width:22px;height:2px;border-radius:1px;background:rgba(21,16,12,.12);overflow:hidden;position:relative}
+.lmx-panel .sh .load::after{content:'';position:absolute;inset:0;border-radius:1px;background:rgba(21,16,12,.3);animation:lmxLoad 1.1s ease-in-out infinite}
+@keyframes lmxLoad{0%{transform:translateX(-100%)}100%{transform:translateX(100%)}}
+
 .lmx-panel .quote{margin:12px 0 0;padding:11px 13px;border-radius:14px;background:rgba(var(--cream),.06);font-family:'DM Mono',ui-monospace,monospace;font-size:13px;line-height:1.45;color:rgba(var(--cream),.85)}
 .lmx-panel .p-acts{display:flex;gap:8px;margin-top:16px}
 .lmx-panel .p-acts button{flex:1;height:50px;border:0;border-radius:16px;font-size:15px;font-weight:600}

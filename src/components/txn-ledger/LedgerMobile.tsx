@@ -25,7 +25,9 @@ import { useSnackbar } from '../Snackbar';
 import { navTakeover } from '../nav/txDraft';
 import type { WalletBalance } from '../../lib/walletApi';
 import { LMX_CSS } from './lmxCss';
-import { DocPeek, type Paper } from './DocPeek';
+import { DocPeek } from './DocPeek';
+import { useSignedDocs, isPdf, type Paper } from './docSigning';
+import { useSheetDrag } from '../../lib/sheetDrag';
 import { toEntry, type Entry, type LedgerRaw } from './toEntry';
 
 const inr = (n: number) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');
@@ -77,7 +79,7 @@ export function LedgerMobile({ rows, wallets, categories, sites, loading, refetc
   const [compact, setCompact] = useState(false);
   const [tuck, setTuck] = useState(false);
   const [toast, setToast] = useState<{ text: string; undo?: () => void } | null>(null);
-  const [peek, setPeek] = useState<Entry | null>(null);
+  const [peek, setPeek] = useState<{ e: Entry; at: number } | null>(null);
   const qRef = useRef<HTMLInputElement | null>(null);
 
   const buzz = (ms: number | number[] = 6) => { try { navigator.vibrate?.(ms); } catch { /* unsupported */ } };
@@ -301,7 +303,7 @@ export function LedgerMobile({ rows, wallets, categories, sites, loading, refetc
         onPointerUp={cancelPress} onPointerCancel={cancelPress} onPointerLeave={cancelPress}
         onClick={(ev) => {
           if (press.current.fired) { press.current.fired = false; return; }
-          if (!selecting && (ev.target as HTMLElement).closest('.clipx')) { buzz(5); setPeek(e); return; }
+          if (!selecting && (ev.target as HTMLElement).closest('.clipx')) { buzz(5); setPeek({ e, at: 0 }); return; }
           if (!selecting && (ev.target as HTMLElement).closest('.wtag')) { openWallet(e.wallet); return; }
           if (selecting) { toggle(e.id); buzz(4); return; }
           setPanel({ kind: 'entry', e });
@@ -477,13 +479,13 @@ export function LedgerMobile({ rows, wallets, categories, sites, loading, refetc
         {toast?.undo && <button type="button" onClick={() => { const u = toast.undo!; setToast(null); buzz(5); u(); }}>Undo</button>}
       </div>
 
-      {peek && <DocPeek papers={papersOf(peek)} title={peek.name} sub={`${peek.day} · ${inr(peek.amt)}`}
-        onClose={() => setPeek(null)} onOpenEntry={() => onOpenEntry(peek.id)} />}
+      {peek && <DocPeek papers={papersOf(peek.e)} at={peek.at} title={peek.e.name} sub={`${peek.e.day} · ${inr(peek.e.amt)}`}
+        onClose={() => setPeek(null)} onOpenEntry={() => onOpenEntry(peek.e.id)} />}
 
       {panel && <div className="lmx-scrim on" onClick={() => setPanel(null)} />}
       {panel && <PanelView
         panel={panel} close={() => setPanel(null)} wallets={wallets} sites={sites} categories={categories} F={F} setF={setF}
-        shown={visible.length} openWallet={openWallet} onOpenEntry={onOpenEntry} onPeek={setPeek} onImport={onImport}
+        shown={visible.length} openWallet={openWallet} onOpenEntry={onOpenEntry} onPeek={(e, at) => setPeek({ e, at })} onImport={onImport}
         onExportShown={() => { csv(visible, 'transactions'); say('Downloaded what is shown'); }}
         onSelect={() => { setPanel(null); enterSelect(); say('Tap entries to select them'); }}
         onCategory={doCategory} onSite={doSite} n={sel.size}
@@ -492,15 +494,58 @@ export function LedgerMobile({ rows, wallets, categories, sites, loading, refetc
   );
 }
 
+/**
+ * What this entry carries, under its own line. Shut it reads "Bill and proof"; opened it lays the
+ * papers out as thumbnails — the documents themselves, not icons — and one of those opens it full.
+ */
+function Attachments({ e, onPeek }: { e: Entry; onPeek: (at: number) => void }) {
+  const [open, setOpen] = useState(false);
+  const papers = papersOf(e);
+  const signed = useSignedDocs(open ? papers.map((p) => p.url) : []);
+  const label = papers.length === 0 ? 'None'
+    : papers.length === 2 ? 'Bill and proof'
+    : papers[0].kind;
+  return (
+    <>
+      <button type="button" className={`s sx${open ? ' open' : ''}`} disabled={!papers.length}
+        aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+        <span>Attachment</span>
+        <b className={papers.length ? '' : 'none'}>{label}</b>
+        {!!papers.length && <svg className="c" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>}
+      </button>
+      {open && (
+        <div className="thumbs">
+          {papers.map((paper, n) => {
+            const url = signed[paper.url];
+            return (
+              <button key={paper.kind} type="button" className="th" onClick={() => onPeek(n)} aria-label={`Open the ${paper.kind.toLowerCase()}`}>
+                <span className="sh">
+                  {url && !isPdf(paper.url) && <img alt="" src={url} />}
+                  {url && isPdf(paper.url) && <span className="pdf">PDF</span>}
+                  {!url && <span className="load" />}
+                </span>
+                <em>{paper.kind}</em>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </>
+  );
+}
+
 // ── the panels: the bar opens, as everywhere ──────────────────────────────────
 function PanelView({ panel, close, wallets, sites, categories, F, setF, shown, openWallet, onOpenEntry, onPeek, onImport, onExportShown, onSelect, onCategory, onSite, n }: {
   panel: NonNullable<Panel>; close: () => void; wallets: WalletBalance[]; sites: { id: string; name: string }[]; categories: [string, string][];
   F: { site: string; clip: boolean; min: number }; setF: (f: { site: string; clip: boolean; min: number }) => void;
-  shown: number; openWallet: (n: string) => void; onOpenEntry: (id: string) => void; onPeek: (e: Entry) => void; onImport: () => void;
+  shown: number; openWallet: (n: string) => void; onOpenEntry: (id: string) => void; onPeek: (e: Entry, at: number) => void; onImport: () => void;
   onExportShown: () => void; onSelect: () => void; onCategory: (code: string) => void; onSite: (id: string) => void; n: number;
 }) {
   const [on, setOn] = useState(false);
   useEffect(() => { const r = requestAnimationFrame(() => setOn(true)); return () => cancelAnimationFrame(r); }, []);
+  // Pull it down to put it back — from anywhere on the sheet (sheetDrag), which stands aside while
+  // you are part-way down the panel's own scroll.
+  const drag = useSheetDrag<HTMLElement>(close, on);
   const X = <button type="button" className="x" aria-label="Close" onClick={close}>{CROSS}</button>;
   const held = wallets.reduce((a, w) => a + w.balance, 0);
   const top = Math.max(1, ...wallets.map((w) => w.balance));
@@ -518,10 +563,14 @@ function PanelView({ panel, close, wallets, sites, categories, F, setF, shown, o
           : <><div className="s"><span>Site</span><b>{e.site || '—'}</b></div><div className="s"><span>Category</span><b>{e.cat || '—'}</b></div></>}
         <div className="s"><span>Paid from</span><b>{from}</b></div>
         {e.src !== 'topup' && <div className="s"><span>Bill</span><b className={e.linked ? '' : 'warn'}>{e.linked ? 'Linked' : 'Not linked'}</b></div>}
+        <Attachments e={e} onPeek={(at) => { close(); onPeek(e, at); }} />
         {e.wa && <p className="quote">WhatsApp: “{e.wa}”</p>}
+        {/* One way on, unless there is something specific left undone with this entry. */}
         <div className="p-acts">
-          <button type="button" className="sec" onClick={() => { close(); onOpenEntry(e.id); }}>Open</button>
-          <button type="button" className="pri" onClick={() => { if (e.clip) { close(); onPeek(e); return; } close(); onOpenEntry(e.id); }}>{e.clip ? 'See the paper' : e.src !== 'topup' && !e.linked ? 'Link a bill' : 'Add proof'}</button>
+          {e.src !== 'topup' && !e.linked && <button type="button" className="sec" onClick={() => { close(); onOpenEntry(e.id); }}>Open the entry</button>}
+          <button type="button" className="pri" onClick={() => { close(); onOpenEntry(e.id); }}>
+            {e.src !== 'topup' && !e.linked ? 'Link a bill' : 'Open the entry'}
+          </button>
         </div>
       </>
     );
@@ -589,5 +638,5 @@ function PanelView({ panel, close, wallets, sites, categories, F, setF, shown, o
       </>
     );
   }
-  return <section className={`lmx-panel${on ? ' on' : ''}`} role="dialog" aria-modal="true"><div className="grab" aria-hidden="true"><i /></div>{body}</section>;
+  return <section ref={drag} className={`lmx-panel${on ? ' on' : ''}`} role="dialog" aria-modal="true"><div className="grab" aria-hidden="true"><i /></div>{body}</section>;
 }

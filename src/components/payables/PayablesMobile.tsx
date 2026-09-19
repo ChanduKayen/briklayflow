@@ -24,6 +24,7 @@ import { supabase } from '../../lib/supabase';
 import { recordWeeklyPayment, settleWeeklyPaymentOnLedger, undoWeeklyPayment, mondayOf, weekLabel, type PayRow, type RunPaid } from '../../lib/weeklyPaymentsApi';
 import { approve as approveRow, unapprove as unapproveRow, isMissingTable, type Approval } from '../../lib/paymentApprovals';
 import { PYM_CSS } from './pymCss';
+import { useSheetDrag } from '../../lib/sheetDrag';
 
 const inr = (n: number) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');
 const grouped = (n: number) => Math.round(Number(n) || 0).toLocaleString('en-IN');
@@ -424,6 +425,8 @@ function PanelView({ panel, setPanel, close, busy, say, keyPress, onApprove, onU
 }) {
   const [on, setOn] = useState(false);
   useEffect(() => { const r = requestAnimationFrame(() => setOn(true)); return () => cancelAnimationFrame(r); }, []);
+  // Pull it down to put it back — from anywhere on the sheet, not only the handle (sheetDrag).
+  const drag = useSheetDrag<HTMLElement>(close, on);
   const buzz = (ms: number | number[] = 6) => { try { navigator.vibrate?.(ms); } catch { /* unsupported */ } };
   const calm = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
   const [ok, setOk] = useState(false);
@@ -434,7 +437,7 @@ function PanelView({ panel, setPanel, close, busy, say, keyPress, onApprove, onU
   if (panel.view === 'weeks') {
     const cur = mondayOf(monday).toISOString().slice(0, 10);
     return (
-      <section className={`pym-panel${on ? ' on' : ''}`} role="dialog" aria-modal="true" aria-label="Pick a week" style={{ ['--h' as string]: '520px' } as React.CSSProperties}>
+      <section ref={drag} className={`pym-panel${on ? ' on' : ''}`} role="dialog" aria-modal="true" aria-label="Pick a week" style={{ ['--h' as string]: '520px' } as React.CSSProperties}>
         <div className="grab" aria-hidden="true"><i /></div>
         <div className="p-head">
           <button type="button" className="ico" aria-label="Close" onClick={close}>{CROSS}</button>
@@ -467,7 +470,7 @@ function PanelView({ panel, setPanel, close, busy, say, keyPress, onApprove, onU
   if (panel.view === 'keys') {
     const n = parseInt(panel.typed || '0', 10), over = n > owed(it);
     return (
-      <section className={`pym-panel${on ? ' on' : ''}`} role="dialog" aria-modal="true" aria-label="Another amount" style={{ ['--h' as string]: '548px' } as React.CSSProperties}
+      <section ref={drag} className={`pym-panel${on ? ' on' : ''}`} role="dialog" aria-modal="true" aria-label="Another amount" style={{ ['--h' as string]: '548px' } as React.CSSProperties}
         onPointerDown={(e) => { const k = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-k]'); if (!k || k.disabled) return; e.preventDefault(); keyPress(k.dataset.k!, k); }}>
         <div className="grab" aria-hidden="true"><i /></div>
         {head(false, () => setPanel({ view: 'pay', it, amt: panel.amt, approved: panel.approved }))}
@@ -496,7 +499,7 @@ function PanelView({ panel, setPanel, close, busy, say, keyPress, onApprove, onU
     const which = panel.amt === it.week && it.week ? 'week' : panel.amt === owed(it) ? 'all' : 'other';
     const setAmt = (amt: number) => { buzz(4); setPanel({ ...panel, amt }); };
     return (
-      <section className={`pym-panel${on ? ' on' : ''}`} role="dialog" aria-modal="true" aria-labelledby="pymTitle"
+      <section ref={drag} className={`pym-panel${on ? ' on' : ''}`} role="dialog" aria-modal="true" aria-labelledby="pymTitle"
         style={{ ['--h' as string]: `${it.nobill ? 590 : it.carried ? 520 : 480}px` } as React.CSSProperties}>
         <div className="grab" aria-hidden="true"><i /></div>
         {head(true)}
@@ -556,7 +559,7 @@ function PanelView({ panel, setPanel, close, busy, say, keyPress, onApprove, onU
     </div>
   );
   return (
-    <section className={`pym-panel${on ? ' on' : ''}`} role="dialog" aria-modal="true" aria-label="Mark paid"
+    <section ref={drag} className={`pym-panel${on ? ' on' : ''}`} role="dialog" aria-modal="true" aria-label="Mark paid"
       style={{ ['--h' as string]: `${p.open ? 520 : 470}px` } as React.CSSProperties}>
       <div className="grab" aria-hidden="true"><i /></div>
       {head(true)}
