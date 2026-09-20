@@ -15,6 +15,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { RoughEntry } from '../../types';
 import { fileRoughEntry, fileRoughEntrySplit, rejectRoughEntry, createParty, errMessage, type ProjectSplit } from './fileEntry';
 import { resolveEntry, type ProjectLite, type StakeholderLite } from './resolveEntry';
+import { searchPayees } from '../../lib/payeeSearch';
 import { usePayablePreview } from './payablePreview';
 import { PayablePicker } from '../payables/PayablePicker';
 import { applyAttribution, type Selection } from '../../lib/payableAttribution';
@@ -273,6 +274,19 @@ const CSS = `
 .rvm .field:focus-within{box-shadow:0 0 0 2px var(--tint)}
 .rvm .field label{display:block;font-size:12px;font-weight:600;color:var(--ink-2);margin-bottom:2px}
 .rvm .field input{width:100%;border:0;background:none;font:inherit;font-size:16.5px;font-weight:500;color:var(--ink);outline:none}
+/* The names already on file, offered as the new one is typed — cut from the same card as the field
+   above them, so the list reads as part of the same question rather than a second one. */
+.rvm .npm{background:var(--card);border-radius:14px;padding:4px 6px 6px;margin:-2px 0 10px}
+.rvm .npm-h{font-size:12px;font-weight:600;color:var(--ink-3);padding:8px 10px 6px}
+.rvm .npm-row{display:flex;align-items:center;gap:11px;width:100%;padding:9px 10px;border:0;border-radius:11px;
+  background:none;font:inherit;text-align:left;color:var(--ink);cursor:pointer}
+.rvm .npm-row:active{background:var(--bg)}
+.rvm .npm-av{flex:none;width:34px;height:34px;border-radius:17px;background:var(--bg);display:grid;place-items:center;
+  font-size:12.5px;font-weight:700;color:var(--ink-2)}
+.rvm .npm-m{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+.rvm .npm-m b{font-size:15.5px;font-weight:600;letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rvm .npm-m span{font-size:12.5px;color:var(--ink-3)}
+.rvm .npm-go{flex:none;display:grid;place-items:center;color:var(--ink-3);transform:rotate(-90deg)}
 .rvm .frow{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .rvm .sitechips{display:flex;gap:8px;flex-wrap:wrap;margin:4px 0 16px}
 .rvm .sitechips button{border:0;background:var(--card);font-size:14px;font-weight:500;color:var(--ink-2);
@@ -862,6 +876,19 @@ export default function ReviewMobile(p: ReviewMobileProps) {
 
   // ── new party ───────────────────────────────────────────────────────────────
   const [npName, setNpName] = useState('');
+  // A name typed off a WhatsApp line is a name as someone HEARD it: "dhaveedu sadanala" for a party
+  // already on file as "Sadanala Daveedu". Adding it would make a second one and split their ledger
+  // in half. So the nearest names on file are offered as it is typed — the same ranker the composer
+  // uses, which scores that pair 0.93 and an unrelated name 0.19.
+  const npMatches = useMemo(
+    () => (npName.trim().length >= 2 ? searchPayees(p.stakeholders as never, npName).slice(0, 5) as StakeholderLite[] : []),
+    [npName, p.stakeholders],
+  );
+  const npUse = (m: StakeholderLite) => {
+    if (!active || !activeDraft) return;
+    setDrafts(st => ({ ...st, [active.id]: { ...activeDraft, payeeId: m.stakeholder_id, payeeName: m.name } }));
+    setSheet(null);
+  };
   const npAdd = async () => {
     const name = npName.trim();
     if (!active || !activeDraft || !name || busy) return;
@@ -1084,9 +1111,23 @@ export default function ReviewMobile(p: ReviewMobileProps) {
         </p>
         <div className="field">
           <label>Name — fix it if it's misspelt</label>
-          <input value={npName} onChange={e => setNpName(e.target.value)} />
+          <input value={npName} onChange={e => setNpName(e.target.value)} autoComplete="off" />
         </div>
-        <button type="button" className="b2" disabled={busy || !npName.trim()} onClick={() => void npAdd()}>Add &amp; file</button>
+        {npMatches.length > 0 && (
+          <div className="npm">
+            <div className="npm-h">Already in your parties</div>
+            {npMatches.map(m => (
+              <button type="button" className="npm-row" key={m.stakeholder_id} onClick={() => npUse(m)}>
+                <span className="npm-av">{(m.name.match(/\b[A-Za-z]/g) || []).slice(0, 2).join('').toUpperCase() || '?'}</span>
+                <span className="npm-m"><b>{m.name}</b><span>{m.type || 'Party'}</span></span>
+                <span className="npm-go">{CHEV}</span>
+              </button>
+            ))}
+          </div>
+        )}
+        <button type="button" className="b2" disabled={busy || !npName.trim()} onClick={() => void npAdd()}>
+          {npMatches.length > 0 ? 'None of these — add as new' : 'Add & file'}
+        </button>
         <button type="button" className="b2" style={{ background: 'rgba(27,23,19,.06)', color: 'var(--ink)', marginTop: 8 }}
           onClick={() => setSheet(null)}>Pick someone else</button>
       </DragSheet>
