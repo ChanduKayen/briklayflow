@@ -569,7 +569,7 @@ export interface UnpaidBill { id: string; kind: 'bill' | 'po'; billNo: string | 
 
 export async function loadUnpaidBillsForVendor(stakeholderId: string): Promise<UnpaidBill[]> {
   const [bR, projR, poR] = await Promise.all([
-    supabase.from('bills').select('id, project_id, bill_no, bill_date, amount, doc_url, created_at').eq('stakeholder_id', stakeholderId),
+    supabase.from('bills').select('id, po_id, project_id, bill_no, bill_date, amount, doc_url, created_at').eq('stakeholder_id', stakeholderId),
     supabase.from('projects').select('project_id, name'),
     supabase.from('purchase_orders').select(`po_id, project_id, vendor_bill_number, vendor_bill_doc_url, vendor_bill_url, ${BILL_DATE_COLUMNS}, status, approval_status`)
       .eq('stakeholder_id', stakeholderId).eq('approval_status', 'APPROVED')
