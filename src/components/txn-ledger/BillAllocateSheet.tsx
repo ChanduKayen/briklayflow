@@ -100,12 +100,17 @@ export function BillAllocateSheet({ txnId, orgId, stakeholderId, vendorName, amo
   const [door, setDoor] = useState<{ file: File | null } | null>(initialFile ? { file: initialFile } : null);
 
   // Load the vendor's unpaid bills; pre-select on an exact remaining match.
+  // When this payment is ALREADY on some bills, that is the selection — re-opening the picker to
+  // change an attribution has to open on the attribution it is changing, not on a guess.
   useEffect(() => {
     let live = true;
-    loadUnpaidBillsForVendor(stakeholderId).then(bs => {
+    loadUnpaidBillsForVendor(stakeholderId, txnId).then(bs => {
       if (!live) return;
       setBills(bs);
-      if (prefill === 'fifo') {
+      const own = bs.filter(b => b.ownAllocated > 0);
+      if (own.length) {
+        setSel(Object.fromEntries(own.map(b => [b.id, b.ownAllocated])));
+      } else if (prefill === 'fifo') {
         // fill the OLDEST bills first, up to the payment amount (bs is already oldest-first)
         const picks: Record<string, number> = {};
         let left = amount;
@@ -121,7 +126,7 @@ export function BillAllocateSheet({ txnId, orgId, stakeholderId, vendorName, amo
       }
     }).catch(e => { if (live) setErr(errMsg(e)); });
     return () => { live = false; };
-  }, [stakeholderId, amount, prefill]);
+  }, [stakeholderId, txnId, amount, prefill]);
 
   /**
    * A bill has just arrived through the door — either freshly minted, or the one the dedupe found
@@ -135,7 +140,7 @@ export function BillAllocateSheet({ txnId, orgId, stakeholderId, vendorName, amo
   const adoptBill = async (billId: string) => {
     setBusy('reading'); setErr(null);
     try {
-      const bs = await loadUnpaidBillsForVendor(stakeholderId);
+      const bs = await loadUnpaidBillsForVendor(stakeholderId, txnId);
       setBills(bs);
       const fresh = bs.find(b => b.kind === 'bill' && b.id === billId);
       if (!fresh) { setErr('That bill is on file, but nothing is left to pay on it.'); return; }

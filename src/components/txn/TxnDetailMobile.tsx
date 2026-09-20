@@ -80,8 +80,8 @@ const CSS = `
 .txm .status .act{font-size:15px;font-weight:600;color:var(--tint);flex-shrink:0}
 .txm .status.linked .sd{background:var(--good)}
 .txm .status.linked .s1{color:var(--good)}
-.txm .status.linked .act{display:none}
-.txm .status.linked{cursor:default}
+.txm .status.linked .act{color:var(--ink-2);font-weight:500}
+.txm .status:disabled{cursor:default}
 
 .txm .note{padding:16px 18px}
 .txm .note .src{font-size:12.5px;font-weight:600;color:var(--ink-2);margin-bottom:8px;display:flex;align-items:center;gap:6px}
@@ -179,6 +179,9 @@ export interface TxnDetailMobileProps {
   statusTitle: string;
   statusSub: string;
   onLink: (() => void) | null;
+  /** Once it IS linked, the same row reopens the picker — what the desktop's per-allocation
+   *  "Change" does. Null when the attribution cannot be changed (voided, an overhead). */
+  onChange?: (() => void) | null;
   details: TxmDetailRow[];
   noteSource: string | null;
   noteText: string | null;
@@ -278,13 +281,16 @@ export default function TxnDetailMobile(p: TxnDetailMobileProps) {
             </div>
           ))}
           <button type="button" className={`status${p.linked ? ' linked' : ''}`}
-            onClick={() => { if (!p.linked && p.onLink) p.onLink(); }} disabled={p.linked || !p.onLink}>
+            onClick={() => { const go = p.linked ? p.onChange : p.onLink; if (go) go(); }}
+            disabled={!(p.linked ? p.onChange : p.onLink)}>
             <span className="sd" />
             <span className="st">
               <span className="s1" style={{ display: 'block' }}>{p.statusTitle}</span>
               <span className="s2" style={{ display: 'block' }}>{p.statusSub}</span>
             </span>
-            {!p.linked && p.onLink && <span className="act">Link</span>}
+            {p.linked
+              ? p.onChange && <span className="act chg">Change</span>
+              : p.onLink && <span className="act">Link</span>}
           </button>
         </div>
 
