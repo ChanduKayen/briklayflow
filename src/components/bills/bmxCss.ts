@@ -170,6 +170,9 @@ export const BMX_CSS = `.bmx{
 .bmx .payrow b{font-size:14.5px;font-weight:600}
 .bmx .payrow .m > span{font-size:12.5px;color:var(--ink-3)}
 .bmx .payrow em{font-style:normal;font-family:var(--mono);font-size:14.5px}
+.bmx button.payrow{width:100%;text-align:left;background:none;border-left:0;border-right:0;border-bottom:0;color:inherit;font:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.bmx button.payrow:active{background:var(--card-2,rgba(255,255,255,.04))}
+.bmx .payrow.tap em .go{color:var(--ink-3);margin-left:4px}
 .bmx .tickc{flex:none;width:26px;height:26px;border-radius:13px;background:var(--sage-wash);color:var(--sage);display:grid;place-items:center}
 .bmx .tickc svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}
 .bmx .none2{padding:2px 18px 6px;font-size:14px;color:var(--ink-3)}

@@ -16,10 +16,11 @@ import StakeholderLedgerDrawer from '../components/StakeholderLedgerDrawer';
 import { BillAllocateSheet } from '../components/txn-ledger/BillAllocateSheet';
 import { useOrgId } from '../lib/auth/AuthProvider';
 import { ContractHub, CONTRACT_HUB_CSS } from '../components/txn-ledger/ContractHub';
+import { PayablePicker } from '../components/payables/PayablePicker';
+import { applyAttribution, attributeToPhase, prefetchAttrTargets } from '../lib/payableAttribution';
 import { useIsMobile } from '../lib/useIsMobile';
 import { createPortal } from 'react-dom';
 import TxnDetailMobile from '../components/txn/TxnDetailMobile';
-import { saveBillAllocations } from '../lib/billsApi';
 
 // ─── Scoped stylesheet — a faithful port of the txn-detail reference (cream/terracotta).
 //     Every selector is prefixed with `.txnx` so nothing leaks into the rest of the app. ──
@@ -488,7 +489,8 @@ export default function TransactionDetail({ session }: { session: Session }) {
 
   const navigate = useNavigate();
   const [mappingAllocId, setMappingAllocId] = useState<string | null>(null);
-  const [contractHubOpen, setContractHubOpen] = useState(false);                       // worker: link to a WO
+  const [contractHubOpen, setContractHubOpen] = useState(false);                       // worker: link to a WO (legacy)
+  const [payablePicker, setPayablePicker] = useState<{ projectId: string } | null>(null); // worker: "Towards which payable?" — same picker as the ledger/day-book
   const [attachBill, setAttachBill] = useState<{ file: File | null; mode: 'upload' | 'link' } | null>(null); // vendor: dup-check + PO create
   const [, setSelectedObligation] = useState<SelectedObligation | null>(null);
   const [, setProjectWOs] = useState<any[]>([]);
@@ -520,9 +522,7 @@ export default function TransactionDetail({ session }: { session: Session }) {
   const { data: allocs, isLoading: allocsLoading } = useQuery({
     queryKey: ['txn_allocations', txnId],
     queryFn: async () => {
-      // ORDER BY, because the page reads meaning off these rows: without one, Postgres is free to
-      // return a split payment's parts in any order, and the summary changed between reloads.
-      const { data, error } = await supabase.from('txn_allocations').select('*, projects(name), wo_milestones(name)').eq('txn_id', txnId).order('allocation_id');
+      const { data, error } = await supabase.from('txn_allocations').select('*, projects(name), wo_milestones(name)').eq('txn_id', txnId);
       if (error) throw error;
       return data;
     },
@@ -707,20 +707,27 @@ export default function TransactionDetail({ session }: { session: Session }) {
     qc.invalidateQueries({ queryKey: ['transaction', txnId] });
     qc.invalidateQueries({ queryKey: ['txn_allocations', txnId] });
     qc.invalidateQueries({ queryKey: ['ledger'] });
-    qc.invalidateQueries({ queryKey: ['bills'] });
+    qc.invalidateQueries({ queryKey: ['party_ledger'] });
+    qc.invalidateQueries({ queryKey: ['weekly_payments'] });
   };
 
-  // Take the payment back off whatever it was settling. Nothing is destroyed: this is the write the
-  // picker already makes when you untick everything — the money becomes one unallocated part again,
-  // and the bill it was on goes back to owing. Only made reachable, because "change it" and "take it
-  // off" are different intentions and only one of them had a door.
-  const unlinkMutation = useMutation({
-    mutationFn: async () => {
-      if (!orgId || !txnId) throw new Error('Not ready');
-      await saveBillAllocations(txnId, orgId, Number(effective.total_amount) || 0, [], primaryAlloc?.project_id ?? null);
-    },
-    onSuccess: afterAttach,
-  });
+  // Warm the attribution options once the page has its transaction, so tapping "Payable for" /
+  // "Change" opens instantly instead of showing a skeleton.
+  useEffect(() => {
+    const sid = txn?.stakeholder_id;
+    if (!sid || txn?.status === 'Voided') return;
+    const proj = (allocs ?? [])[0]?.project_id;
+    if (!proj) return;
+    const type = (txn?.stakeholders as { type?: string } | null)?.type === 'Vendor' ? 'Vendor' : 'Worker';
+    prefetchAttrTargets(qc, { id: sid, type }, String(proj), txn?.date ?? null, Number(txn?.total_amount) || 0);
+  }, [txn, allocs, qc]);
+
+  // Unlink a worker contract attribution (removes any payment-cert and clears the WO/phase on the
+  // allocation). The proven OFF path — safe for both formats (wages-mode has no cert to remove).
+  const unlinkWorkerAlloc = async (a: any) => {
+    try { await attributeToPhase(txn.txn_id, a.order_ref, null, false, true); afterAttach(); }
+    catch (e) { window.alert(e instanceof Error ? e.message : 'Could not unlink'); }
+  };
 
   // Proof of payment is a SEPARATE document from the bill (receipt / UPI screenshot / Day-Book
   // photo) — stored on transactions.proof_document_url.
@@ -793,16 +800,9 @@ export default function TransactionDetail({ session }: { session: Session }) {
     setAmendError(null); setAmendStep('edit');
   };
 
-  // An allocation that names a bill, an order or an advance is one that SAYS SOMETHING. A split
-  // payment has one of those and a leftover part, and which came back first was luck — so the page
-  // read "not settled" about a payment that was settled, and offered to link it all over again.
-  // Prefer a part that speaks; fall back to the first.
-  const allocSpeaks = (a: { order_type?: string | null; bill_id?: string | null } | undefined | null) =>
-    !!a && (!!a.order_type || !!a.bill_id);
-  const pickAlloc = (list: typeof allocs) => (list ?? []).find(allocSpeaks) ?? (list ?? [])[0];
   const primaryAlloc = focusProjectId
-    ? (pickAlloc(allocs?.filter((a) => a.project_id === focusProjectId)) ?? pickAlloc(allocs))
-    : pickAlloc(allocs);
+    ? (allocs?.find((a) => a.project_id === focusProjectId) ?? allocs?.[0])
+    : allocs?.[0];
   const secondaryAllocs = allocs?.filter((a) => a !== primaryAlloc) ?? [];
 
   const txnDate = effective.date ? new Date(effective.date) : null;
@@ -874,7 +874,7 @@ export default function TransactionDetail({ session }: { session: Session }) {
   // sent every phone here, where the choice was hardcoded to 'upload'. So linking a payment to an
   // order it already has was unreachable on a phone entirely. Ask, the way the chip does.
   // Vendor → the bill picker (same everywhere: list/mobile/detail); worker → the contract hub.
-  const linkAction = () => { if (isVendor) setAttachBill({ file: null, mode: 'upload' }); else setContractHubOpen(true); };
+  const linkAction = () => { if (isVendor) setAttachBill({ file: null, mode: 'upload' }); else setPayablePicker({ projectId: primaryAlloc?.project_id || '' }); };
   // WhatsApp origin, only when the ingest actually captured the source message.
   const waText: string | null = (txn as any).ai_flag_data?.source_text || (txn as any).ai_flag_data?.raw_message || (txn as any).ai_flag_data?.wa_message || null;
   const waWho: string | null = (txn as any).ai_flag_data?.source_sender || (txn as any).ai_flag_data?.sender || null;
@@ -885,22 +885,10 @@ export default function TransactionDetail({ session }: { session: Session }) {
     // An overhead has no party, so it has no bill and no contract to settle against. Saying
     // "not settled" about one — and offering to link its contract — is asking for something that
     // cannot exist.
-    // One line stands for the whole payment, so it is read off every part of it: what it is settling,
-    // and how much of it is still settling nothing.
-    const spoken = allAllocs.filter(allocSpeaks);
-    const loose = allAllocs.filter((a) => !allocSpeaks(a)).reduce((sum, a) => sum + (Number(a.allocated_amount) || 0), 0);
-    const base = spoken.length ? allocStatus(spoken[0])
-      : primaryAlloc ? allocStatus(primaryAlloc)
-      : { linked: false, k: 'Not linked to work yet', sub: `link ${payeeName}'s ${isVendor ? 'bill' : 'contract'}, and this settles against it` };
     const st = isGenExp
       ? { linked: true, k: 'An overhead — nothing to settle', sub: `${generalExpenseLabel(txn)}${heardName ? ` · paid to ${heardName}` : ''}` }
-      : spoken.length && loose > 0.5 ? { ...base, sub: `${base.sub} · ${rupee(loose)} of it still settles nothing` }
-      : spoken.length > 1 ? { ...base, sub: `${base.sub} · and ${spoken.length - 1} more` }
-      : base;
-    // Something left over is still worth linking; everything spoken for can still be changed.
-    const settled = spoken.length > 0 && loose <= 0.5;
-    const canLink = !isVoided && !isGenExp && !settled;
-    const canChange = !isVoided && !isGenExp && spoken.length > 0;
+      : primaryAlloc ? allocStatus(primaryAlloc) : { linked: false, k: 'Not linked to work yet', sub: `link ${payeeName}'s ${isVendor ? 'bill' : 'contract'}, and this settles against it` };
+    const canLink = !isVoided && !billLinked && !isGenExp;
 
     // "Cash · Friday 5 Sept, 5:30 pm"
     const longDate = txnDate
@@ -943,7 +931,6 @@ export default function TransactionDetail({ session }: { session: Session }) {
       { label: 'Share as PDF', onSelect: () => generatePDF(txn, allocs || [], effective, isAmended) },
     ];
     if (canAmend) menu.push({ label: 'Amend entry', onSelect: openAmendModal });
-    if (canChange) menu.push({ label: isVendor ? 'Unlink from the bill' : 'Unlink from the contract', onSelect: () => unlinkMutation.mutate() });
     if (canVoid && !isVoided) menu.push({ label: 'Void transaction', danger: true });
 
     return (
@@ -980,10 +967,23 @@ export default function TransactionDetail({ session }: { session: Session }) {
           } : null}
           hideSites={isWTransfer}
           linked={st.linked}
-          statusTitle={st.linked ? st.k : 'Not settled against a bill'}
-          statusSub={st.sub}
+          statusTitle={st.linked ? st.k : (isVendor ? 'Towards a bill' : 'Payable towards')}
+          statusSub={st.linked ? st.sub : (isVendor ? 'Tap to link the bill it settles' : 'Tap to choose the phase or balance')}
           onLink={canLink ? linkAction : null}
-          onChange={canChange ? linkAction : null}
+          attrCtx={!isVoided && !isGenExp && txn.stakeholder_id ? {
+            payee: { id: txn.stakeholder_id, name: payeeName, type: isVendor ? 'Vendor' : 'Worker' },
+            projectId: primaryAlloc?.project_id || '',
+            projectName: primaryAlloc?.projects?.name ?? null,
+            txnDate: txn.date ?? null,
+            amount: Number(effective.total_amount) || 0,
+            selfPaid: Number(effective.total_amount) || 0,
+            onConfirm: (sel) => { void (async () => {
+              if (sel.type === 'skip') return;
+              try { await applyAttribution(txn.txn_id, orgId ?? '', Number(effective.total_amount) || 0, primaryAlloc?.project_id || null, sel); afterAttach(); }
+              catch (e) { window.alert(e instanceof Error ? e.message : 'Could not attribute'); }
+            })(); },
+          } : null}
+          onUnlink={st.linked && !isVoided && !isVendor && primaryAlloc?.order_type === 'WO' ? () => void unlinkWorkerAlloc(primaryAlloc) : null}
           details={details}
           noteSource={waText ? 'From WhatsApp' : null}
           noteText={noteText}
@@ -997,10 +997,10 @@ export default function TransactionDetail({ session }: { session: Session }) {
           onReplaceProof={isVoided ? null : () => proofInputRef.current?.click()}
           replacing={proofUploadMutation.isPending}
           events={events}
-          showBar={canLink}
+          showBar={!isVoided && !billLinked && !isGenExp}
           canEdit={canAmend}
           onEdit={openAmendModal}
-          ctaLabel={spoken.length ? (isVendor ? 'Link the rest to a bill' : 'Link the rest') : isVendor ? 'Link to a bill' : 'Link to contract'}
+          ctaLabel={isVendor ? 'Link to a bill' : 'Link to contract'}
           menu={menu}
           deleteTitle="Void this transaction?"
           deleteBody={`${rupee(Number(effective.total_amount) || 0)} ${isIn ? 'from' : 'to'} ${payeeName} will be reversed in the books. The entry stays on record, marked voided.`}
@@ -1158,9 +1158,12 @@ export default function TransactionDetail({ session }: { session: Session }) {
                               ? (hasBill
                                 ? <button className="ghost" onClick={() => setAttachBill({ file: null, mode: 'upload' })}>Change</button>
                                 : <button className="linkbtn" onClick={() => setAttachBill({ file: null, mode: 'upload' })}>Attach bill</button>)
-                              : (hasBill
-                                ? <button className="ghost" onClick={() => setContractHubOpen(true)}>Change</button>
-                                : <button className="linkbtn" onClick={() => setContractHubOpen(true)}>Link to contract</button>)}
+                              : (isWO
+                                ? <>
+                                    <button className="ghost" onClick={() => setPayablePicker({ projectId: a.project_id || '' })}>Change</button>
+                                    <button className="ghost" onClick={() => void unlinkWorkerAlloc(a)}>Unlink</button>
+                                  </>
+                                : <button className="linkbtn" onClick={() => setPayablePicker({ projectId: a.project_id || '' })}>Towards a payable</button>)}
                             {isVendor && picking && (
                               <>
                                 <div style={{ position: 'fixed', inset: 0, zIndex: 35 }} onClick={() => setMappingAllocId(null)} />
@@ -1466,6 +1469,24 @@ export default function TransactionDetail({ session }: { session: Session }) {
               : <BillAllocateSheet txnId={txnId!} orgId={orgId} stakeholderId={txn.stakeholder_id} vendorName={payeeName} amount={Number(effective.total_amount) || 0} defaultProjectId={primaryAlloc?.project_id ?? null} initialFile={attachBill?.file ?? null} onClose={() => setAttachBill(null)} onDone={() => { afterAttach(); }} />}
           </div>
         </div>
+      )}
+
+      {payablePicker && txn.stakeholder_id && (
+        <PayablePicker
+          payee={{ id: txn.stakeholder_id, name: payeeName, type: isVendor ? 'Vendor' : 'Worker' }}
+          projectId={payablePicker.projectId}
+          projectName={allocs?.find((a) => a.project_id === payablePicker.projectId)?.projects?.name ?? null}
+          txnDate={txn.date ?? null}
+          amount={Number(effective.total_amount) || 0}
+          selfPaid={Number(effective.total_amount) || 0}
+          onClose={() => setPayablePicker(null)}
+          onConfirm={(sel) => { void (async () => {
+            const proj = payablePicker.projectId; setPayablePicker(null);
+            if (sel.type === 'skip') return;
+            try { await applyAttribution(txn.txn_id, orgId ?? '', Number(effective.total_amount) || 0, proj || null, sel); afterAttach(); }
+            catch (e) { window.alert(e instanceof Error ? e.message : 'Could not attribute'); }
+          })(); }}
+        />
       )}
     </div>
   );

@@ -140,7 +140,6 @@ export default function BillsMobile() {
   const [bucket, setBucket] = useState(-1);
   const [compact, setCompact] = useState(false);
   const [tuck, setTuck] = useState(false);
-  const [folded, setFolded] = useState(false);
   const [openBill, setOpenBill] = useState<string | null>(null);
   const [openVendor, setOpenVendor] = useState<string | null>(null);
   const [panel, setPanel] = useState<null | { kind: 'menu' } | { kind: 'link'; billId: string }>(null);
@@ -213,12 +212,10 @@ export default function BillsMobile() {
       const y = window.scrollY, past = y > 240 - 54, d = y - lastY;
       setCompact(past);
       if (Math.abs(d) > 6) {
-        setFolded(d > 0 && y > 60);
         setTuck(d > 0 && past && document.activeElement !== qRef.current);
         lastY = y;
       }
       if (!past) setTuck(false);
-      if (y < 8) setFolded(false);
     };
     window.addEventListener('scroll', onScroll, { passive: true });
     return () => window.removeEventListener('scroll', onScroll);
@@ -379,6 +376,7 @@ export default function BillsMobile() {
             onSay={say} onZoom={() => setZoom(bill)} onLink={() => setPanel({ kind: 'link', billId: bill.id })}
             onLinked={() => { refresh(); }}
             onDeleted={() => { setBillMenu(false); setOpenBill(null); setOpenVendor(null); refresh(); say('Bill deleted · ' + inr(bill.amount)); }}
+            onOpenTxn={(txnId) => navigate(`/ledger/${txnId}`, { state: { backTo: '/bills', backLabel: 'Bills' } })}
             onVendor={() => navigate(`/stakeholders/${encodeURIComponent(bill.vendorId ?? '')}`)} />
         ) : openVendor ? (
           <VendorPage name={openVendor} bills={B.filter((b) => b.vendor === openVendor)}
@@ -412,13 +410,8 @@ export default function BillsMobile() {
         <button type="button" aria-label="Close" onClick={() => setZoom(null)}>{CLOSE}</button>
       </div>
 
-      {/* One button, one job: a new bill. Linking a payment lives on the bill page itself, where the
-          money it is being linked to is — a second, floating copy of it only asked the same question twice. */}
-      <button type="button" data-page-cta className={`fab${folded ? ' folded' : ''}${pageOn || panel ? ' away' : ''}`}
-        style={{ ['--w' as string]: '120px' }} aria-label="Add a bill" onClick={() => setParams({ new: '1' })}>
-        <span className="ic"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg></span>
-        <span className="lbl">Bill</span>
-      </button>
+      {/* No page-local "+ Bill" here: the app's nav-capsule already carries the one "+ Bill" action,
+          in the shape every other page uses. A second floating copy only duplicated it. */}
 
       <div className={`toast${toast ? ' on' : ''}`} role="status"><span>{toast?.text ?? ''}</span></div>
 
@@ -470,11 +463,11 @@ const PBar = ({ back, name, onBack, onMenu }: { back: string; name?: string; onB
 );
 
 // ── a bill ────────────────────────────────────────────────────────────────────
-function BillPage({ b, backTo, fit, orgId, menu, onMenu, onCloseMenu, onBack, onSay, onZoom, onLink, onLinked, onDeleted, onVendor }: {
+function BillPage({ b, backTo, fit, orgId, menu, onMenu, onCloseMenu, onBack, onSay, onZoom, onLink, onLinked, onDeleted, onOpenTxn, onVendor }: {
   b: BillRow; backTo: string | null; fit: LinkablePayment | null; orgId: string | null | undefined;
   menu: boolean; onMenu: () => void; onCloseMenu: () => void;
   onBack: () => void; onSay: (s: string) => void; onZoom: () => void; onLink: () => void;
-  onLinked: () => void; onDeleted: () => void; onVendor: () => void;
+  onLinked: () => void; onDeleted: () => void; onOpenTxn: (txnId: string) => void; onVendor: () => void;
 }) {
   const { data: d } = useQuery({ queryKey: ['bill', b.id], queryFn: () => loadBillDetail(b.id) });
   const [noHint, setNoHint] = useState(false);
@@ -541,11 +534,11 @@ function BillPage({ b, backTo, fit, orgId, menu, onMenu, onCloseMenu, onBack, on
         <div className="setnum"><span><b>{inr(b.paid)}</b> paid</span><span><b>{inr(left)}</b> left</span></div>
         {d?.payments.length
           ? d.payments.map((p) => (
-            <div className="payrow" key={p.txnId}>
+            <button type="button" className="payrow tap" key={p.txnId} onClick={() => onOpenTxn(p.txnId)}>
               <span className="tickc">{TICK}</span>
               <span className="m"><b>{day(p.date)}{p.mode ? ` · ${p.mode}` : ''}</b><span>In Book · linked to this bill</span></span>
-              <em>{inr(p.amount)}</em>
-            </div>))
+              <em>{inr(p.amount)} <span className="go">›</span></em>
+            </button>))
           : <p className="none2">Nothing in Book is linked to it yet.</p>}
         {left > 0 ? <div className="two"><button type="button" className="pri" data-link onClick={onLink}>Link a payment</button></div> : <div style={{ height: 10 }} />}
       </div>

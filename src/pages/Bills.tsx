@@ -4,12 +4,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { loadBills, loadBillDetail, deleteBill, extractBill, type BillRow, type BillStatus, type ExtractedBill } from '../lib/billsApi';
+import { loadBills, loadBillDetail, deleteBill, extractBill, loadLinkablePayments, linkPaymentToBill, allocTargetOf, type BillRow, type BillStatus, type ExtractedBill, type BillDetail, type LinkablePayment } from '../lib/billsApi';
+import { allocateAcross } from '../lib/billPayMath';
 import { DocThumb } from '../components/DocThumb';
 import { ImageLightbox } from '../components/ImageLightbox';
 import { openDoc, resolveDocUrl } from '../lib/storage';
 import { useSnackbar } from '../components/Snackbar';
-import { type BillDraft } from '../components/bills/NewBillModal';
+import NewBillModal, { type BillDraft } from '../components/bills/NewBillModal';
 import { useSearchScope } from '../components/search/searchScope';
 import { useCursorLamp } from '../components/nav/useCursorLamp';
 import BillsMobile from '../components/bills/BillsMobile';
@@ -38,6 +39,27 @@ const BLX_CSS = `
 /* the whole hero is a FIXED height; its inner wrap is a flex column and the stage flex-fills, so the
    header never resizes as the title row (the sub only shows at rest) or the stage content changes. */
 .blx .bh .hero{position:relative;overflow:hidden;background:var(--espresso);color:var(--on-dark);padding:38px 0 34px;height:352px;--mx:50%;--my:50%}
+/* composing: the add-bill composer opens inline ON the header — the header keeps its espresso bg +
+   glow (the composer is transparent); it just sizes to the form and lets dropdowns overflow below. */
+/* Composing keeps the header's OWN resting height (352px) — pressing Add bill never resizes it. The
+   padding is trimmed so the form has more of that fixed band to sit in; the stage fills what's left
+   and the composer (in the iframe) is laid out to fit it. Dropdowns float over the list (overflow
+   visible) without growing the header. */
+/* z-index sits ABOVE the sticky controls/search bar (z-index:5) so the vendor/date dropdowns, which
+   overflow the iframe down over the list, float over the search bar instead of under it. */
+.blx .bh .hero.composing{overflow:visible;z-index:30;padding-top:22px;padding-bottom:22px}
+.blx .bh .hero.composing .hwrap{height:100%}
+.blx .bh .hero.composing .hero-stage{flex:1;min-height:0;margin-top:6px;overflow:visible;display:block}
+/* the cursor lamp (glow + grid) is deliberately quiet during a bill — a calm surface to write on. */
+.blx .bh .hero.composing .fx{opacity:0!important}
+/* the title + button swap gracefully as the header morphs into the composer and back */
+@keyframes blxHMorph{from{opacity:0;transform:translateY(-5px)}to{opacity:1;transform:none}}
+.blx .bh .hero-top h1.h1morph{animation:blxHMorph .34s cubic-bezier(.22,1,.36,1)}
+.blx .bh .actions .tb-btn{animation:blxHMorph .3s cubic-bezier(.22,1,.36,1)}
+/* Close wears the same solid clay as Add bill — one orange button, one orange shadow, not a ghost. */
+.blx .bh .tb-btn.primary.is-close{background:#B4532F;color:#fff;box-shadow:0 2px 0 #8B3F1E,0 10px 22px -10px rgba(150,68,32,.85)}
+/* Close is a quiet exit, not a call to action — the hover is a barely-there lift, no jump, no full white. */
+.blx .bh .tb-btn.primary.is-close:hover{background:#9C4526;color:#fff;transform:translateY(-1px);box-shadow:0 2px 0 #8B3F1E,0 14px 28px -10px rgba(150,68,32,.9)}
 .blx .bh .hero>*{position:relative;z-index:1}
 .blx .bh .hero .hwrap{display:flex;flex-direction:column;height:100%}
 /* the transactions page's cursor lamp — a warm glow + revealed grid that follow the pointer on the dark band */
@@ -377,6 +399,26 @@ const BLX_CSS = `
 .blx .btn-ghost{background:none;border:1px solid var(--line-strong);border-radius:8px;padding:9px 16px;font-size:.85rem;color:var(--walnut-60);cursor:pointer}
 .blx .btn-prim{background:var(--terracotta);border:none;border-radius:8px;padding:9px 18px;font-size:.85rem;font-weight:600;color:#fff;cursor:pointer}
 .blx .btn-prim:disabled{opacity:.5;cursor:default}
+/* referenced-by: an openable payment row */
+.blx button.refrow{width:100%;text-align:left;background:none;font:inherit;color:inherit;cursor:pointer}
+.blx button.refrow:hover{background:var(--cream)}
+.blx .refrow.tap .go{color:var(--walnut-60);margin-left:6px;font-size:.95rem}
+.blx .refrow.tap:hover .go{color:var(--terracotta)}
+/* desktop payment linker */
+.blx .sheet-m.linker .ltgt{font-size:.86rem;color:var(--walnut-60)}
+.blx .sheet-m.linker .ltgt b{font-family:'IBM Plex Mono',monospace;color:var(--walnut)}
+.blx .lcands{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.blx .lcand{display:flex;align-items:center;gap:12px;width:100%;text-align:left;padding:11px 14px;background:var(--paper);border:none;border-bottom:1px solid var(--line);font:inherit;color:var(--walnut);cursor:pointer}
+.blx .lcand:last-child{border-bottom:none}
+.blx .lcand:hover{background:var(--cream)}
+.blx .lcand[aria-pressed="true"]{background:var(--terra-tint)}
+.blx .lcand .ck{width:18px;height:18px;flex-shrink:0;border:1.5px solid var(--line-strong);border-radius:5px;display:grid;place-items:center;font-size:.72rem;color:var(--terracotta);font-weight:800}
+.blx .lcand[aria-pressed="true"] .ck{border-color:var(--terracotta)}
+.blx .lcand .lm{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}
+.blx .lcand .lm b{font-weight:600;font-size:.85rem}
+.blx .lcand .lm span{font-size:.76rem;color:var(--walnut-60);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.blx .lcand .lr{font-family:'IBM Plex Mono',monospace;font-size:.85rem;flex-shrink:0}
+.blx .lnone{font-size:.83rem;color:var(--walnut-60);padding:14px;border:1px dashed var(--line-strong);border-radius:10px;line-height:1.5}
 `;
 
 const inr = (n: number) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');
@@ -460,6 +502,7 @@ function BillsDesktop() {
   const orgId = useOrgId();
   const { show: showSnackbar } = useSnackbar();
   const mintBill = useMintBill();
+  const qc = useQueryClient();
 
   // Known vendors (to resolve a read name to a party) + active sites (the confirm's site chips).
   const { data: vendorParties = [] } = useQuery({
@@ -478,6 +521,10 @@ function BillsDesktop() {
   type Cap = 'rest' | 'catch' | 'read';
   const EMPTY_RD = { vendor: '', billNo: '', billDate: '', amount: '', lines: [] as ExtractedBill['lines'], file: null as File | null, fileName: '', weak: false };
   const [cap, setCap] = useState<Cap>('rest');
+  // The add-bill composer (the reference iframe) is the one door everywhere now; the Bills page opens
+  // it too. The old in-header capture below is retained but no longer triggered.
+  const [newOpen, setNewOpen] = useState(false);
+  const [newFile, setNewFile] = useState<File | null>(null);
   const [reading, setReading] = useState(false);
   const [rd, setRd] = useState(EMPTY_RD);
   const [rdSite, setRdSite] = useState<{ id: string; name: string } | null>(null);
@@ -523,9 +570,9 @@ function BillsDesktop() {
   const fileBillRef = useRef(fileBill); fileBillRef.current = fileBill;
   useEffect(() => {
     const onOver = (e: DragEvent) => { if (e.dataTransfer?.types?.includes('Files')) e.preventDefault(); };
-    const onEnter = (e: DragEvent) => { if (e.dataTransfer?.types?.includes('Files')) { dragDepth.current++; if (capRef.current === 'rest') setCap('catch'); } };
-    const onLeave = () => { dragDepth.current = Math.max(0, dragDepth.current - 1); if (dragDepth.current === 0 && capRef.current === 'catch') setCap('rest'); };
-    const onDrop = (e: DragEvent) => { e.preventDefault(); dragDepth.current = 0; const f = e.dataTransfer?.files?.[0]; if (f && /^image\/|application\/pdf/.test(f.type)) void startReadRef.current(f); else if (capRef.current === 'catch') setCap('rest'); };
+    const onEnter = (e: DragEvent) => { if (e.dataTransfer?.types?.includes('Files')) dragDepth.current++; };
+    const onLeave = () => { dragDepth.current = Math.max(0, dragDepth.current - 1); };
+    const onDrop = (e: DragEvent) => { e.preventDefault(); dragDepth.current = 0; const f = e.dataTransfer?.files?.[0]; if (f && /^image\/|application\/pdf/.test(f.type)) { setNewFile(f); setNewOpen(true); } };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && capRef.current !== 'rest') setCap('rest');
       if (e.key === 'Enter' && capRef.current === 'read' && (e.target as HTMLElement)?.tagName !== 'BUTTON') { e.preventDefault(); void fileBillRef.current(); }
@@ -539,8 +586,8 @@ function BillsDesktop() {
   // ?party=<id> — arriving from the search's "Bills" row for one vendor.
   const [searchParams] = useSearchParams();
   const partyId = searchParams.get('party');
-  // ?new=1 — the mobile nav FAB opens the capture straight into type-it-in.
-  useEffect(() => { if (searchParams.get('new') === '1') void startReadRef.current(null); }, [searchParams]);
+  // ?new=1 (nav "Add bill" deep-link) opens the composer, same as the button.
+  useEffect(() => { if (searchParams.get('new') === '1') { setNewFile(null); setNewOpen(true); } }, [searchParams]);
   const shown = useMemo(() => bills.filter(b =>
     (!partyId || b.vendorId === partyId) &&
     (!site || b.site === site) &&
@@ -615,16 +662,18 @@ function BillsDesktop() {
           <div className="fx glow" aria-hidden="true" />
           <div className="fx grid" aria-hidden="true" />
           <div className="hwrap">
+          {/* "Add bill" opens the composer as a centered popup over the page (see NewBillModal, below)
+              — the header no longer morphs; it just stays the register's own header. */}
           <div className="hero-top">
             <div>
-              <h1>{cap === 'rest' ? 'Vendor Bills' : (cap === 'read' && reading) ? <>Uploading<span className="dots"><i /><i /><i /></span></> : 'New bill'}</h1>
+              <h1 className="h1morph">{cap === 'rest' ? 'Vendor Bills' : (cap === 'read' && reading) ? <>Uploading<span className="dots"><i /><i /><i /></span></> : 'New bill'}</h1>
               {cap === 'rest' && <p className="sub">Every bill recorded across your sites. Purchase orders, payments and ledgers all point back here.</p>}
             </div>
             <div>
               <div className="actions">
-                <button className="tb-btn primary" onClick={() => setCap(cap === 'rest' ? 'catch' : 'rest')}
+                <button key="add" className="tb-btn primary" onClick={() => { setNewFile(null); setNewOpen(true); }}
                   title="Add a bill — drop the paper and we'll read it, or type it in. You can also drop files anywhere on this page.">
-                  <IconUpload /><span>{cap === 'rest' ? 'Add bill' : 'Close'}</span>
+                  <IconUpload /><span>Add bill</span>
                 </button>
               </div>
               {cap === 'rest' && <div className="hint"><IconDrop />or drop a bill anywhere on this page</div>}
@@ -632,6 +681,7 @@ function BillsDesktop() {
           </div>
 
           <div className="hero-stage">
+          <>
           {/* REST — the figures */}
           {cap === 'rest' && (
           <div className="figure">
@@ -741,9 +791,16 @@ function BillsDesktop() {
             </div>
           </div>
           )}
+          </>
           </div>
         </div></header>
         <input ref={captureFileRef} type="file" accept="image/*,application/pdf" hidden onChange={e => { const f = e.target.files?.[0]; e.currentTarget.value = ''; if (f) void startRead(f); }} />
+
+        {/* Add bill — a centered popup over the whole page (portals to <body>). */}
+        {newOpen && (
+          <NewBillModal open initialFile={newFile} commit={mintBill}
+            onClose={() => { setNewOpen(false); setNewFile(null); qc.invalidateQueries({ queryKey: ['bills'] }); }} />
+        )}
 
         <div className="controls"><div className="hwrap">
           <div className="bar">
@@ -812,7 +869,6 @@ function BillsDesktop() {
           </div>
         )}
       </div>
-
     </div>
   );
 }
@@ -828,14 +884,16 @@ function BillDetailView({ id }: { id: string }) {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { show } = useSnackbar();
+  const orgId = useOrgId();
   const { data: b, isLoading } = useQuery({ queryKey: ['bill', id], queryFn: () => loadBillDetail(id) });
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [linkOpen, setLinkOpen] = useState(false);
 
   // Back goes where you came FROM. Opening a bill from a PO and being returned to the bills register
   // loses the thread you were pulling — you were reading that order, not the register.
-  const { state } = useLocation();
-  const from = (state ?? null) as { backTo?: string; backLabel?: string } | null;
+  const location = useLocation();
+  const from = (location.state ?? null) as { backTo?: string; backLabel?: string } | null;
   const backTo = from?.backTo ?? '/bills';
   const backLabel = from?.backLabel ?? 'Bills';
   const goBack = () => navigate(backTo);
@@ -922,18 +980,25 @@ function BillDetailView({ id }: { id: string }) {
             )}
 
             <div className="card">
-              <div className="cardhead">Referenced by</div>
+              <div className="cardhead">
+                Referenced by
+                {remaining > 0.5 && b.vendorId && (
+                  <button className="lnk" onClick={() => setLinkOpen(true)}>+ Link a payment</button>
+                )}
+              </div>
               {b.poId && (
                 <div className="refrow">
                   <div className="what"><span className="kind">Order</span><span className="chip">{b.poId}</span></div>
                   <button className="lnk" onClick={() => navigate(`/purchase-orders/${b.poId}`)}>Open</button>
                 </div>
               )}
+              {/* Each payment opens its own transaction; Back there returns to this bill. */}
               {b.payments.map(p => (
-                <div className="refrow" key={p.txnId}>
-                  <div className="what"><span className="kind">Payment</span><span>{p.mode || 'Payment'} · {fmtDate(p.date)}</span></div>
-                  <span className="lr">{inr(p.amount)}</span>
-                </div>
+                <button className="refrow tap" key={p.txnId}
+                  onClick={() => navigate(`/ledger/${p.txnId}`, { state: { backTo: location.pathname, backLabel: b.vendor } })}>
+                  <span className="what"><span className="kind">Payment</span><span>{p.mode || 'Payment'} · {fmtDate(p.date)}</span></span>
+                  <span className="lr">{inr(p.amount)} <span className="go">›</span></span>
+                </button>
               ))}
               {!b.poId && b.payments.length === 0 && <div className="refrow"><span className="site">Nothing points here yet.</span></div>}
             </div>
@@ -953,6 +1018,112 @@ function BillDetailView({ id }: { id: string }) {
         </div>
       </div>
       <ImageLightbox url={lightbox} title="Bill document" onClose={() => setLightbox(null)} />
+      {linkOpen && b.vendorId && (
+        <DeskLinker
+          bill={b}
+          need={remaining}
+          orgId={orgId}
+          onClose={() => setLinkOpen(false)}
+          onDone={(msg) => {
+            setLinkOpen(false);
+            show(msg);
+            qc.invalidateQueries({ queryKey: ['bill', id] });
+            qc.invalidateQueries({ queryKey: ['bills'] });
+            qc.invalidateQueries({ queryKey: ['party_ledger'] });
+            qc.invalidateQueries({ queryKey: ['weekly_payments'] });
+            qc.invalidateQueries({ queryKey: ['po_detail'] });
+          }}
+          onFail={(m) => show(m, { type: 'error' })}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Point one or more loose Book payments at this bill, from the desktop bill page — the mobile bill
+ * page has had this for a while; this is the desktop's version of the same two-step picker. It never
+ * creates money: it re-points the free part of a payment already in the ledger (linkPaymentToBill →
+ * set_txn_allocations). The pool is this vendor's payments on THIS site (plus any not yet placed on a
+ * site); another project's money is never offered.
+ */
+function DeskLinker({ bill, need, orgId, onClose, onDone, onFail }: {
+  bill: BillDetail; need: number; orgId: string | null | undefined;
+  onClose: () => void; onDone: (msg: string) => void; onFail: (m: string) => void;
+}) {
+  const vendorId = bill.vendorId!;
+  const projectId = bill.projectId ?? bill.poProjectId ?? null;
+  const [picked, setPicked] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+
+  const { data: pool, isLoading } = useQuery({
+    queryKey: ['bill_linkable', vendorId, projectId, need],
+    enabled: !!vendorId,
+    queryFn: () => loadLinkablePayments(vendorId, projectId, need),
+  });
+
+  const alloc = useMemo(() => {
+    const byId: Record<string, LinkablePayment> = {};
+    (pool ?? []).forEach((t) => { byId[t.txnId] = t; });
+    return allocateAcross(picked.map((pid) => byId[pid]).filter(Boolean), need);
+  }, [picked, pool, need]);
+  const used = alloc.filter((p) => p.use > 0);
+  const got = used.reduce((s, p) => s + p.use, 0);
+  const rest = Math.max(0, need - got);
+
+  async function link() {
+    if (!orgId || busy || !used.length) return;
+    setBusy(true);
+    try {
+      for (const p of used) await linkPaymentToBill(orgId, p.pay, allocTargetOf(bill), p.use);
+      onDone(rest <= 0 ? 'Linked. This bill is paid.' : `Linked. ${inr(rest)} still to cover.`);
+    } catch (e) { setBusy(false); onFail(e instanceof Error ? e.message : 'Could not link that payment'); }
+  }
+
+  return (
+    <div className="scrim" onClick={onClose}>
+      <div className="sheet-m linker" onClick={(e) => e.stopPropagation()}>
+        <div className="sh">
+          <h3>Link a payment</h3>
+          <span className="qn">{bill.vendor}{bill.site ? ` · ${bill.site}` : ''}</span>
+        </div>
+        <div className="sb">
+          <p className="ltgt">
+            {inr(need)} to cover{bill.billNo ? ` · bill ${bill.billNo}` : ''}
+            {got > 0 && <> — <b>{inr(got)}</b> picked, <b>{inr(rest)}</b> left</>}
+          </p>
+          {isLoading ? (
+            <div className="lnone">Looking for payments…</div>
+          ) : pool?.length ? (
+            <div className="lcands">
+              {pool.map((t) => {
+                const a = alloc.find((x) => x.pay.txnId === t.txnId);
+                const note = [t.note, t.free < t.total ? `${inr(t.total - t.free)} already on another bill` : ''].filter(Boolean).join(' · ') || 'In Book';
+                return (
+                  <button key={t.txnId} type="button" className="lcand" aria-pressed={picked.includes(t.txnId)}
+                    onClick={() => setPicked((p) => (p.includes(t.txnId) ? p.filter((x) => x !== t.txnId) : [...p, t.txnId]))}>
+                    <span className="ck">{picked.includes(t.txnId) ? '✓' : ''}</span>
+                    <span className="lm">
+                      <b>{fmtDate(t.date)}{t.mode ? ` · ${t.mode}` : ''}</b>
+                      <span>{note}{a && a.use < t.free && a.use > 0 ? ` · ${inr(a.use)} used here` : ''}</span>
+                    </span>
+                    <em className="lr">{inr(t.free)}</em>
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="lnone">No payment to {bill.vendor}{bill.site ? ` at ${bill.site}` : ''} is waiting without a bill. When one is entered in Book, it shows up here.</div>
+          )}
+        </div>
+        <div className="sf">
+          <span className="amt-tot">{used.length ? `${inr(got)} · ${used.length} ${used.length === 1 ? 'payment' : 'payments'}` : ''}</span>
+          <div className="acts">
+            <button className="btn-ghost" onClick={onClose}>Cancel</button>
+            <button className="btn-prim" disabled={!used.length || busy} onClick={link}>{busy ? 'Linking…' : 'Link'}</button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

@@ -197,6 +197,83 @@ export const NBX_CSS = `
 .nbx.sheet .btn-quiet:hover{background:rgba(var(--cream),.13)}
 .nbx.sheet .f2{gap:16px}
 
+/* ---------- the Add-bill redesign: opens on the form, a flexible date, chips, a live status ---------- */
+/* the photo drop, now a compact option inside the form rather than a gate in front of it */
+.nbx .dropmini{display:flex; align-items:center; gap:12px; width:100%; text-align:left; cursor:pointer;
+  border:1.5px dashed #D4C4A8; border-radius:14px; background:transparent; color:var(--walnut);
+  padding:12px 16px; margin:2px 0 18px; font-family:var(--sans); font-size:13.5px; transition:border-color .2s, background .2s}
+.nbx .dropmini:hover,.nbx .dropmini.over{border-color:var(--walnut); background:#FCFAF3}
+.nbx .dropmini .dz-ic{font-size:20px; flex:none}
+.nbx .dropmini b{color:var(--ink); font-weight:600}
+/* Today / Yesterday quick-picks riding on the date label */
+.nbx .flabel .dquick{margin-left:auto; display:flex; gap:12px}
+.nbx .flabel .dquick button{background:none; border:0; padding:0; cursor:pointer; font-family:var(--sans);
+  font-size:11px; font-weight:600; letter-spacing:0; text-transform:none; color:var(--walnut); text-decoration:underline; text-underline-offset:3px}
+.nbx .flabel .dquick button:hover{color:var(--ink)}
+/* the date field: input + calendar button + the echo line under it */
+.nbx .datewrap{position:relative; display:flex; align-items:center; gap:8px; border-bottom:1px solid var(--rule)}
+.nbx .datewrap .finput{border-bottom:0; padding-bottom:8px}
+.nbx .finput.bad{color:#B4431C}
+.nbx .calbtn{flex:none; width:34px; height:34px; display:grid; place-items:center; border:0; border-radius:9px;
+  background:transparent; color:var(--soft); cursor:pointer}
+.nbx .calbtn:hover,.nbx .calbtn.on{background:var(--cream); color:var(--ink)}
+.nbx .decho{min-height:17px; margin-top:6px; font-size:12.5px; line-height:1.35; color:var(--soft)}
+.nbx .decho.ok{color:var(--sage)} .nbx .decho.warn{color:#C0603F}
+.nbx .frow.miss .finput,.nbx .frow.miss .datewrap,.nbx .frow.miss .amtline{border-bottom-color:#E0987C}
+/* the calendar popover */
+.nbx .cal{position:absolute; top:calc(100% + 8px); left:0; width:300px; z-index:30; background:var(--paper);
+  border:1px solid var(--rule); border-radius:16px; box-shadow:0 24px 54px -26px rgba(42,36,28,.5); padding:14px 14px 10px}
+.nbx .cal-top{display:flex; align-items:center; justify-content:space-between; margin-bottom:10px}
+.nbx .cal-mo{font-family:var(--serif); font-size:19px} .nbx .cal-mo em{font-style:normal; font-size:13px; color:var(--soft); margin-left:5px}
+.nbx .cal-nav button{width:32px; height:32px; border:1px solid var(--rule); border-radius:8px; background:var(--paper); color:var(--ink); cursor:pointer; font-size:15px; line-height:1}
+.nbx .cal-nav button+button{margin-left:6px} .nbx .cal-nav button:disabled{color:#CFC4B0; cursor:not-allowed}
+.nbx .cal-grid{display:grid; grid-template-columns:repeat(7,1fr); gap:2px}
+.nbx .cal-wd{height:24px; display:grid; place-items:center; font-size:10.5px; font-weight:600; color:var(--soft)}
+.nbx .cal-day{height:36px; border:0; border-radius:9px; background:transparent; color:var(--ink); cursor:pointer; font:inherit; font-size:13.5px}
+.nbx .cal-day:hover:not(:disabled){background:var(--cream)} .nbx .cal-day.blank{visibility:hidden}
+.nbx .cal-day:disabled{color:#CFC4B0; cursor:not-allowed}
+.nbx .cal-day.today{box-shadow:inset 0 0 0 1.5px var(--terra); font-weight:600}
+.nbx .cal-day.sel{background:var(--terra); color:#fff; font-weight:600}
+.nbx .cal-foot{padding-top:10px; margin-top:6px; border-top:1px solid var(--rule); text-align:right; font-size:11px; color:var(--soft)}
+/* amount: the ₹ and the lakh/crore echo */
+.nbx .amtline{display:flex; align-items:center; gap:8px; border-bottom:1px solid var(--rule)}
+.nbx .amtline .rs{font-family:var(--mono); font-size:18px; color:var(--soft)}
+.nbx .amtline .finput{border-bottom:0}
+.nbx .ahint{min-height:17px; margin-top:6px; font-size:12.5px; color:var(--soft)}
+/* site chips replace the select */
+.nbx .chips{display:flex; flex-wrap:wrap; gap:8px}
+.nbx .chips .chip{display:inline-flex; align-items:center; gap:6px; height:38px; padding:0 15px; border-radius:999px;
+  border:1px solid var(--rule); background:transparent; color:var(--walnut); cursor:pointer; font-family:var(--sans); font-size:14px; transition:all .18s}
+.nbx .chips .chip:hover{border-color:var(--walnut)}
+.nbx .chips .chip.on{background:var(--terra); border-color:var(--terra); color:#fff; font-weight:500}
+.nbx .chips .chip .ck{font-size:11px}
+/* the live status line + the Enter hint on the button */
+.nbx .fstatus{font-size:12.5px; color:var(--soft); margin-right:auto; align-self:center}
+.nbx .fstatus.ok{color:var(--sage)} .nbx .fstatus.warn{color:#C0603F}
+.nbx .btn{display:inline-flex; align-items:center; gap:10px}
+.nbx .btn.dim{opacity:.5}
+.nbx .btn .kbd{font-family:var(--mono); font-size:10px; padding:2px 6px; border-radius:5px; background:rgba(255,255,255,.18)}
+
+/* the phone drawer re-inks the new bits for night */
+.nbx.sheet .dropmini{border-color:rgba(var(--cream),.22); color:rgba(var(--cream),.82)}
+.nbx.sheet .dropmini:hover,.nbx.sheet .dropmini.over{border-color:rgba(var(--cream),.45); background:rgba(var(--cream),.06)}
+.nbx.sheet .dropmini b{color:rgb(var(--cream))}
+.nbx.sheet .flabel .dquick button{color:rgba(var(--cream),.8)} .nbx.sheet .flabel .dquick button:hover{color:rgb(var(--cream))}
+.nbx.sheet .datewrap,.nbx.sheet .amtline{border-bottom-color:rgba(var(--cream),.16)}
+.nbx.sheet .calbtn{color:rgba(var(--cream),.7)} .nbx.sheet .calbtn:hover,.nbx.sheet .calbtn.on{background:rgba(var(--cream),.1); color:rgb(var(--cream))}
+.nbx.sheet .decho{color:rgba(var(--cream),.56)} .nbx.sheet .decho.ok{color:#A9D6B1} .nbx.sheet .decho.warn{color:#EFAE93}
+.nbx.sheet .amtline .rs{color:rgba(var(--cream),.6)} .nbx.sheet .ahint{color:rgba(var(--cream),.56)}
+.nbx.sheet .cal{background:#1F150E; border-color:rgba(var(--cream),.12); box-shadow:0 24px 54px -22px rgba(0,0,0,.8)}
+.nbx.sheet .cal-mo{color:rgb(var(--cream))} .nbx.sheet .cal-mo em{color:rgba(var(--cream),.56)}
+.nbx.sheet .cal-nav button{background:rgba(var(--cream),.06); border-color:rgba(var(--cream),.14); color:rgb(var(--cream))}
+.nbx.sheet .cal-wd{color:rgba(var(--cream),.5)} .nbx.sheet .cal-day{color:rgb(var(--cream))} .nbx.sheet .cal-day:hover:not(:disabled){background:rgba(var(--cream),.08)}
+.nbx.sheet .cal-day:disabled{color:rgba(var(--cream),.3)} .nbx.sheet .cal-foot{color:rgba(var(--cream),.5); border-top-color:rgba(var(--cream),.12)}
+.nbx.sheet .chips .chip{border-color:rgba(var(--cream),.24); color:rgba(var(--cream),.85)}
+.nbx.sheet .chips .chip:hover{border-color:rgba(var(--cream),.45)}
+.nbx.sheet .chips .chip.on{background:var(--clay); border-color:var(--clay); color:#fff}
+.nbx.sheet .fstatus{color:rgba(var(--cream),.6)} .nbx.sheet .fstatus.ok{color:#A9D6B1} .nbx.sheet .fstatus.warn{color:#EFAE93}
+.nbx.sheet .frow.miss .datewrap,.nbx.sheet .frow.miss .amtline,.nbx.sheet .frow.miss .finput{border-bottom-color:#E0987C}
+
 @media (prefers-reduced-motion:reduce){
   .nbx .modal,.nbx .dupe{animation:none}
   .nbx .rd-doc i{animation:none; opacity:.4; top:16px}

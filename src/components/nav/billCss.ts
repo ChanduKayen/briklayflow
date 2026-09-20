@@ -17,6 +17,9 @@ export const BILL_CSS = `
 .mnav .rowC .c{flex:none;width:16px;height:16px;fill:none;stroke:rgba(var(--cream),.35);stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
 .mnav .waLine{flex:none;display:flex;gap:10px;align-items:flex-start;margin:6px 6px 0;font-size:13px;line-height:1.45;color:rgba(var(--cream),.55);text-wrap:pretty}
 .mnav .waLine svg{flex:none;width:16px;height:16px;margin-top:2px;fill:#3DBB6C}
+/* a quiet way in for a bill with no paper — subtle, never competing with the photo cards */
+.mnav .manLink{flex:none;align-self:flex-start;margin:14px 6px 2px;padding:2px 0;border:0;background:none;font:inherit;font-size:13.5px;color:rgba(var(--cream),.6);text-decoration:underline;text-underline-offset:3px;text-decoration-color:rgba(var(--cream),.28);cursor:pointer}
+.mnav .manLink:active{color:rgb(var(--cream))}
 
 /* read — the bill itself is on screen while a ledger rule passes over it */
 .mnav .reading{flex:1;display:flex;gap:16px;align-items:flex-start;padding-top:6px}

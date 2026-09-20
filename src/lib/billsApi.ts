@@ -573,8 +573,8 @@ export interface UnpaidBill {
 }
 
 /**
- * The vendor's bills that still want money — and, when `forTxnId` is given, the bills THAT payment
- * already settles.
+ * The vendor's bills that still want money — on `projectId`'s site when one is given — and, when
+ * `forTxnId` is given, the bills THAT payment already settles.
  *
  * Re-opening the picker to change a payment's attribution used to show a list the payment's own bill
  * was missing from: it had been paid in full, so `remaining` was 0 and it fell through the filter.
@@ -583,9 +583,9 @@ export interface UnpaidBill {
  * which puts the bill back in the list at the amount it would owe if this payment went away, and
  * `ownAllocated` says how much of it this payment is holding — enough for the picker to re-tick it.
  */
-export async function loadUnpaidBillsForVendor(stakeholderId: string, forTxnId?: string | null): Promise<UnpaidBill[]> {
+export async function loadUnpaidBillsForVendor(stakeholderId: string, projectId?: string | null, forTxnId?: string | null): Promise<UnpaidBill[]> {
   const [bR, projR, poR] = await Promise.all([
-    supabase.from('bills').select('id, project_id, bill_no, bill_date, amount, doc_url, created_at').eq('stakeholder_id', stakeholderId),
+    supabase.from('bills').select('id, po_id, project_id, bill_no, bill_date, amount, doc_url, created_at').eq('stakeholder_id', stakeholderId),
     supabase.from('projects').select('project_id, name'),
     supabase.from('purchase_orders').select(`po_id, project_id, vendor_bill_number, vendor_bill_doc_url, vendor_bill_url, ${BILL_DATE_COLUMNS}, status, approval_status`)
       .eq('stakeholder_id', stakeholderId).eq('approval_status', 'APPROVED')
@@ -629,9 +629,13 @@ export async function loadUnpaidBillsForVendor(stakeholderId: string, forTxnId?:
     const amount = num(p.vendor_bill_amount), paid = Math.min(amount, paidByPo[p.po_id] || 0);
     out.push({ id: p.po_id, kind: 'po', billNo: p.vendor_bill_number || p.po_id, billDate: billDateOf(p), amount, paid, remaining: amount - paid, projectId: p.project_id ?? null, site: p.project_id ? (projName[p.project_id] || p.project_id) : null, docUrl: p.vendor_bill_doc_url || p.vendor_bill_url || null, ownAllocated: ownByPo[p.po_id] || 0 });
   }
-  // A bill this payment is already on stays in the list even when nothing else is left to pay on it —
-  // otherwise "Change" cannot show, or keep, the choice that was made.
-  return out.filter(b => b.remaining > 0.5 || b.ownAllocated > 0).sort((a, b) => (a.billDate || '').localeCompare(b.billDate || '')); // oldest first
+  // When the payment is for a site, show only that vendor's bills for THAT site (plus any not yet
+  // tagged to a site) — never another project's bills, even for the same vendor.
+  const inProject = (b: UnpaidBill) => !projectId || b.projectId === projectId || b.projectId == null;
+  // A bill this payment is already on is shown whatever else is true of it — nothing left to pay,
+  // another site — or "Change" cannot show, or keep, the choice that was made.
+  return out.filter(b => b.ownAllocated > 0 || (b.remaining > 0.5 && inProject(b)))
+    .sort((a, b) => (a.billDate || '').localeCompare(b.billDate || '')); // oldest first
 }
 
 // Record a payment's bill allocation. Replaces the txn's full allocation set (must sum to its total):

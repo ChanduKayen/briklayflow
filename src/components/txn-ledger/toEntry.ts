@@ -17,6 +17,8 @@ export type Entry = {
   /** for a wallet transfer (src 'topup'): 'in' = a float (Bank → wallet), 'out' = a return (Wallet → bank) */
   walletDir: 'in' | 'out' | '';
   party: boolean; clip: boolean; linked: boolean; wallet: string; walletId: string; via: string; cat: string;
+  /** who + type, for attributing a payment to a payable */
+  stakeholderId: string | null; payeeType: string | null;
   /** the paper this entry carries, as stored — signed only when it is looked at */
   bill: string; proof: string;
   voided: boolean; status: string | null; allocs: number;
@@ -45,6 +47,8 @@ export function toEntry(t: LedgerRaw): Entry {
     src: isWalletTransfer(t) ? 'topup' : isWalletSpend(t) ? 'wallet' : 'direct',
     walletDir: (t.wallet_dir === 'in' || t.wallet_dir === 'out') ? t.wallet_dir : '',
     party: !!t.stakeholder_id, clip: !!t.bill_doc_url || !!t.proof_document_url, linked: !isNotLinked(t),
+    stakeholderId: t.stakeholder_id ? String(t.stakeholder_id) : null,
+    payeeType: (t.stakeholders as { type?: string } | null)?.type ?? null,
     bill: String(t.bill_doc_url ?? ''), proof: String(t.proof_document_url ?? ''),
     wallet: (t.wallets as { holder_name?: string } | null)?.holder_name ?? '', walletId: String(t.wallet_id ?? ''),
     via: String(t.payment_mode ?? ''), cat: t.category ? (costCodeLabel(String(t.category)) || String(t.category)) : '',

@@ -104,7 +104,7 @@ export function BillAllocateSheet({ txnId, orgId, stakeholderId, vendorName, amo
   // change an attribution has to open on the attribution it is changing, not on a guess.
   useEffect(() => {
     let live = true;
-    loadUnpaidBillsForVendor(stakeholderId, txnId).then(bs => {
+    loadUnpaidBillsForVendor(stakeholderId, defaultProjectId, txnId).then(bs => {
       if (!live) return;
       setBills(bs);
       const own = bs.filter(b => b.ownAllocated > 0);
@@ -126,7 +126,7 @@ export function BillAllocateSheet({ txnId, orgId, stakeholderId, vendorName, amo
       }
     }).catch(e => { if (live) setErr(errMsg(e)); });
     return () => { live = false; };
-  }, [stakeholderId, txnId, amount, prefill]);
+  }, [stakeholderId, txnId, amount, prefill, defaultProjectId]);
 
   /**
    * A bill has just arrived through the door — either freshly minted, or the one the dedupe found
@@ -140,7 +140,7 @@ export function BillAllocateSheet({ txnId, orgId, stakeholderId, vendorName, amo
   const adoptBill = async (billId: string) => {
     setBusy('reading'); setErr(null);
     try {
-      const bs = await loadUnpaidBillsForVendor(stakeholderId, txnId);
+      const bs = await loadUnpaidBillsForVendor(stakeholderId, defaultProjectId, txnId);
       setBills(bs);
       const fresh = bs.find(b => b.kind === 'bill' && b.id === billId);
       if (!fresh) { setErr('That bill is on file, but nothing is left to pay on it.'); return; }

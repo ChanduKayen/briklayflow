@@ -488,7 +488,7 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
   const navigate = useNavigate();
   const { rows, isLoading } = usePOListData(projectId);
   const { data: openRfqs = [] } = useOpenRfqs(projectId);
-  const [filter, setFilter] = useState<'all' | 'mine' | 'late' | 'open' | 'vendor' | 'done' | 'quotes' | 'approvals' | 'tosend' | 'onway' | 'live' | 'archive' | 'nobill' | 'topay' | 'atsite'>('all');
+  const [filter, setFilter] = useState<'all' | 'active' | 'fulfilled' | 'mine' | 'late' | 'open' | 'vendor' | 'done' | 'quotes' | 'approvals' | 'tosend' | 'onway' | 'live' | 'archive' | 'nobill' | 'topay' | 'atsite'>('active');
   const [sortK, setSortK] = useState<'vendor' | 'site' | 'ordered' | 'delivery' | 'value' | 'balance'>('ordered');
   const [sortDir, setSortDir] = useState(-1);
   const [q, setQ] = useState('');
@@ -594,6 +594,14 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
 
   const FILTERS: Record<string, (p: PORow) => boolean> = {
     all: () => true,
+    // ── the three the list now shows ──
+    // Active: an order still in motion — placed/sent/partly-or-fully received but not yet fully billed
+    //   AND paid. Everything between a quote and a finished order. (Cancelled never reaches here.)
+    active: (p) => !p.cancelled && !p.rfq && !settled(p),
+    // Fulfilled: received in full, billed, and nothing left to pay — nothing more to do with it.
+    fulfilled: settled,
+    // Quotes: a quotation/enquiry (a value-0 RFQ-style PO); open RFQ entities are merged in alongside.
+    quotes: (p) => p.rfq,
     mine,
     late,
     open: (p) => !p.cancelled && !p.rfq && !full(p),
@@ -631,12 +639,14 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
   }, [rows, filter, q, sortK, sortDir, partyId]);
 
   // RFQs awaiting quotes, interleaved with POs by date (only in All / Quotes).
-  const rfqShown = useMemo(() => (filter === 'all' || filter === 'quotes')
+  // Open RFQ entities show only under the Quotes chip (quotations are their own bucket now, not
+  // interleaved into Active). They merge with any value-0 RFQ-style POs there.
+  const rfqShown = useMemo(() => (filter === 'quotes')
     ? openRfqs.filter(r => !q || ('quote request enquiry ' + r.site + ' ' + r.summary + ' ' + r.rfq_id).toLowerCase().includes(q))
     : [], [openRfqs, filter, q]);
   type MergedRow = { kind: 'po'; po: PORow } | { kind: 'rfq'; rfq: RfqRow };
   const merged: MergedRow[] = useMemo(() => {
-    if (filter === 'quotes') return rfqShown.map(r => ({ kind: 'rfq' as const, rfq: r }));
+    // Quotes = value-0 RFQ-style POs (in `list` via FILTERS.quotes) merged with open RFQ entities.
     const rows: MergedRow[] = list.map(p => ({ kind: 'po' as const, po: p }));
     if (rfqShown.length === 0) return rows;
     // Slot each quote into the list by when it was created (real created_at, not
@@ -659,11 +669,6 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
   const fMine = rows.filter(mine).length;
   const fOpen = live.filter(p => !full(p)).reduce((a, p) => a + p.value, 0);
   const fBal = live.reduce((a, p) => a + Math.max(0, balance(p)), 0);
-  const cAll = rows.length;
-  const cMine = fMine;
-  const cVendor = rows.filter(FILTERS.vendor).length;
-  const cDone = rows.filter(FILTERS.done).length;
-  const cApprovals = rows.filter(FILTERS.approvals).length;
   const cToSend = rows.filter(FILTERS.tosend).length;
   const footTotal = list.reduce((a, p) => a + (p.cancelled ? 0 : p.value), 0);
 
@@ -776,16 +781,11 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
     // Chips are states again — a trade per chip made a row nobody could scan. They are ordered the
     // way the money moves: what has no bill, then what is owed, and only then the goods. Approvals
     // and Quotes lead when they exist because they are somebody waiting on you.
-    const mFilter = FILTERS[filter] ? filter : 'live';
-    const liveRows = rows.filter(FILTERS.live);
+    const mFilter = FILTERS[filter] ? filter : 'active';
     const mChips: { k: typeof filter; label: string; n: number; tone?: 'gold' | 'terra' }[] = [
-      ...(cApprovals > 0 ? [{ k: 'approvals' as const, label: 'To approve', n: cApprovals, tone: 'gold' as const }] : []),
-      ...(rfqShown.length > 0 ? [{ k: 'quotes' as const, label: 'Quotes', n: rfqShown.length, tone: 'gold' as const }] : []),
-      { k: 'live', label: 'All', n: liveRows.length },
-      { k: 'nobill', label: 'Awaiting bill', n: rows.filter(FILTERS.nobill).length },
-      { k: 'topay', label: 'To pay', n: rows.filter(FILTERS.topay).length, tone: 'terra' as const },
-      { k: 'atsite', label: 'At site', n: rows.filter(FILTERS.atsite).length },
-      { k: 'archive', label: 'Archive', n: rows.filter(settled).length },
+      { k: 'active', label: 'Active', n: rows.filter(FILTERS.active).length },
+      { k: 'fulfilled', label: 'Fulfilled', n: rows.filter(settled).length },
+      { k: 'quotes', label: 'Quotes', n: openRfqs.length + rows.filter(p => p.rfq).length, tone: 'gold' as const },
     ];
     // A quote request is not a PO — it lives in its own table and has no vendor, value or
     // delivery — so the desktop merges the two lists by date rather than joining them. The phone
@@ -794,12 +794,12 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
       const pos = rows.filter(FILTERS[mFilter])
         .filter(p => !q || (p.vendor + p.id + p.site + p.items.map(i => i.n).join(' ')).toLowerCase().includes(q))
         .map(p => ({ kind: 'po' as const, po: p }));
-      const quotes = (mFilter === 'live' || mFilter === 'quotes')
+      // On Quotes, the value-0 quote POs (pos, via FILTERS.quotes) merge with the open RFQ entities.
+      const quotes = (mFilter === 'quotes')
         ? rfqShown
             .filter(r => !q || (r.site + r.summary).toLowerCase().includes(q))
             .map(r => ({ kind: 'rfq' as const, rfq: r }))
         : [];
-      if (mFilter === 'quotes') return quotes;
       return [...pos, ...quotes].sort((a, b) =>
         D(b.kind === 'po' ? b.po.createdAt : b.rfq.created_at).getTime()
         - D(a.kind === 'po' ? a.po.createdAt : a.rfq.created_at).getTime());
@@ -821,7 +821,7 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
             <b>{fmt(fBal)}</b> open with vendors · <b>{fmt(fOpen)}</b> on the way
             {cToSend > 0 && (
               <button type="button" className={`m-wf${mFilter === 'tosend' ? ' on' : ''}`}
-                onClick={() => setFilter(mFilter === 'tosend' ? 'live' : 'tosend')}>{cToSend} to send</button>
+                onClick={() => setFilter(mFilter === 'tosend' ? 'active' : 'tosend')}>{cToSend} to send</button>
             )}
           </div>
         </div>
@@ -829,7 +829,7 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
         <div className="m-chips">
           {mChips.map(c => (
             <button key={c.k} className={`m-chip${c.tone ? ' ' + c.tone : ''}${mFilter === c.k ? ' on' : ''}`}
-              onClick={() => setFilter(mFilter === c.k && c.k !== 'live' ? 'live' : c.k)}>
+              onClick={() => setFilter(mFilter === c.k && c.k !== 'active' ? 'active' : c.k)}>
               {c.label}<em>{c.n}</em>
             </button>
           ))}
@@ -922,11 +922,9 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
           <SearchBar label="orders" />
           <PartyFilterChip what="Orders" />
           <div className="chips">
-            <button className={`chip${filter === 'all' ? ' on' : ''}`} onClick={() => setFilter('all')}>All <span className="n">{cAll}</span></button>
-            <button className={`chip warn${filter === 'mine' ? ' on' : ''}`} onClick={() => setFilter('mine')}>To receive <span className="n">{cMine}</span></button>
-            <button className={`chip${filter === 'vendor' ? ' on' : ''}`} onClick={() => setFilter('vendor')}>On the way <span className="n">{cVendor}</span></button>
-            <button className={`chip quote${filter === 'quotes' ? ' on' : ''}`} onClick={() => setFilter('quotes')}>Quotations <span className="n">{openRfqs.length}</span></button>
-            <button className={`chip${filter === 'done' ? ' on' : ''}`} onClick={() => setFilter('done')}>Received <span className="n">{cDone}</span></button>
+            <button className={`chip${filter === 'active' ? ' on' : ''}`} onClick={() => setFilter('active')}>Active <span className="n">{rows.filter(FILTERS.active).length}</span></button>
+            <button className={`chip${filter === 'fulfilled' ? ' on' : ''}`} onClick={() => setFilter('fulfilled')}>Fulfilled <span className="n">{rows.filter(settled).length}</span></button>
+            <button className={`chip quote${filter === 'quotes' ? ' on' : ''}`} onClick={() => setFilter('quotes')}>Quotes <span className="n">{openRfqs.length + rows.filter(p => p.rfq).length}</span></button>
           </div>
         </div>
 

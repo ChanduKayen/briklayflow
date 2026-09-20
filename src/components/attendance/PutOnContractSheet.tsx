@@ -30,7 +30,6 @@ export function PutOnContractSheet({ ctx, onClose, onDone, onError }: {
   const [woId, setWoId] = useState<string>('');
   const [stages, setStages] = useState<WOStage[] | null>(null);
   const [stageIds, setStageIds] = useState<string[]>([]);
-  const [mode, setMode] = useState<ContractMode | null>(ctx.accrued.amount > 0 ? null : 'fold');
   const [measure, setMeasure] = useState<MeasureMode>('percent');   // how the contract is valued
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
@@ -58,8 +57,7 @@ export function PutOnContractSheet({ ctx, onClose, onDone, onError }: {
   const toggleStage = (id: string) => setStageIds((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
   // At least one phase must be chosen (a single-phase contract is auto-selected above).
   const phasesOk = !!stages && (stages.length <= 1 || stageIds.length > 0);
-  // In 'wages' mode the past-wages keep/fold question is moot (day-wages keep counting), so it isn't required.
-  const canConfirm = !!woId && phasesOk && (measure === 'wages' || ctx.accrued.amount <= 0 || mode != null) && !busy && !done;
+  const canConfirm = !!woId && phasesOk && !busy && !done;
 
   async function confirm() {
     if (!woId || !canConfirm) return;
@@ -67,7 +65,8 @@ export function PutOnContractSheet({ ctx, onClose, onDone, onError }: {
     const picked = measure === 'wages'
       ? (stageIds.length ? stageIds : null)
       : (stages && stageIds.length && stageIds.length < stages.length ? stageIds : null);
-    const effMode: ContractMode = ctx.accrued.amount > 0 ? mode! : 'fold';
+    // The measure choice IS the decision — no separate keep/fold question.
+    const effMode: ContractMode = measure === 'percent' ? 'fold' : 'keep_wages';
     setBusy(true);
     try {
       if (ctx.kind === 'crew' && ctx.crewId) {
@@ -147,18 +146,6 @@ export function PutOnContractSheet({ ctx, onClose, onDone, onError }: {
             </div>
           )}
 
-          {measure === 'percent' && ctx.accrued.amount > 0 && (
-            <div className="pocx-wages">
-              <p className="pocx-wages-h"><b>{ctx.accrued.days} day{ctx.accrued.days === 1 ? '' : 's'} · {inr(ctx.accrued.amount)}</b> in daily wages logged so far.</p>
-              <p className="pocx-hint">From now they're paid by certified stages. What about those?</p>
-              <button className={`pocx-opt${mode === 'keep_wages' ? ' on' : ''}`} onClick={() => setMode('keep_wages')}>
-                <b>Keep as wages</b><small>{inr(ctx.accrued.amount)} stays owed — kept as a certified credit through today.</small>
-              </button>
-              <button className={`pocx-opt${mode === 'fold' ? ' on' : ''}`} onClick={() => setMode('fold')}>
-                <b>Fold into the contract</b><small>The contract value covers that work — the day-wages drop off.</small>
-              </button>
-            </div>
-          )}
         </div>
 
         <div className="pocx-foot">

@@ -100,8 +100,9 @@ export const WAGES_ASK = {
   which: 'Which contract do they come off?',
   doneOff: (name: string, label: string) => `${name}'s wages now come off ${shortContract(label, 28)}`,
   doneKeep: (name: string) => `${name} is on day wages`,
-  /** The muster row's mark. Short on purpose — the row is a glance; the sheet carries the figures. */
-  chip: 'off contract',
+  /** The muster row's mark. Short on purpose — the row is a glance; the sheet carries the figures.
+   *  "From contract" (not "off contract"): their day wages are drawn FROM the contract, not excluded from it. */
+  chip: 'From contract',
   chipTitle: (label: string) => `These day wages come off the contract: ${label}`,
   /** The line inside the worker's sheet that makes the subtraction plain. */
   standingHead: 'These day wages come off the contract',
