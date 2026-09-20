@@ -49,6 +49,20 @@ const WALLET_ICON = <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 7.
 const TICK = <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5" /></svg>;
 const CHEVR = <svg className="c" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>;
 const CROSS = <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>;
+/** The mark a settled row wears. `fresh` draws it in — the answer you just gave, landing. */
+const Tick = ({ fresh }: { fresh?: boolean }) => (
+  <i className={`tk${fresh ? ' in' : ''}`} aria-hidden="true">
+    <svg viewBox="0 0 24 24"><path d="m6 12.5 4 4L18 8" /></svg>
+  </i>
+);
+/** What a just-made choice is called, so the row can say it before the register is read again. */
+const selectionLabel = (sel: Selection): string | null => {
+  if (sel.type === 'tag') return payableTagLabel(sel.tag);
+  if (sel.type === 'other') return 'Other';
+  if (sel.type === 'phase') return 'Contract';
+  if (sel.type === 'bills') return sel.picks.length > 1 ? `${sel.picks.length} bills` : 'Bill';
+  return null;
+};
 
 type Period = '14' | 'month' | 'all';
 type Cut = 'all' | 'direct' | 'wallet';
@@ -580,6 +594,9 @@ function PanelView({ panel, close, refetch, wallets, sites, categories, F, setF,
 }) {
   const orgId = useOrgId();
   const [attrStep, setAttrStep] = useState(false);   // the entry card's "next state": choose the payable
+  // What was just chosen, held locally: the entry this card was opened with is a snapshot, so the
+  // re-read behind it cannot tell the row what changed — but the write that succeeded can.
+  const [justSet, setJustSet] = useState<string | null>(null);
   const [on, setOn] = useState(false);
   useEffect(() => { const r = requestAnimationFrame(() => setOn(true)); return () => cancelAnimationFrame(r); }, []);
   // Pull it down to put it back — from anywhere on the sheet (sheetDrag), which stands aside while
@@ -598,13 +615,17 @@ function PanelView({ panel, close, refetch, wallets, sites, categories, F, setF,
     const isVendorEntry = e.payeeType === 'Vendor';
     const canAttr = e.src !== 'topup' && !!e.stakeholderId && e.dir === 'out';
     const rowLabel = isVendorEntry ? 'Bill for' : 'Payable for';
+    // The card used to shut itself the moment a choice was made, so the answer landed on a screen
+    // that was already gone. It stays: the row becomes the answer, the tick draws itself in, and the
+    // register is re-read underneath. Closing is the reader's to do.
     const onAttr = (sel: Selection) => { void (async () => {
       setAttrStep(false);
-      if (sel.type !== 'skip') {
-        try { await applyAttribution(e.id, orgId ?? '', e.amt, e.siteId || null, sel); }
-        catch (err) { window.alert(err instanceof Error ? err.message : 'Could not attribute'); }
-      }
-      refetch(); close();
+      if (sel.type === 'skip') return;
+      try {
+        await applyAttribution(e.id, orgId ?? '', e.amt, e.siteId || null, sel);
+        setJustSet(selectionLabel(sel) ?? 'Linked');
+      } catch (err) { window.alert(err instanceof Error ? err.message : 'Could not attribute'); return; }
+      refetch();
     })(); };
 
     body = attrStep && canAttr ? (
@@ -632,16 +653,22 @@ function PanelView({ panel, close, refetch, wallets, sites, categories, F, setF,
             Once it IS answered this card only STATES it: a quick card is for reading, and reopening
             the options on a tap asked a question that had already been settled. Changing it belongs
             on the entry itself, one tap further in, where the whole payment is in view. */}
-        {canAttr && !e.linked ? (
+        {canAttr && !e.linked && !justSet ? (
           <button type="button" className="s sx" onClick={() => setAttrStep(true)}>
             <span>{rowLabel}</span>
             <b className="warn">Choose</b>
             <svg className="c" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
           </button>
         ) : canAttr ? (
-          <div className="s"><span>{rowLabel}</span><b>{payableTagLabel(e.payableTag) ?? 'Linked'}</b></div>
+          <div className="s"><span>{rowLabel}</span>
+            <b className="set">{justSet ?? payableTagLabel(e.payableTag) ?? 'Linked'}<Tick fresh={!!justSet} /></b>
+          </div>
         ) : e.src !== 'topup' ? (
-          <div className="s"><span>Bill</span><b className={e.linked ? '' : 'warn'}>{e.linked ? 'Linked' : 'Not linked'}</b></div>
+          <div className="s"><span>Bill</span>
+            {e.linked
+              ? <b className="set">Linked<Tick /></b>
+              : <b className="warn">Not linked</b>}
+          </div>
         ) : null}
         <Attachments e={e} onPeek={(at) => { close(); onPeek(e, at); }} />
         {e.wa && <p className="quote">WhatsApp: “{e.wa}”</p>}

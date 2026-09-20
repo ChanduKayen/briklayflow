@@ -224,6 +224,16 @@ export const LMX_CSS = `
 .lmx-panel .s > span{flex:none;width:86px;font-size:14px;color:rgba(var(--cream),.55)}
 .lmx-panel .s b{flex:1;min-width:0;text-align:right;font-size:15px;font-weight:600}
 .lmx-panel .s b.warn{color:var(--clay-hi)}
+/* A SETTLED ROW WEARS ITS MARK. Small, green, and quiet — the point is recognition at a glance, not
+   applause. The fresh one draws rather than pops: the stroke runs itself on in a single motion,
+   the way a tick is actually made, so the answer you just gave is seen landing. */
+.lmx-panel .s b.set{display:flex;align-items:center;justify-content:flex-end;gap:8px}
+.lmx-panel .tk{flex:none;display:grid;place-items:center;width:18px;height:18px;border-radius:9px;background:rgba(143,199,154,.16)}
+.lmx-panel .tk svg{width:12px;height:12px;fill:none;stroke:#A9D6B1;stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round}
+.lmx-panel .tk.in{animation:lmxTkIn .34s var(--ease) both}
+.lmx-panel .tk.in svg path{stroke-dasharray:20;stroke-dashoffset:20;animation:lmxTkDraw .42s var(--ease) .1s forwards}
+@keyframes lmxTkIn{from{transform:scale(.6);opacity:0}60%{transform:scale(1.08)}to{transform:none;opacity:1}}
+@keyframes lmxTkDraw{to{stroke-dashoffset:0}}
 /* WHAT THIS ENTRY CARRIES. A line of its own, which opens onto the papers themselves. */
 .lmx-panel .s.sx{width:100%;border:0;background:none;color:inherit;font:inherit;text-align:left;cursor:pointer;gap:12px}
 .lmx-panel .s.sx:disabled{cursor:default}
