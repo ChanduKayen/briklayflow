@@ -21,6 +21,7 @@ import { applyAttribution, attributeToPhase, prefetchAttrTargets } from '../lib/
 import { useIsMobile } from '../lib/useIsMobile';
 import { createPortal } from 'react-dom';
 import TxnDetailMobile from '../components/txn/TxnDetailMobile';
+import { saveBillAllocations } from '../lib/billsApi';
 
 // ─── Scoped stylesheet — a faithful port of the txn-detail reference (cream/terracotta).
 //     Every selector is prefixed with `.txnx` so nothing leaks into the rest of the app. ──
@@ -522,7 +523,9 @@ export default function TransactionDetail({ session }: { session: Session }) {
   const { data: allocs, isLoading: allocsLoading } = useQuery({
     queryKey: ['txn_allocations', txnId],
     queryFn: async () => {
-      const { data, error } = await supabase.from('txn_allocations').select('*, projects(name), wo_milestones(name)').eq('txn_id', txnId);
+      // ORDER BY, because the page reads meaning off these rows: without one, Postgres is free to
+      // hand a split payment's parts back in any order, and the status changed between reloads.
+      const { data, error } = await supabase.from('txn_allocations').select('*, projects(name), wo_milestones(name)').eq('txn_id', txnId).order('allocation_id');
       if (error) throw error;
       return data;
     },
@@ -729,6 +732,18 @@ export default function TransactionDetail({ session }: { session: Session }) {
     catch (e) { window.alert(e instanceof Error ? e.message : 'Could not unlink'); }
   };
 
+  // A vendor's half of the same door. Unlinking a contract had one; taking a payment back off a BILL
+  // did not, so the only way out was to reopen the picker and untick. Nothing is destroyed here: this
+  // is the write the picker itself makes with nothing ticked — the money becomes one unallocated part
+  // again, and the bill it was on goes back to owing.
+  const unlinkVendorAlloc = async () => {
+    if (!orgId || !txnId) return;
+    try {
+      await saveBillAllocations(txnId, orgId, Number(effective.total_amount) || 0, [], primaryAlloc?.project_id ?? null);
+      afterAttach();
+    } catch (e) { window.alert(e instanceof Error ? e.message : 'Could not unlink'); }
+  };
+
   // Proof of payment is a SEPARATE document from the bill (receipt / UPI screenshot / Day-Book
   // photo) — stored on transactions.proof_document_url.
   const proofUploadMutation = useMutation({
@@ -800,9 +815,15 @@ export default function TransactionDetail({ session }: { session: Session }) {
     setAmendError(null); setAmendStep('edit');
   };
 
+  // An allocation naming a bill, an order or an advance SAYS SOMETHING. A payment split across a
+  // bill and a leftover has one of each, and which came back first was luck — so "Payable for" read
+  // the leftover, called a settled payment unsettled, and asked to attribute it all over again.
+  const allocSpeaks = (a: { order_type?: string | null; bill_id?: string | null } | undefined | null) =>
+    !!a && (!!a.order_type || !!a.bill_id);
+  const pickAlloc = (list: typeof allocs) => (list ?? []).find(allocSpeaks) ?? (list ?? [])[0];
   const primaryAlloc = focusProjectId
-    ? (allocs?.find((a) => a.project_id === focusProjectId) ?? allocs?.[0])
-    : allocs?.[0];
+    ? (pickAlloc(allocs?.filter((a) => a.project_id === focusProjectId)) ?? pickAlloc(allocs))
+    : pickAlloc(allocs);
   const secondaryAllocs = allocs?.filter((a) => a !== primaryAlloc) ?? [];
 
   const txnDate = effective.date ? new Date(effective.date) : null;
@@ -885,9 +906,18 @@ export default function TransactionDetail({ session }: { session: Session }) {
     // An overhead has no party, so it has no bill and no contract to settle against. Saying
     // "not settled" about one — and offering to link its contract — is asking for something that
     // cannot exist.
+    // One line stands for the whole payment, so it is read off every part of it: what it settles, and
+    // how much of it settles nothing yet. Otherwise a part-attributed payment reads as un-attributed.
+    const spoken = allAllocs.filter(allocSpeaks);
+    const loose = allAllocs.filter((a) => !allocSpeaks(a)).reduce((sum, a) => sum + (Number(a.allocated_amount) || 0), 0);
+    const base = spoken.length ? allocStatus(spoken[0])
+      : primaryAlloc ? allocStatus(primaryAlloc)
+      : { linked: false, k: 'Not linked to work yet', sub: `link ${payeeName}'s ${isVendor ? 'bill' : 'contract'}, and this settles against it` };
     const st = isGenExp
       ? { linked: true, k: 'An overhead — nothing to settle', sub: `${generalExpenseLabel(txn)}${heardName ? ` · paid to ${heardName}` : ''}` }
-      : primaryAlloc ? allocStatus(primaryAlloc) : { linked: false, k: 'Not linked to work yet', sub: `link ${payeeName}'s ${isVendor ? 'bill' : 'contract'}, and this settles against it` };
+      : spoken.length && loose > 0.5 ? { ...base, sub: `${base.sub} · ${rupee(loose)} of it still settles nothing` }
+      : spoken.length > 1 ? { ...base, sub: `${base.sub} · and ${spoken.length - 1} more` }
+      : base;
     const canLink = !isVoided && !billLinked && !isGenExp;
 
     // "Cash · Friday 5 Sept, 5:30 pm"
@@ -983,7 +1013,9 @@ export default function TransactionDetail({ session }: { session: Session }) {
               catch (e) { window.alert(e instanceof Error ? e.message : 'Could not attribute'); }
             })(); },
           } : null}
-          onUnlink={st.linked && !isVoided && !isVendor && primaryAlloc?.order_type === 'WO' ? () => void unlinkWorkerAlloc(primaryAlloc) : null}
+          onUnlink={!st.linked || isVoided || isGenExp ? null
+            : isVendor ? (spoken.length ? () => void unlinkVendorAlloc() : null)
+            : primaryAlloc?.order_type === 'WO' ? () => void unlinkWorkerAlloc(primaryAlloc) : null}
           details={details}
           noteSource={waText ? 'From WhatsApp' : null}
           noteText={noteText}
