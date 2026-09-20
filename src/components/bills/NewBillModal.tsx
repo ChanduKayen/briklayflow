@@ -30,6 +30,47 @@ const inr = (n: number) => '₹' + Math.round(Number(n) || 0).toLocaleString('en
 const poss = (n: string) => (/s$/i.test(n) ? `${n}\u2019` : `${n}\u2019s`);
 const fmtDate = (d: string | null) => d ? new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
 
+// ── the reference's own date reader: type it any way, or pick it ───────────────────────────────────
+// "19/9" · "19-09-26" · "19 sept" · "sept 19" · "today" · "yesterday" all resolve; a bare day/month with
+// no year takes the most recent past occurrence; nothing in the future. Ported from the Add-bill design.
+const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sept', 'Oct', 'Nov', 'Dec'];
+const MONTHS_LONG = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const pad2 = (n: number) => String(n).padStart(2, '0');
+const today0 = () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), d.getDate()); };
+const daysAgo = (n: number) => { const t = today0(); return new Date(t.getFullYear(), t.getMonth(), t.getDate() - n); };
+const iso = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+const shortDMY = (d: Date) => `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}/${d.getFullYear()}`;
+const longDate = (d: Date) => `${DOW[d.getDay()]}, ${d.getDate()} ${MONTHS_SHORT[d.getMonth()]} ${d.getFullYear()}`;
+const relDate = (d: Date) => { const n = Math.round((today0().getTime() - d.getTime()) / 864e5); return n === 0 ? 'today' : n === 1 ? 'yesterday' : (n > 1 && n < 7) ? `${n} days ago` : ''; };
+type ParsedDate = { empty?: boolean; err?: boolean; future?: boolean; d?: Date };
+function parseBillDate(t: string): ParsedDate {
+  const s = (t || '').trim().toLowerCase();
+  const T = today0();
+  if (!s) return { empty: true };
+  if (s === 'today' || s === 'tod') return { d: T };
+  if (s === 'yesterday' || s === 'yday' || s === 'ydy') return { d: daysAgo(1) };
+  const mabbr = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+  let d: number | null = null, m: number | null = null, y: number | null = null, mm: RegExpMatchArray | null;
+  mm = s.match(/^(\d{1,2})\s*[/\-.\s]\s*(\d{1,2})(?:\s*[/\-.\s]\s*(\d{2,4}))?$/);
+  if (mm) { d = +mm[1]; m = +mm[2] - 1; y = mm[3] ? +mm[3] : null; }
+  if (d === null) { mm = s.match(/^(\d{1,2})\s*([a-z]{3,})\.?,?\s*(\d{2,4})?$/); if (mm) { const i = mabbr.indexOf(mm[2].slice(0, 3)); if (i >= 0) { d = +mm[1]; m = i; y = mm[3] ? +mm[3] : null; } } }
+  if (d === null) { mm = s.match(/^([a-z]{3,})\s*(\d{1,2}),?\s*(\d{2,4})?$/); if (mm) { const i = mabbr.indexOf(mm[1].slice(0, 3)); if (i >= 0) { d = +mm[2]; m = i; y = mm[3] ? +mm[3] : null; } } }
+  if (d === null || m === null) return { err: true };
+  if (y === null) { y = T.getFullYear(); if (new Date(y, m, d) > T) y -= 1; } else if (y < 100) y += 2000;
+  const dt = new Date(y, m, d);
+  if (dt.getMonth() !== m || dt.getDate() !== d) return { err: true };
+  if (dt > T) return { future: true, d: dt };
+  return { d: dt };
+}
+// ₹ grouping the Indian way, from a digits string.
+const indianAmt = (v: string) => {
+  const s = String(v || '').replace(/^0+(?=\d)/, '');
+  if (!s) return '';
+  if (s.length <= 3) return s;
+  return s.slice(0, -3).replace(/\B(?=(\d{2})+(?!\d))/g, ',') + ',' + s.slice(-3);
+};
+
 export interface BillDraft {
   file: File | null;
   vendorId: string; vendorName: string;
@@ -82,7 +123,9 @@ function Modal({
 }: NewBillModalProps & { isMobile: boolean }) {
   const orgId = useOrgId();
 
-  const [stage, setStage] = useState<Stage>(initialExtract ? 'form' : initialFile ? 'reading' : 'pick');
+  // Opens straight on the form (the reference's board 1) — the photo drop is an option inside it, not a
+  // gate in front of it. A file the door arrives with still reads first.
+  const [stage, setStage] = useState<Stage>(initialFile ? 'reading' : 'form');
   const [readStep, setReadStep] = useState(READ_STEPS[0]);
   const [readError, setReadError] = useState<string | null>(null);
   const [file, setFile] = useState<File | null>(initialFile);
@@ -98,11 +141,17 @@ function Modal({
   const [createdName, setCreatedName] = useState<string | null>(null);
 
   const [billNo, setBillNo] = useState(initialExtract?.billNo ?? '');
-  const [billDate, setBillDate] = useState(initialExtract?.billDate ?? '');
+  // The date is free text the reference's reader parses; the calendar and the echo derive from it.
+  const [dateText, setDateText] = useState(initialExtract?.billDate ? shortDMY(new Date(initialExtract.billDate + 'T00:00:00')) : '');
+  const [calOpen, setCalOpen] = useState(false);
+  const [calView, setCalView] = useState(() => { const t = today0(); return { y: t.getFullYear(), m: t.getMonth() }; });
   const [amount, setAmount] = useState(initialExtract?.amount ? String(Math.round(initialExtract.amount)) : '');
   const [projectId, setProjectId] = useState(lockProject?.id ?? '');
   const [lines, setLines] = useState<ExtractedBill['lines']>(initialExtract?.lines ?? []);
   const [inked, setInked] = useState<Record<string, boolean>>({});
+  const [nudge, setNudge] = useState(false);   // Add pressed while something's missing → flag the gaps
+  const pd = parseBillDate(dateText);
+  const billDateISO = pd.d && !pd.future ? iso(pd.d) : null;
 
   const [dup, setDup] = useState<DuplicateBill | null>(null);
   const [dupAck, setDupAck] = useState(false);
@@ -170,7 +219,7 @@ function Modal({
       } else if (lockVendor) ink('vendor');
       setLines(ex.lines);
       window.setTimeout(() => { if (ex.billNo) { setBillNo(ex.billNo); ink('no'); } }, 260);
-      window.setTimeout(() => { if (ex.billDate) { setBillDate(ex.billDate); ink('date'); } }, 480);
+      window.setTimeout(() => { if (ex.billDate) { setDateText(shortDMY(new Date(ex.billDate + 'T00:00:00'))); ink('date'); } }, 480);
       window.setTimeout(() => { if (ex.amount) { setAmount(String(Math.round(ex.amount))); ink('amt'); } }, 700);
     } catch (e) {
       setStage('pick');
@@ -206,12 +255,12 @@ function Modal({
       if (!live) return;
       setDup(null); setDupAck(false);
       if (!orgId || (!n && !(amt > 0.5))) return;
-      void findDuplicateBill({ orgId, billNo: n || null, amount: amt, billDate: billDate || null, vendorName: vendorName || vq || null })
+      void findDuplicateBill({ orgId, billNo: n || null, amount: amt, billDate: billDateISO, vendorName: vendorName || vq || null })
         // A warning that can't be fetched must not become an unhandled rejection — or block filing.
         .then(d => { if (live) setDup(d); }, () => { /* no warning available */ });
     }, 260);
     return () => { live = false; window.clearTimeout(t); };
-  }, [orgId, billNo, amt, billDate, vendorName, vq]);
+  }, [orgId, billNo, amt, billDateISO, vendorName, vq]);
 
   // Close the typeahead on an outside click, the way a menu is expected to behave.
   useEffect(() => {
@@ -239,7 +288,21 @@ function Modal({
   }, [vendorId, amt, vendorName, before, isNewParty]);
 
   const matches = useMemo(() => (vq.trim() ? searchPayees(vendors, vq).slice(0, 3) : vendors.slice(0, 3)), [vendors, vq]);
-  const canSave = !!vendorId && amt > 0 && (!dup || dupAck) && !saving && !filed;
+
+  // What the bill still needs, in the order a person fills it (site stays optional — a bill can be
+  // unassigned). The date is required and must read as a real, non-future day.
+  const missing: string[] = [];
+  if (!vendorId) missing.push('vendor');
+  if (!amt) missing.push('amount');
+  if (!billDateISO) missing.push('date');
+  const miss = (k: string) => nudge && missing.indexOf(k) >= 0;
+  const dateBad = !!dateText.trim() && (pd.err || pd.future);
+  const canSave = missing.length === 0 && (!dup || dupAck) && !saving && !filed;
+  // the live status line the reference shows beside the button
+  let statusText = '', statusTone: 'ok' | 'warn' | 'idle' = 'idle';
+  if (dateBad) { statusText = 'Fix the bill date first'; statusTone = 'warn'; }
+  else if (missing.length) { statusText = 'Still needed: ' + missing.join(' · '); statusTone = nudge ? 'warn' : 'idle'; }
+  else { statusText = 'Ready · ' + inr(amt) + ' to ' + vendorName; statusTone = 'ok'; }
 
   // ── creating a party we have never billed before ─────────────────────────────
   const createVendor = async (name: string) => {
@@ -260,12 +323,12 @@ function Modal({
 
   // ── file it ──────────────────────────────────────────────────────────────────
   const file_ = async () => {
-    if (!canSave) return;
+    if (!canSave) { setNudge(true); return; }   // flag the gaps instead of failing silently
     setSaving(true); setSaveError(null);
     try {
       const res = await commit({
         file, vendorId, vendorName, projectId: projectId || null, lines,
-        billNo: billNo.trim() || null, billDate: billDate || null, amount: amt,
+        billNo: billNo.trim() || null, billDate: billDateISO, amount: amt,
         allowDuplicate: !!dup && dupAck,
       });
       if (res && 'duplicate' in res && res.duplicate) { setDup(res.duplicate); setDupAck(false); setSaving(false); return; }
@@ -279,6 +342,33 @@ function Modal({
 
   const pick = (f: File | null | undefined) => { if (f) void read(f); };
   const rowCls = (k: string, filled: boolean) => `frow${filled ? ' filled' : ''}${inked[k] ? ' inked' : ''}`;
+
+  // ── the date field's echo + calendar (the reference's boards 3 & 4) ──
+  const onFormKey = (e: { key: string; preventDefault: () => void }) => { if (e.key === 'Enter') { e.preventDefault(); void file_(); } };
+  const setDate = (d: Date) => { setDateText(shortDMY(d)); setCalOpen(false); setCalView({ y: d.getFullYear(), m: d.getMonth() }); };
+  let dateEcho = '', dateEchoTone: 'ok' | 'warn' | 'idle' = 'idle';
+  if (pd.empty) dateEcho = 'e.g. 19/9 · 19-09-26 · yesterday';
+  else if (pd.err) { dateEcho = `Can’t read “${dateText.trim()}” — try 19/09/2026`; dateEchoTone = 'warn'; }
+  else if (pd.future && pd.d) { dateEcho = `${longDate(pd.d)} is after today`; dateEchoTone = 'warn'; }
+  else if (pd.d) { const r = relDate(pd.d); dateEcho = `→ ${longDate(pd.d)}${r ? ' · ' + r : ''}`; dateEchoTone = 'ok'; }
+  const calT = today0();
+  const calCells = (() => {
+    const { y, m } = calView;
+    const offset = (new Date(y, m, 1).getDay() + 6) % 7;      // Monday-first
+    const dim = new Date(y, m + 1, 0).getDate();
+    const total = Math.ceil((offset + dim) / 7) * 7;
+    const sameDay = (a: Date | undefined, b: Date) => !!a && a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+    const out: { key: number; label: string; disabled: boolean; sel: boolean; today: boolean; d: Date | null }[] = [];
+    for (let i = 0; i < total; i++) {
+      const n = i - offset + 1;
+      if (n < 1 || n > dim) { out.push({ key: i, label: '', disabled: true, sel: false, today: false, d: null }); continue; }
+      const d = new Date(y, m, n);
+      out.push({ key: i, label: String(n), disabled: d > calT, sel: !pd.future && sameDay(pd.d, d), today: sameDay(calT, d), d });
+    }
+    return out;
+  })();
+  const calNextDisabled = calView.y > calT.getFullYear() || (calView.y === calT.getFullYear() && calView.m >= calT.getMonth());
+  const shiftMonth = (delta: number) => setCalView(v => { const d = new Date(v.y, v.m + delta, 1); return { y: d.getFullYear(), m: d.getMonth() }; });
 
   return createPortal(
     <div className={`nbx${isMobile ? ' sheet' : ''}`} role="dialog" aria-modal="true" aria-label={title}
@@ -331,6 +421,18 @@ function Modal({
 
           {stage === 'form' && (
             <>
+              <button
+                type="button" className={`dropmini${over ? ' over' : ''}`}
+                onClick={() => fileRef.current?.click()}
+                onDragOver={(e) => { e.preventDefault(); setOver(true); }}
+                onDragLeave={() => setOver(false)}
+                onDrop={(e) => { e.preventDefault(); setOver(false); pick(e.dataTransfer.files?.[0]); }}
+              >
+                <span className="dz-ic">⇪</span>
+                <span><b>Drop a photo or PDF</b> — the fields fill themselves</span>
+              </button>
+              {readError && <div className="readfail">{readError}. Type the figures in below.</div>}
+
               <div className={rowCls('vendor', !!vendorId)} ref={vendorRowRef}>
                 <div className="flabel">Vendor <span className="ftick">✓</span></div>
                 {lockVendor ? (
@@ -385,33 +487,80 @@ function Modal({
               <div className="f2">
                 <div className={rowCls('no', !!billNo.trim())}>
                   <div className="flabel">Bill / invoice no <span className="ftick">✓</span></div>
-                  <input className="finput" value={billNo} placeholder="—" autoComplete="off" onChange={(e) => setBillNo(e.target.value)} />
+                  <input className="finput" value={billNo} placeholder="—" autoComplete="off" onChange={(e) => setBillNo(e.target.value)} onKeyDown={onFormKey} />
                 </div>
-                <div className={rowCls('date', !!billDate)}>
-                  <div className="flabel">Bill date <span className="ftick">✓</span></div>
-                  <input className="finput" type="date" value={billDate} onChange={(e) => setBillDate(e.target.value)} />
+                <div className={`frow${billDateISO ? ' filled' : ''}${inked['date'] ? ' inked' : ''}${miss('date') ? ' miss' : ''}`}>
+                  <div className="flabel">Bill date <span className="ftick">✓</span>
+                    <span className="dquick">
+                      <button type="button" onMouseDown={(e) => { e.preventDefault(); setDate(today0()); }}>Today</button>
+                      <button type="button" onMouseDown={(e) => { e.preventDefault(); setDate(daysAgo(1)); }}>Yesterday</button>
+                    </span>
+                  </div>
+                  <div className="datewrap">
+                    <input className={`finput${dateBad ? ' bad' : ''}`} value={dateText} autoComplete="off" placeholder="19/9 or yesterday"
+                      onChange={(e) => { setDateText(e.target.value); const p = parseBillDate(e.target.value); if (p.d) setCalView({ y: p.d.getFullYear(), m: p.d.getMonth() }); }}
+                      onKeyDown={(e) => { if (e.key === 'Escape' && calOpen) { e.preventDefault(); setCalOpen(false); } else onFormKey(e); }} />
+                    <button type="button" className={`calbtn${calOpen ? ' on' : ''}`} aria-label="Open calendar"
+                      onMouseDown={(e) => { e.preventDefault(); const base = pd.d && !pd.future ? pd.d : today0(); setCalView({ y: base.getFullYear(), m: base.getMonth() }); setCalOpen(o => !o); }}>
+                      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><rect x="3.5" y="5" width="17" height="15" rx="2.5" /><path d="M3.5 10h17M8 3v4M16 3v4" /></svg>
+                    </button>
+                    {calOpen && (
+                      <div className="cal">
+                        <div className="cal-top">
+                          <span className="cal-mo">{MONTHS_LONG[calView.m]} <em>{calView.y}</em></span>
+                          <span className="cal-nav">
+                            <button type="button" aria-label="Previous month" onMouseDown={(e) => { e.preventDefault(); shiftMonth(-1); }}>‹</button>
+                            <button type="button" aria-label="Next month" disabled={calNextDisabled} onMouseDown={(e) => { e.preventDefault(); if (!calNextDisabled) shiftMonth(1); }}>›</button>
+                          </span>
+                        </div>
+                        <div className="cal-grid">
+                          {['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'].map(w => <span key={w} className="cal-wd">{w}</span>)}
+                          {calCells.map(c => (
+                            <button key={c.key} type="button" disabled={c.disabled || !c.d}
+                              className={`cal-day${c.sel ? ' sel' : ''}${c.today ? ' today' : ''}${!c.d ? ' blank' : ''}`}
+                              onMouseDown={(e) => { e.preventDefault(); if (c.d && !c.disabled) setDate(c.d); }}>{c.label}</button>
+                          ))}
+                        </div>
+                        <div className="cal-foot"><span>No future dates</span></div>
+                      </div>
+                    )}
+                  </div>
+                  <div className={`decho ${dateEchoTone}`}>{dateEcho}</div>
                 </div>
               </div>
 
-              <div className="f2">
-                <div className={rowCls('amt', amt > 0)}>
-                  <div className="flabel">Amount <span className="ftick">✓</span></div>
+              <div className={`frow amtrow${amt > 0 ? ' filled' : ''}${inked['amt'] ? ' inked' : ''}${miss('amount') ? ' miss' : ''}`}>
+                <div className="flabel">Amount <span className="ftick">✓</span></div>
+                <div className="amtline">
+                  <span className="rs">₹</span>
                   <input
-                    className="finput big" inputMode="numeric" value={amount} placeholder="0"
-                    onChange={(e) => setAmount(e.target.value.replace(/[^\d]/g, ''))}
+                    className="finput big" inputMode="numeric" value={indianAmt(amount)} placeholder="0"
+                    onChange={(e) => setAmount(e.target.value.replace(/[^\d]/g, '').slice(0, 10))} onKeyDown={onFormKey}
                   />
                 </div>
-                <div className="frow">
-                  <div className="flabel">Site <span className="opt">optional</span></div>
-                  {lockProject ? (
-                    <div className="locked">{lockProjectName}</div>
-                  ) : (
-                    <select className="finput" value={projectId} onChange={(e) => setProjectId(e.target.value)}>
-                      <option value="">No site / unassigned</option>
-                      {projects.map(p => <option key={p.project_id} value={p.project_id}>{p.name}</option>)}
-                    </select>
-                  )}
-                </div>
+                <div className="ahint">{(() => {
+                  const t = (x: number) => String(parseFloat(x.toFixed(2)));
+                  if (amt >= 1e7) return '= ' + t(amt / 1e7) + ' crore';
+                  if (amt >= 1e5) return '= ' + t(amt / 1e5) + ' lakh';
+                  if (amt >= 1e3) return '= ' + t(amt / 1e3) + ' thousand';
+                  return 'Total on the bill, incl. GST';
+                })()}</div>
+              </div>
+
+              <div className="frow">
+                <div className="flabel">Site <span className="opt">optional</span></div>
+                {lockProject ? (
+                  <div className="locked">{lockProjectName}</div>
+                ) : (
+                  <div className="chips">
+                    {projects.map(p => (
+                      <button type="button" key={p.project_id} className={`chip${projectId === p.project_id ? ' on' : ''}`}
+                        onClick={() => setProjectId(projectId === p.project_id ? '' : p.project_id)}>
+                        {projectId === p.project_id && <span className="ck">✓</span>}{p.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {saveError && <div className="readfail">{saveError}</div>}
@@ -422,9 +571,11 @@ function Modal({
         <div className="m-foot">
           <div className="consequence">{stage === 'form' ? consequence : <>A bill raises what you owe — drop it in and watch.</>}</div>
           <div className="actions">
+            {stage === 'form' && <span className={`fstatus ${statusTone}`}>{statusText}</span>}
             <button className="btn-quiet" onClick={onClose}>Discard</button>
-            <button className={`btn${filed ? ' ok' : ''}`} disabled={!canSave} onClick={() => void file_()}>
-              {filed ? '✓ Filed' : saving ? 'Filing…' : 'Add bill'}
+            <button className={`btn${filed ? ' ok' : ''}${!canSave && !filed ? ' dim' : ''}`} aria-disabled={!canSave} onClick={() => void file_()}>
+              <span>{filed ? '✓ Filed' : saving ? 'Filing…' : 'Add bill'}</span>
+              {!filed && !saving && <span className="kbd">↵ Enter</span>}
             </button>
           </div>
         </div>
