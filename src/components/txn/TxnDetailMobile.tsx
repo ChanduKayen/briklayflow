@@ -194,6 +194,8 @@ export interface TxnDetailMobileProps {
   attrCtx?: {
     payee: { id: string; name: string; type: 'Worker' | 'Vendor' };
     projectId: string; projectName: string | null; txnDate: string | null; amount: number; selfPaid: number;
+    /** what it is attributed to already, so the options open on it rather than on nothing */
+    current?: string | null;
     onConfirm: (sel: PayableSelection) => void;
   } | null;
   onUnlink?: (() => void) | null;      // linked → clear the attribution
@@ -425,6 +427,7 @@ export default function TxnDetailMobile(p: TxnDetailMobileProps) {
             <PayableOptions
               payee={p.attrCtx.payee} projectId={p.attrCtx.projectId} projectName={p.attrCtx.projectName}
               txnDate={p.attrCtx.txnDate} amount={p.attrCtx.amount} selfPaid={p.attrCtx.selfPaid} allowSkip={false}
+              current={p.attrCtx.current ?? null}
               onConfirm={(sel) => { setAttrStep(false); p.attrCtx!.onConfirm(sel); }}
             />
           </main>

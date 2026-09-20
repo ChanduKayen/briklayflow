@@ -18,7 +18,7 @@ const inr = (n: number) => '₹' + Math.round(Number(n) || 0).toLocaleString('en
 const fmtDate = (d: string | null) => d ? new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: '2-digit' }) : '';
 
 export function PayableOptions({
-  payee, projectId, projectName, txnDate, amount, selfPaid = 0, allowSkip = true, onConfirm,
+  payee, projectId, projectName, txnDate, amount, selfPaid = 0, allowSkip = true, current = null, onConfirm,
 }: {
   payee: { id: string; name: string; type: PayeeType };
   projectId: string;
@@ -27,6 +27,10 @@ export function PayableOptions({
   amount: number;
   selfPaid?: number;
   allowSkip?: boolean;
+  /** The choice already on record — a tag ('this_week' | 'past' | 'other') or a milestone id. Opening
+   *  on it is what makes this a picker you can come back to: reopening used to show a blank slate,
+   *  which read as "nothing was saved" even though it had been. */
+  current?: string | null;
   onConfirm: (sel: Selection) => void;
 }) {
   const { data: targets, isLoading } = useQuery({
@@ -37,7 +41,7 @@ export function PayableOptions({
   });
 
   const [bills, setBills] = useState<string[]>([]);
-  const [choice, setChoice] = useState<string | null>(null);
+  const [choice, setChoice] = useState<string | null>(current);
   const [addBill, setAddBill] = useState(false);   // the "upload / add a bill" door (vendors)
   const orgId = useOrgId();
   const qc = useQueryClient();

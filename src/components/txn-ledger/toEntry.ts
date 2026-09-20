@@ -3,6 +3,7 @@
  * Kept beside it so the page file exports a component only, and so the shaping is testable.
  */
 import { deriveDirection, isNotLinked, isWalletSpend, isWalletTransfer, payeeLabel } from '../../lib/transactions';
+import { payableTagOf, type PayableTag } from '../../lib/payableAttribution';
 import { costCodeLabel } from '../../lib/costCodes';
 
 const DOW = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -19,6 +20,8 @@ export type Entry = {
   party: boolean; clip: boolean; linked: boolean; wallet: string; walletId: string; via: string; cat: string;
   /** who + type, for attributing a payment to a payable */
   stakeholderId: string | null; payeeType: string | null;
+  /** a day-wage payable's answer, when one has been given — it has no allocation to carry it */
+  payableTag: PayableTag | null;
   /** the paper this entry carries, as stored — signed only when it is looked at */
   bill: string; proof: string;
   voided: boolean; status: string | null; allocs: number;
@@ -49,6 +52,7 @@ export function toEntry(t: LedgerRaw): Entry {
     party: !!t.stakeholder_id, clip: !!t.bill_doc_url || !!t.proof_document_url, linked: !isNotLinked(t),
     stakeholderId: t.stakeholder_id ? String(t.stakeholder_id) : null,
     payeeType: (t.stakeholders as { type?: string } | null)?.type ?? null,
+    payableTag: payableTagOf(t as { ai_flag_data?: unknown }),
     bill: String(t.bill_doc_url ?? ''), proof: String(t.proof_document_url ?? ''),
     wallet: (t.wallets as { holder_name?: string } | null)?.holder_name ?? '', walletId: String(t.wallet_id ?? ''),
     via: String(t.payment_mode ?? ''), cat: t.category ? (costCodeLabel(String(t.category)) || String(t.category)) : '',

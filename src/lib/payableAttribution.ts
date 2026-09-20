@@ -223,6 +223,22 @@ export async function applyAttribution(
   // 'skip' → nothing
 }
 
+// ── readers — what a payment is attributed to, for every surface that shows it ────────────────────
+
+/** The tag a payment carries, if the owner has said what it settles. */
+export function payableTagOf(txn: { ai_flag_data?: unknown } | null | undefined): PayableTag | null {
+  const t = (txn?.ai_flag_data as { payable_tag?: string } | null | undefined)?.payable_tag;
+  return t === 'this_week' || t === 'past' || t === 'other' ? t : null;
+}
+
+/** The tag, in words. Short for a chip; `long` for a line that stands on its own. */
+export function payableTagLabel(tag: PayableTag | null | undefined, long = false): string | null {
+  if (tag === 'this_week') return long ? "This week's payable" : 'This week';
+  if (tag === 'past') return long ? 'Past ledger balance' : 'Past balance';
+  if (tag === 'other') return long ? 'Other — not against work done' : 'Other';
+  return null;
+}
+
 // ── reader — the chip's current state ─────────────────────────────────────────────────────────────
 export interface CurrentAttribution { linked: boolean; label: string | null }
 

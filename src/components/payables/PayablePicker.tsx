@@ -9,7 +9,7 @@ import type { Selection, PayeeType } from '../../lib/payableAttribution';
 const inr = (n: number) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');
 
 export function PayablePicker({
-  payee, projectId, projectName, txnDate, amount, selfPaid = 0, onConfirm, onClose, allowSkip = true,
+  payee, projectId, projectName, txnDate, amount, selfPaid = 0, current = null, onConfirm, onClose, allowSkip = true,
 }: {
   payee: { id: string; name: string; type: PayeeType };
   projectId: string;
@@ -17,6 +17,8 @@ export function PayablePicker({
   txnDate: string | null;
   amount: number;
   selfPaid?: number;
+  /** the choice already on record, so reopening shows it instead of a blank slate */
+  current?: string | null;
   onConfirm: (sel: Selection) => void;
   onClose: () => void;
   allowSkip?: boolean;
@@ -34,7 +36,7 @@ export function PayablePicker({
         </div>
         <PayableOptions
           payee={payee} projectId={projectId} projectName={projectName}
-          txnDate={txnDate} amount={amount} selfPaid={selfPaid} allowSkip={allowSkip}
+          txnDate={txnDate} amount={amount} selfPaid={selfPaid} allowSkip={allowSkip} current={current}
           onConfirm={onConfirm}
         />
       </div>

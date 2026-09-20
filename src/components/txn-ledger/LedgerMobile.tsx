@@ -32,7 +32,7 @@ import { useSheetFlag } from '../../lib/sheetFlag';
 import { toEntry, type Entry, type LedgerRaw } from './toEntry';
 import { useOrgId } from '../../lib/auth/AuthProvider';
 import { PayableOptions } from '../payables/PayableOptions';
-import { applyAttribution, prefetchAttrTargets, type Selection } from '../../lib/payableAttribution';
+import { applyAttribution, prefetchAttrTargets, payableTagLabel, type Selection } from '../../lib/payableAttribution';
 import { useQueryClient } from '@tanstack/react-query';
 
 const inr = (n: number) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');
@@ -616,7 +616,7 @@ function PanelView({ panel, close, refetch, wallets, sites, categories, F, setF,
         <PayableOptions
           payee={{ id: e.stakeholderId as string, name: e.name, type: isVendorEntry ? 'Vendor' : 'Worker' }}
           projectId={e.siteId} projectName={e.site || null} txnDate={e.date} amount={e.amt} selfPaid={e.amt}
-          allowSkip={false} onConfirm={onAttr}
+          allowSkip={false} current={e.payableTag} onConfirm={onAttr}
         />
       </>
     ) : (
@@ -630,7 +630,9 @@ function PanelView({ panel, close, refetch, wallets, sites, categories, F, setF,
         {canAttr ? (
           <button type="button" className="s sx" onClick={() => setAttrStep(true)}>
             <span>{rowLabel}</span>
-            <b className={e.linked ? '' : 'warn'}>{e.linked ? 'Linked · change' : 'Choose'}</b>
+            {/* Name what it was attributed to — "Linked" told you nothing, and a day-wage answer has no
+                allocation to speak for it, so the row read as unanswered over an answer already given. */}
+            <b className={e.linked ? '' : 'warn'}>{e.linked ? `${payableTagLabel(e.payableTag) ?? 'Linked'} · change` : 'Choose'}</b>
             <svg className="c" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
           </button>
         ) : e.src !== 'topup' ? (

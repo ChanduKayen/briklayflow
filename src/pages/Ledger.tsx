@@ -32,7 +32,7 @@ import { useCursorLamp } from '../components/nav/useCursorLamp';
 import { DirMedallion, Amount, AnchorChip, FilterChip } from '../components/txn-ledger/LedgerAtoms';
 import { TrackChip, TRACK_CHIP_CSS } from '../components/txn-ledger/TrackChip';
 import { PayablePicker } from '../components/payables/PayablePicker';
-import { applyAttribution, prefetchAttrTargets } from '../lib/payableAttribution';
+import { applyAttribution, prefetchAttrTargets, payableTagOf } from '../lib/payableAttribution';
 import { unlinkTxnOrder } from '../lib/trackingApi';
 import { useOrgId } from '../lib/auth/AuthProvider';
 import WalletRail from '../components/wallets/WalletRail';
@@ -815,7 +815,7 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
       return out;
     },
   });
-  const [attrPicker, setAttrPicker] = useState<{ txnId: string; payee: { id: string; name: string; type: 'Worker' | 'Vendor' }; projectId: string; projectName: string | null; amount: number; date: string | null; selfPaid: number } | null>(null);
+  const [attrPicker, setAttrPicker] = useState<{ txnId: string; payee: { id: string; name: string; type: 'Worker' | 'Vendor' }; projectId: string; projectName: string | null; amount: number; date: string | null; selfPaid: number; current: string | null } | null>(null);
 
   // Deep-link focus: the Day Book's filed "View →" links to /ledger?txn=<id>. Scroll to
   // and ring that row once the ledger has loaded (once — survives realtime refetches).
@@ -1730,6 +1730,9 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
                                   projectName: projName, amount: Number(txn.total_amount), date: txn.date ?? null,
                                   // Add this payment back UNLESS a phase-cert already offsets it (billed rose with paid).
                                   selfPaid: phaseByTxn[txn.txn_id] ? 0 : Number(txn.total_amount),
+                                  // open on the answer already given, so it can be read and changed
+                                  current: (txn.txn_allocations || []).find((a: { order_type?: string | null }) => a.order_type === 'WO')?.milestone_id
+                                    ?? payableTagOf(txn as { ai_flag_data?: unknown }),
                                 })}
                                 onHover={() => prefetchAttrTargets(qc, { id: String(txn.stakeholder_id), type: 'Worker' }, String((txn.txn_allocations || [])[0]?.project_id ?? ''), txn.date ?? null, phaseByTxn[txn.txn_id] ? 0 : Number(txn.total_amount))}
                               />
@@ -1924,6 +1927,7 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
           txnDate={attrPicker.date}
           amount={attrPicker.amount}
           selfPaid={attrPicker.selfPaid}
+          current={attrPicker.current}
           allowSkip={false}
           onClose={() => setAttrPicker(null)}
           onConfirm={async (sel) => {

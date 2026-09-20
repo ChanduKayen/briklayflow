@@ -17,7 +17,7 @@ import { BillAllocateSheet } from '../components/txn-ledger/BillAllocateSheet';
 import { useOrgId } from '../lib/auth/AuthProvider';
 import { ContractHub, CONTRACT_HUB_CSS } from '../components/txn-ledger/ContractHub';
 import { PayablePicker } from '../components/payables/PayablePicker';
-import { applyAttribution, attributeToPhase, prefetchAttrTargets } from '../lib/payableAttribution';
+import { applyAttribution, attributeToPhase, attributeTag, prefetchAttrTargets, payableTagOf, payableTagLabel } from '../lib/payableAttribution';
 import { useIsMobile } from '../lib/useIsMobile';
 import { createPortal } from 'react-dom';
 import TxnDetailMobile from '../components/txn/TxnDetailMobile';
@@ -736,6 +736,13 @@ export default function TransactionDetail({ session }: { session: Session }) {
   // did not, so the only way out was to reopen the picker and untick. Nothing is destroyed here: this
   // is the write the picker itself makes with nothing ticked — the money becomes one unallocated part
   // again, and the bill it was on goes back to owing.
+  // A day-wage answer is taken back the way it was given — by clearing the tag.
+  const unlinkTag = async () => {
+    if (!txnId) return;
+    try { await attributeTag(txnId, null); afterAttach(); }
+    catch (e) { window.alert(e instanceof Error ? e.message : 'Could not unlink'); }
+  };
+
   const unlinkVendorAlloc = async () => {
     if (!orgId || !txnId) return;
     try {
@@ -908,9 +915,15 @@ export default function TransactionDetail({ session }: { session: Session }) {
     // cannot exist.
     // One line stands for the whole payment, so it is read off every part of it: what it settles, and
     // how much of it settles nothing yet. Otherwise a part-attributed payment reads as un-attributed.
+    // A day-wage payable has no allocation to point at — the answer is a tag on the transaction. It
+    // was being written and then read by nobody, so the row kept saying "Payable towards · tap to
+    // choose" over an answer that was already given, and kept asking for it again.
+    const tag = payableTagOf(txn);
     const spoken = allAllocs.filter(allocSpeaks);
     const loose = allAllocs.filter((a) => !allocSpeaks(a)).reduce((sum, a) => sum + (Number(a.allocated_amount) || 0), 0);
     const base = spoken.length ? allocStatus(spoken[0])
+      : tag ? { linked: true, k: `✓ ${payableTagLabel(tag, true)}`,
+          sub: tag === 'other' ? 'Recorded as not settling work · tap to change' : `What this payment settles · tap to change` }
       : primaryAlloc ? allocStatus(primaryAlloc)
       : { linked: false, k: 'Not linked to work yet', sub: `link ${payeeName}'s ${isVendor ? 'bill' : 'contract'}, and this settles against it` };
     const st = isGenExp
@@ -918,7 +931,7 @@ export default function TransactionDetail({ session }: { session: Session }) {
       : spoken.length && loose > 0.5 ? { ...base, sub: `${base.sub} · ${rupee(loose)} of it still settles nothing` }
       : spoken.length > 1 ? { ...base, sub: `${base.sub} · and ${spoken.length - 1} more` }
       : base;
-    const canLink = !isVoided && !billLinked && !isGenExp;
+    const canLink = !isVoided && !billLinked && !tag && !isGenExp;
 
     // "Cash · Friday 5 Sept, 5:30 pm"
     const longDate = txnDate
@@ -1005,6 +1018,7 @@ export default function TransactionDetail({ session }: { session: Session }) {
             projectId: primaryAlloc?.project_id || '',
             projectName: primaryAlloc?.projects?.name ?? null,
             txnDate: txn.date ?? null,
+            current: primaryAlloc?.milestone_id || payableTagOf(txn),
             amount: Number(effective.total_amount) || 0,
             selfPaid: Number(effective.total_amount) || 0,
             onConfirm: (sel) => { void (async () => {
@@ -1015,7 +1029,8 @@ export default function TransactionDetail({ session }: { session: Session }) {
           } : null}
           onUnlink={!st.linked || isVoided || isGenExp ? null
             : isVendor ? (spoken.length ? () => void unlinkVendorAlloc() : null)
-            : primaryAlloc?.order_type === 'WO' ? () => void unlinkWorkerAlloc(primaryAlloc) : null}
+            : primaryAlloc?.order_type === 'WO' ? () => void unlinkWorkerAlloc(primaryAlloc)
+            : tag ? () => void unlinkTag() : null}
           details={details}
           noteSource={waText ? 'From WhatsApp' : null}
           noteText={noteText}

@@ -55,6 +55,10 @@ export function cashDirection(txn: any): 'in' | 'out' | 'skip' {
 export function isNotLinked(txn: any): boolean {
   if (deriveDirection(txn) === 'in') return false;
   if (txn?.is_one_time) return false; // a deliberate one-time payment is resolved, not orphaned
+  // A day-wage payable carries no allocation to point at — the derived balance already nets it, so
+  // the owner's answer to "what is this settling?" lives on the transaction as a tag. It is an
+  // answer all the same: a payment that has one is not unlinked money waiting to be explained.
+  if ((txn?.ai_flag_data as { payable_tag?: string } | null)?.payable_tag) return false;
   const allocs: any[] = txn?.txn_allocations ?? [];
   if (allocs.length === 0) return true;
   // A bill_id allocation IS a link (the payment settles a recorded bill) — not orphaned money.
