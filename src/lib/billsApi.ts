@@ -567,7 +567,7 @@ export async function unlinkBillFromPO(billId: string, poId: string): Promise<vo
 // legacy order_type='PO' allocation.
 export interface UnpaidBill { id: string; kind: 'bill' | 'po'; billNo: string | null; billDate: string | null; amount: number; paid: number; remaining: number; projectId: string | null; site: string | null; docUrl: string | null }
 
-export async function loadUnpaidBillsForVendor(stakeholderId: string): Promise<UnpaidBill[]> {
+export async function loadUnpaidBillsForVendor(stakeholderId: string, projectId?: string | null): Promise<UnpaidBill[]> {
   const [bR, projR, poR] = await Promise.all([
     supabase.from('bills').select('id, po_id, project_id, bill_no, bill_date, amount, doc_url, created_at').eq('stakeholder_id', stakeholderId),
     supabase.from('projects').select('project_id, name'),
@@ -603,7 +603,10 @@ export async function loadUnpaidBillsForVendor(stakeholderId: string): Promise<U
     const amount = num(p.vendor_bill_amount), paid = Math.min(amount, paidByPo[p.po_id] || 0);
     out.push({ id: p.po_id, kind: 'po', billNo: p.vendor_bill_number || p.po_id, billDate: billDateOf(p), amount, paid, remaining: amount - paid, projectId: p.project_id ?? null, site: p.project_id ? (projName[p.project_id] || p.project_id) : null, docUrl: p.vendor_bill_doc_url || p.vendor_bill_url || null });
   }
-  return out.filter(b => b.remaining > 0.5).sort((a, b) => (a.billDate || '').localeCompare(b.billDate || '')); // oldest first
+  // When the payment is for a site, show only that vendor's bills for THAT site (plus any not yet
+  // tagged to a site) — never another project's bills, even for the same vendor.
+  const inProject = (b: UnpaidBill) => !projectId || b.projectId === projectId || b.projectId == null;
+  return out.filter(b => b.remaining > 0.5 && inProject(b)).sort((a, b) => (a.billDate || '').localeCompare(b.billDate || '')); // oldest first
 }
 
 // Record a payment's bill allocation. Replaces the txn's full allocation set (must sum to its total):

@@ -102,7 +102,7 @@ export function BillAllocateSheet({ txnId, orgId, stakeholderId, vendorName, amo
   // Load the vendor's unpaid bills; pre-select on an exact remaining match.
   useEffect(() => {
     let live = true;
-    loadUnpaidBillsForVendor(stakeholderId).then(bs => {
+    loadUnpaidBillsForVendor(stakeholderId, defaultProjectId).then(bs => {
       if (!live) return;
       setBills(bs);
       if (prefill === 'fifo') {
@@ -121,7 +121,7 @@ export function BillAllocateSheet({ txnId, orgId, stakeholderId, vendorName, amo
       }
     }).catch(e => { if (live) setErr(errMsg(e)); });
     return () => { live = false; };
-  }, [stakeholderId, amount, prefill]);
+  }, [stakeholderId, amount, prefill, defaultProjectId]);
 
   /**
    * A bill has just arrived through the door — either freshly minted, or the one the dedupe found
@@ -135,7 +135,7 @@ export function BillAllocateSheet({ txnId, orgId, stakeholderId, vendorName, amo
   const adoptBill = async (billId: string) => {
     setBusy('reading'); setErr(null);
     try {
-      const bs = await loadUnpaidBillsForVendor(stakeholderId);
+      const bs = await loadUnpaidBillsForVendor(stakeholderId, defaultProjectId);
       setBills(bs);
       const fresh = bs.find(b => b.kind === 'bill' && b.id === billId);
       if (!fresh) { setErr('That bill is on file, but nothing is left to pay on it.'); return; }
