@@ -891,8 +891,8 @@ export default function TransactionDetail({ session }: { session: Session }) {
     const milestoneName = a.wo_milestones?.name ?? null;
     if (isPO || isWO) return { linked: true, k: `✓ ${a.order_ref}`, sub: `${isPO ? 'Bill on PO' : 'Contract'}${milestoneName ? ` · ${milestoneName}` : ''}` };
     if (isAdv) return { linked: true, k: `Advance to ${payeeName}`, sub: 'No bill yet · adjusts into the next bill' };
-    if (a.bill_id) { const bd = billDocs?.[a.bill_id]; return { linked: true, k: '✓ Bill attached', sub: `${bd?.billNo ? `#${bd.billNo} · ` : ''}settles a recorded bill${bd?.url ? ' · tap to preview' : ''}` }; }
-    if (txn.bill_doc_url) return { linked: true, k: '✓ Bill attached', sub: 'Uploaded · tap to preview' };
+    if (a.bill_id) { const bd = billDocs?.[a.bill_id]; return { linked: true, k: '✓ Bill attached', sub: `${bd?.billNo ? `#${bd.billNo} · ` : ''}settles a recorded bill` }; }
+    if (txn.bill_doc_url) return { linked: true, k: '✓ Bill attached', sub: 'Uploaded with this payment' };
     return { linked: false, k: 'Not linked to work yet', sub: `link ${payeeName}'s ${isVendor ? 'bill' : 'contract'}, and this settles against it` };
   };
   // A vendor payment can be tied to an order two ways, and AttachBillSheet has always supported
@@ -923,7 +923,7 @@ export default function TransactionDetail({ session }: { session: Session }) {
     const loose = allAllocs.filter((a) => !allocSpeaks(a)).reduce((sum, a) => sum + (Number(a.allocated_amount) || 0), 0);
     const base = spoken.length ? allocStatus(spoken[0])
       : tag ? { linked: true, k: `✓ ${payableTagLabel(tag, true)}`,
-          sub: tag === 'other' ? 'Recorded as not settling work · tap to change' : `What this payment settles · tap to change` }
+          sub: tag === 'other' ? 'Recorded as not settling work' : 'What this payment settles' }
       : primaryAlloc ? allocStatus(primaryAlloc)
       : { linked: false, k: 'Not linked to work yet', sub: `link ${payeeName}'s ${isVendor ? 'bill' : 'contract'}, and this settles against it` };
     const st = isGenExp
@@ -931,6 +931,9 @@ export default function TransactionDetail({ session }: { session: Session }) {
       : spoken.length && loose > 0.5 ? { ...base, sub: `${base.sub} · ${rupee(loose)} of it still settles nothing` }
       : spoken.length > 1 ? { ...base, sub: `${base.sub} · and ${spoken.length - 1} more` }
       : base;
+    // The bottom bar is the "there is something still to do" prompt, and so is the tappable row:
+    // once the payment says what it settles, neither has anything left to ask. Changing it is a
+    // deliberate act from then on — the Change beside the status — not something a stray tap does.
     const canLink = !isVoided && !billLinked && !tag && !isGenExp;
 
     // "Cash · Friday 5 Sept, 5:30 pm"
@@ -1044,7 +1047,7 @@ export default function TransactionDetail({ session }: { session: Session }) {
           onReplaceProof={isVoided ? null : () => proofInputRef.current?.click()}
           replacing={proofUploadMutation.isPending}
           events={events}
-          showBar={!isVoided && !billLinked && !isGenExp}
+          showBar={!isVoided && !billLinked && !isGenExp && !st.linked}
           canEdit={canAmend}
           onEdit={openAmendModal}
           ctaLabel={isVendor ? 'Link to a bill' : 'Link to contract'}

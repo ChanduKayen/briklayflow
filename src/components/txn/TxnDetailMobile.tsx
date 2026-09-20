@@ -226,6 +226,9 @@ export default function TxnDetailMobile(p: TxnDetailMobileProps) {
   const [sheet, setSheet] = useState<'menu' | 'delete' | null>(null);
   const [noteOpen, setNoteOpen] = useState(false);
   const [attrStep, setAttrStep] = useState(false);   // status row → the attribution options, in-place
+  // The row asks the question only while it is unanswered; once answered it states the answer and
+  // "Change" is the way back to the options.
+  const ask = !!p.attrCtx && !p.linked;
   const close = () => setSheet(null);
 
   // Portalled to <body> for two reasons, both of which cost real behaviour when they were not:
@@ -298,18 +301,24 @@ export default function TxnDetailMobile(p: TxnDetailMobileProps) {
               <div className="amt">{st.amount}</div>
             </div>
           ))}
-          <button type="button" className={`status${p.linked ? ' linked' : ''}${p.attrCtx ? ' tappable' : ''}`}
-            onClick={() => { if (p.attrCtx) setAttrStep(true); else if (!p.linked && p.onLink) p.onLink(); }}
-            disabled={!p.attrCtx && (p.linked || !p.onLink)}>
+          {/* A row that is already answered STATES the answer. It used to reopen the options on a tap,
+              which read as the question being asked again — so the options are now only ever reached
+              by saying "Change", deliberately. */}
+          <button type="button" className={`status${p.linked ? ' linked' : ''}${ask ? ' tappable' : ''}`}
+            onClick={() => { if (ask) setAttrStep(true); else if (!p.linked && p.onLink) p.onLink(); }}
+            disabled={!ask && (p.linked || !p.onLink)}>
             <span className="sd" />
             <span className="st">
               <span className="s1" style={{ display: 'block' }}>{p.statusTitle}</span>
               <span className="s2" style={{ display: 'block' }}>{p.statusSub}</span>
             </span>
-            {p.attrCtx ? <span className="act chev" aria-hidden="true">›</span> : (!p.linked && p.onLink && <span className="act">Link</span>)}
+            {ask ? <span className="act chev" aria-hidden="true">›</span> : (!p.linked && p.onLink && <span className="act">Link</span>)}
           </button>
-          {p.linked && p.onUnlink && (
-            <div className="statusacts"><button type="button" onClick={p.onUnlink}>Unlink</button></div>
+          {p.linked && (p.attrCtx || p.onUnlink) && (
+            <div className="statusacts">
+              {p.attrCtx && <button type="button" onClick={() => setAttrStep(true)}>Change</button>}
+              {p.onUnlink && <button type="button" onClick={p.onUnlink}>Unlink</button>}
+            </div>
           )}
         </div>
 

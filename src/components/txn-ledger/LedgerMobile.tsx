@@ -627,14 +627,19 @@ function PanelView({ panel, close, refetch, wallets, sites, categories, F, setF,
           ? <div className="s"><span>Kind</span><b>Top-up · not an expense</b></div>
           : <><div className="s"><span>Site</span><b>{e.site || '—'}</b></div><div className="s"><span>Category</span><b>{e.cat || '—'}</b></div></>}
         <div className="s"><span>Paid from</span><b>{from}</b></div>
-        {canAttr ? (
+        {/* Name what it was attributed to — "Linked" told you nothing, and a day-wage answer has no
+            allocation to speak for it, so the row read as unanswered over an answer already given.
+            Once it IS answered this card only STATES it: a quick card is for reading, and reopening
+            the options on a tap asked a question that had already been settled. Changing it belongs
+            on the entry itself, one tap further in, where the whole payment is in view. */}
+        {canAttr && !e.linked ? (
           <button type="button" className="s sx" onClick={() => setAttrStep(true)}>
             <span>{rowLabel}</span>
-            {/* Name what it was attributed to — "Linked" told you nothing, and a day-wage answer has no
-                allocation to speak for it, so the row read as unanswered over an answer already given. */}
-            <b className={e.linked ? '' : 'warn'}>{e.linked ? `${payableTagLabel(e.payableTag) ?? 'Linked'} · change` : 'Choose'}</b>
+            <b className="warn">Choose</b>
             <svg className="c" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
           </button>
+        ) : canAttr ? (
+          <div className="s"><span>{rowLabel}</span><b>{payableTagLabel(e.payableTag) ?? 'Linked'}</b></div>
         ) : e.src !== 'topup' ? (
           <div className="s"><span>Bill</span><b className={e.linked ? '' : 'warn'}>{e.linked ? 'Linked' : 'Not linked'}</b></div>
         ) : null}
