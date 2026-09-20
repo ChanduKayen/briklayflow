@@ -15,6 +15,15 @@ import NewBillModal, { type BillDraft } from '../bills/NewBillModal';
 import { intakeCommit } from '../../lib/billIntake';
 
 const inr = (n: number) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');
+/** A sheet of paper with a plus — the door to recording one, not a drop zone. */
+const DOC_ADD = (
+  <svg viewBox="0 0 24 24" aria-hidden="true">
+    <path d="M13.5 3.5H7.5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2H13" />
+    <path d="M13.5 3.5 18.5 8.5V11" />
+    <path d="M13.5 3.5V8a.5.5 0 0 0 .5.5h4.5" />
+    <path d="M18 14.5v6M15 17.5h6" />
+  </svg>
+);
 const fmtDate = (d: string | null) => d ? new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: '2-digit' }) : '';
 
 export function PayableOptions({
@@ -58,6 +67,9 @@ export function PayableOptions({
   }, [bills, targets, amount]);
 
   const canConfirm = targets?.kind === 'vendor' ? pour.length > 0 : !!choice;
+  // Nothing of theirs is on the books: there is no choice to make here, and an Attribute that can
+  // never be pressed is just a dead weight under the one thing you CAN do. Record the bill first.
+  const nothingToPick = targets?.kind === 'vendor' && targets.bills.length === 0;
 
   const confirm = () => {
     if (!targets) return;
@@ -103,9 +115,18 @@ export function PayableOptions({
                   );
                 })}
               </>
-            ) : <div className="pyo-none">No unpaid bill for {payee.name}{projectName ? ` on ${projectName}` : ''} yet.</div>}
-            {/* The bill module owns the actual upload/create; this is just its door on the txn side. */}
-            <button type="button" className="pyo-add" onClick={() => setAddBill(true)}>+ Upload a bill · or enter it manually</button>
+            ) : <p className="pyo-none">No unpaid bill for {payee.name}{projectName ? ` on ${projectName}` : ''} yet.</p>}
+            {/* The bill module owns the actual upload/create; this is just its door on the txn side.
+                It is built as a row, like the choices above it: an absence is still part of the same
+                list, and a dashed outline promised a drop zone this never was. */}
+            <button type="button" className="pyo-add" onClick={() => setAddBill(true)}>
+              <span className="pyo-ic" aria-hidden="true">{DOC_ADD}</span>
+              <span className="pyo-m">
+                <b>{targets.bills.length ? 'Another bill' : 'Record the bill'}</b>
+                <span>Scan the paper, or type it in</span>
+              </span>
+              <span className="pyo-go" aria-hidden="true">›</span>
+            </button>
           </>
         ) : targets.kind === 'worker_day' ? (
           <>
@@ -144,10 +165,12 @@ export function PayableOptions({
           </>
         )}
       </div>
-      <div className="pyo-f">
-        {allowSkip && <button className="pyo-ghost" onClick={() => onConfirm({ type: 'skip' })}>Skip</button>}
-        <button className="pyo-prim" disabled={!canConfirm} onClick={confirm}>Attribute</button>
-      </div>
+      {(allowSkip || !nothingToPick) && (
+        <div className="pyo-f">
+          {allowSkip && <button className="pyo-ghost" onClick={() => onConfirm({ type: 'skip' })}>Skip</button>}
+          {!nothingToPick && <button className="pyo-prim" disabled={!canConfirm} onClick={confirm}>Attribute</button>}
+        </div>
+      )}
 
       {addBill && (
         <NewBillModal
@@ -205,9 +228,16 @@ const CSS = `
 .pyo-m b{font-weight:600;font-size:.9rem}
 .pyo-m span{font-size:.76rem;opacity:.62;overflow:hidden;text-overflow:ellipsis}
 .pyo-row em{font-style:normal;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:.85rem;flex:none}
-.pyo-none{font-size:.85rem;opacity:.62;padding:14px 4px 4px;line-height:1.5;text-align:center}
-.pyo-add{align-self:flex-start;background:none;border:1px dashed rgba(128,128,128,.4);border-radius:10px;padding:9px 13px;font:inherit;font-size:.82rem;color:var(--pyo-accent);cursor:pointer;margin-top:2px}
-.pyo-add:hover{background:rgba(200,96,58,.08)}
+.pyo-none{font-size:.85rem;opacity:.6;padding:6px 2px 4px;margin:0;line-height:1.5}
+/* The same row the choices are cut from, without their fill: this is an action, not an option. */
+.pyo-add{display:flex;align-items:center;gap:11px;width:100%;text-align:left;padding:12px 13px;background:none;
+  border:1px solid rgba(128,128,128,.22);border-radius:12px;font:inherit;color:inherit;cursor:pointer;margin-top:2px;
+  transition:background .18s,border-color .18s,transform .12s}
+.pyo-add:hover{background:rgba(128,128,128,.09);border-color:rgba(128,128,128,.34)}
+.pyo-add:active{transform:scale(.994)}
+.pyo-ic{flex:none;width:30px;height:30px;border-radius:9px;display:grid;place-items:center;background:rgba(200,96,58,.16);color:var(--pyo-accent)}
+.pyo-ic svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.pyo-go{flex:none;font-size:1.05rem;line-height:1;opacity:.38}
 .pyo-skel{display:flex;flex-direction:column;gap:8px}
 .pyo-sk{display:block;border-radius:12px;background:linear-gradient(90deg,rgba(128,128,128,.10) 25%,rgba(128,128,128,.20) 37%,rgba(128,128,128,.10) 63%);background-size:400% 100%;animation:pyo-shim 1.3s ease-in-out infinite}
 .pyo-sk.sk-hint{height:12px;width:60%;border-radius:6px;margin:2px 0 6px}

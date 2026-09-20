@@ -324,6 +324,12 @@ body.dragging .drop .release{display:block;color:var(--cream)}
   .fab{position:fixed;right:16px;bottom:calc(16px + env(safe-area-inset-bottom));z-index:30;display:inline-flex;height:56px;padding:0 22px 0 18px;border-radius:99px;box-shadow:inset 0 0 0 1px rgba(255,255,255,.14),0 10px 30px rgba(198,90,46,.4);transition:transform .35s var(--spring),opacity .2s,background .2s}
   html.lock .fab{transform:scale(.8);opacity:0;pointer-events:none}
 
+  /* The sheet is written inside .hero, and .hero carries z-index:3 — a stacking context. Its
+     z-index:50 was therefore 50 WITHIN the hero, and the hero as a whole sits at 3, under this
+     backdrop's 40: a 92%-opaque black veil painted over the whole composer, everywhere it opened.
+     On the phone the hero does not need a context of its own (nothing here is positioned over it),
+     so it gives one up and the fixed sheet stacks against the page, where it was meant to. */
+  .hero{z-index:auto}
   .backdrop{display:block;position:fixed;inset:0;z-index:40;background:rgba(12,8,4,.92);opacity:0;transition:opacity .35s var(--ease)}
   .backdrop[hidden]{display:none}
   .backdrop.show{opacity:1}
