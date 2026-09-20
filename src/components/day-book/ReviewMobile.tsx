@@ -183,8 +183,24 @@ const CSS = `
 .rvm .msg{display:grid;grid-template-rows:0fr;transition:grid-template-rows .4s var(--sheet)}
 .rvm .msg.open{grid-template-rows:1fr}
 .rvm .msg>.msg-w{overflow:hidden;min-height:0}
-.rvm .msg .m-in{margin-top:10px;font-size:14px;line-height:1.6;color:var(--ink);font-style:italic;
+.rvm .msg .m-in{margin-top:10px;font-size:14px;line-height:1.6;color:var(--ink);
   border-left:2.5px solid rgba(27,23,19,.12);padding-left:13px}
+.rvm .msg .m-tx{font-style:italic}
+/* What came with the message, at the size a paper is read at — and who sent it, always. */
+.rvm .msg .m-pic{display:block;width:100%;max-width:220px;max-height:260px;object-fit:cover;object-position:top center;
+  border-radius:10px;border:1px solid var(--hair);margin-bottom:9px;background:var(--bg)}
+.rvm .msg .m-who{margin-top:7px;font-size:12.5px;font-style:normal;color:var(--ink-3)}
+
+/* The note reads as a line and edits as one: no box until it is being used. */
+.rvm .kv.note{gap:10px}
+.rvm .kv .ni{flex:1;min-width:0;border:0;background:none;padding:6px 0;font:inherit;font-size:15.5px;font-weight:600;
+  letter-spacing:-.01em;color:var(--ink);outline:none;border-bottom:1px solid transparent;transition:border-color .2s}
+.rvm .kv .ni:focus{border-bottom-color:var(--hair)}
+.rvm .kv .ni::placeholder{color:var(--ink-3);font-weight:500}
+.rvm .kv .nsave{flex:none;height:32px;padding:0 14px;border:0;border-radius:10px;background:var(--tint);color:#fff;
+  font-size:13.5px;font-weight:600;cursor:pointer;animation:rvmNoteIn .2s var(--ease) both}
+.rvm .kv .nsave:active{background:var(--tint-press)}
+@keyframes rvmNoteIn{from{opacity:0;transform:translateX(6px)}to{opacity:1;transform:none}}
 
 .rvm .ctarow{display:flex;gap:9px;margin-top:16px}
 .rvm .cta{flex:1;height:52px;border:0;border-radius:16px;background:var(--tint);color:#fff;
@@ -424,6 +440,9 @@ function Card({
   const [sug, setSug] = useState<null | 'to' | 'site'>(null);
   const [ddq, setDdq] = useState('');
   const [msgOpen, setMsgOpen] = useState(false);
+  // The note as it is being typed. null while untouched, so a card that refreshes underneath keeps
+  // showing what it was given rather than a stale keystroke.
+  const [noteDraft, setNoteDraft] = useState<string | null>(null);
   const [flash, setFlash] = useState<null | 'to' | 'site'>(null);
   const cardRef = useRef<HTMLDivElement>(null);
   const ddRef = useRef<HTMLInputElement>(null);
@@ -445,6 +464,15 @@ function Card({
   const via = entry.source?.startsWith('WHATSAPP') ? 'WhatsApp' : 'Briklay';
   const sentTime = new Date(entry.created_at).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true });
   const message = (entry.transcribed_text || entry.raw_text || '').trim();
+  // Who sent it, and what came with it — a card says this whether the paper is a bill or a payment.
+  const msgWho = (entry.sender_name || '').trim();
+  const msgPic = (entry.raw_image_url || '').trim();
+  const noteDirty = noteDraft !== null && noteDraft.trim() !== (draft.description ?? '').trim();
+  const saveNote = () => {
+    if (!noteDirty) { setNoteDraft(null); return; }
+    onPatch({ description: (noteDraft ?? '').trim() });
+    setNoteDraft(null);
+  };
   const projectRaw = resolveEntry(entry, stakeholders, projects).projectRaw;
 
   // Already owed to this party on this site — read before filing. Vendor: against bills. Worker:
@@ -550,7 +578,17 @@ function Card({
               </div>
             </div>
 
-            <div className="kv"><div className="k">For</div><div className="v" style={{ fontWeight: 500 }}>{draft.description || '—'}</div></div>
+            {/* What the money was for is the line most often slightly wrong, and it was read-only here —
+                correcting a word meant opening the whole edit sheet. It is the field itself now, and
+                the Save only appears once it differs from what is on the card. */}
+            <div className="kv note">
+              <div className="k">For</div>
+              <input className="v ni" value={noteDraft ?? draft.description ?? ''} placeholder="—" enterKeyHint="done"
+                aria-label="What this was for"
+                onChange={(ev) => setNoteDraft(ev.target.value)}
+                onKeyDown={(ev) => { if (ev.key === 'Enter') { (ev.target as HTMLInputElement).blur(); saveNote(); } }} />
+              {noteDirty && <button type="button" className="nsave" onClick={saveNote}>Save</button>}
+            </div>
             {showPayable && (
               <div className="kv"><div className="k">Pending</div>
                 <div className="v" style={{ fontWeight: 500 }}>₹{Math.round(payable).toLocaleString('en-IN')}
@@ -607,7 +645,13 @@ function Card({
               See the message
               {CHEV}
             </button>
-            <div className={`msg${msgOpen ? ' open' : ''}`}><div className="msg-w"><div className="m-in">“{message}”</div></div></div>
+            <div className={`msg${msgOpen ? ' open' : ''}`}><div className="msg-w">
+              <div className="m-in">
+                {msgPic && <img className="m-pic" src={msgPic} alt="" loading="lazy" />}
+                <div className="m-tx">“{message}”</div>
+                <div className="m-who">{msgWho ? `Sent by ${msgWho}` : 'Sender not recorded'}{via === 'WhatsApp' ? ' · on WhatsApp' : ''}</div>
+              </div>
+            </div></div>
           </>
         )}
 

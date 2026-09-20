@@ -90,7 +90,9 @@ const CSS = `
 .txm .txm-attr main{flex:1;min-height:0;display:flex;flex-direction:column;padding:4px 20px calc(16px + env(safe-area-inset-bottom))}
 .txm .txm-attr .pyo{--pyo-accent:var(--tint)}
 @keyframes txm-slidein{from{transform:translateX(100%)}to{transform:none}}
-.txm .statusacts{display:flex;gap:8px;margin-top:8px;padding-left:20px}
+/* The card's own gutter is 18px, and a row of buttons needs a floor under it: these were flush
+   with the right edge and sitting on the card's bottom rule. */
+.txm .statusacts{display:flex;gap:8px;margin-top:6px;padding:0 18px 16px}
 .txm .statusacts button{flex:1;border:1px solid var(--hair);background:var(--card);color:var(--tint);border-radius:12px;padding:10px 0;font-size:14px;font-weight:600;cursor:pointer}
 .txm .statusacts button:active{background:var(--bg)}
 
