@@ -230,6 +230,26 @@ export const composer = {
 };
 
 /**
+ * The "Add a bill" card, lent to a page.
+ *
+ * The bar already owns one, with its stylesheet, its place in the stack and its status capsule. A
+ * page that needs a bill recorded — a payment being pointed at the paper it settles — asks for that
+ * one rather than standing up a second copy, which outside the bar's scope would come up undressed.
+ * It may say who is billing and for which site, and hear back what was filed.
+ */
+export interface BillDoorOpts {
+  lock?: { vendorId: string; vendorName: string; projectId: string; projectName: string } | null;
+  onFiled?: (billId: string) => void;
+}
+let openBill: ((o: BillDoorOpts) => void) | null = null;
+export const billDoor = {
+  /** The bar alone binds. */
+  bind(f: (o: BillDoorOpts) => void) { openBill = f; return () => { if (openBill === f) openBill = null; }; },
+  get available() { return !!openBill; },
+  open(o: BillDoorOpts = {}) { openBill?.(o); },
+};
+
+/**
  * The bar, lent to a page. In select mode the Transactions page's actions take the bar's place —
  * the tabs step down, the actions step up, in the same capsule. Nothing floats over the rows you
  * are choosing. A page offers its toolbar; the bar owns the capsule and the crossfade.

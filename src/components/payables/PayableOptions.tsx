@@ -12,6 +12,8 @@ import { loadAttributionTargets, attrTargetsKey, type Selection, type PayeeType 
 import type { BillPick } from '../../lib/billsApi';
 import { useOrgId } from '../../lib/auth/AuthProvider';
 import NewBillModal, { type BillDraft } from '../bills/NewBillModal';
+import { billDoor } from '../nav/txDraft';
+import { useIsMobile } from '../../lib/useIsMobile';
 import { intakeCommit } from '../../lib/billIntake';
 
 const inr = (n: number) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');
@@ -52,6 +54,9 @@ export function PayableOptions({
   const [bills, setBills] = useState<string[]>([]);
   const [choice, setChoice] = useState<string | null>(current);
   const [addBill, setAddBill] = useState(false);   // the "upload / add a bill" door (vendors)
+  // The phone's door is the card the bar already carries — camera first, then the slip. The desktop
+  // keeps the wide composer, which is what a desktop has room for.
+  const isMobile = useIsMobile();
   const orgId = useOrgId();
   const qc = useQueryClient();
 
@@ -70,6 +75,23 @@ export function PayableOptions({
   // Nothing of theirs is on the books: there is no choice to make here, and an Attribute that can
   // never be pressed is just a dead weight under the one thing you CAN do. Record the bill first.
   const nothingToPick = targets?.kind === 'vendor' && targets.bills.length === 0;
+
+  // A bill just filed from either door: re-read what is owed and tick the new one.
+  const adoptFiled = async (billId: string) => {
+    await qc.invalidateQueries({ queryKey: attrTargetsKey({ id: payee.id, type: payee.type }, projectId, txnDate, selfPaid) });
+    setBills([billId]);
+  };
+
+  const openBillDoor = () => {
+    if (isMobile && billDoor.available) {
+      billDoor.open({
+        lock: { vendorId: payee.id, vendorName: payee.name, projectId, projectName: projectName ?? '' },
+        onFiled: (billId) => { void adoptFiled(billId); },
+      });
+      return;
+    }
+    setAddBill(true);
+  };
 
   const confirm = () => {
     if (!targets) return;
@@ -119,7 +141,7 @@ export function PayableOptions({
             {/* The bill module owns the actual upload/create; this is just its door on the txn side.
                 It is built as a row, like the choices above it: an absence is still part of the same
                 list, and a dashed outline promised a drop zone this never was. */}
-            <button type="button" className="pyo-add" onClick={() => setAddBill(true)}>
+            <button type="button" className="pyo-add" onClick={openBillDoor}>
               <span className="pyo-ic" aria-hidden="true">{DOC_ADD}</span>
               <span className="pyo-m">
                 <b>{targets.bills.length ? 'Another bill' : 'Record the bill'}</b>
@@ -187,8 +209,7 @@ export function PayableOptions({
             if (res.status === 'duplicate') return { duplicate: res.existing };
             // Their new bill → refresh the list and pre-tick it (an explicit action, not an assumption).
             // The modal closes itself on success (its own leave animation → onClose → setAddBill(false)).
-            await qc.invalidateQueries({ queryKey: attrTargetsKey({ id: payee.id, type: payee.type }, projectId, txnDate, selfPaid) });
-            setBills([res.billId]);
+            await adoptFiled(res.billId);
           }}
         />
       )}

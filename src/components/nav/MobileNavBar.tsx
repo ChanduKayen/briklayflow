@@ -31,7 +31,7 @@ import { navAction, type NavActionState } from './navAction';
 import { TxComposer } from './TxComposer';
 import { BillComposer } from './BillComposer';
 import { BILL_CSS } from './billCss';
-import { TX_CSS, composer, emptyBill, emptyDraft, navTakeover, type BillState, type TxDraft } from './txDraft';
+import { TX_CSS, billDoor, composer, emptyBill, emptyDraft, navTakeover, type BillDoorOpts, type BillState, type TxDraft } from './txDraft';
 import { useSheetFlag } from '../../lib/sheetFlag';
 
 // ── icons, exact from the reference (24×24, stroke 1.65, round caps) ──
@@ -223,11 +223,21 @@ export function MobileNavBar({
   const [billDraft, setBillDraft] = useState<BillState | null>(null);
   const billRef = useRef(billDraft);
   useEffect(() => { billRef.current = billDraft; });
+  // A page may borrow this card (billDoor) and say who is billing; the borrower hears what was filed.
+  const [billLock, setBillLock] = useState<BillDoorOpts['lock']>(null);
+  const billFiled = useRef<BillDoorOpts['onFiled']>(undefined);
   const closeBill = useCallback((keep: boolean) => {
     const b = billRef.current;
-    setBillDraft(null);
+    setBillDraft(null); setBillLock(null); billFiled.current = undefined;
     if (keep && b && b.stage === 'check') navAction.draft('Resume bill', () => setBillDraft({ ...b }));
   }, []);
+  useEffect(() => billDoor.bind((o) => {
+    setBillLock(o.lock ?? null);
+    billFiled.current = o.onFiled;
+    closeMore();
+    setBillDraft(emptyBill());
+    navAction.reset();
+  }), [closeMore]);
 
   const openComposer = useCallback((dir: 'out' | 'in' = 'out') => {
     closeMore(); setDraft((d) => d ?? emptyDraft(dir)); navAction.reset();
@@ -314,9 +324,10 @@ export function MobileNavBar({
   return (
     <>
       <style>{CSS + TX_CSS + BILL_CSS}</style>
-      <div className={`mnav${kb.open ? ' kb' : ''}`} style={{ ['--kb' as string]: `${kb.height}px` } as React.CSSProperties}>
+      <div className={`mnav${kb.open ? ' kb' : ''}${draft || billDraft ? ' over' : ''}`} style={{ ['--kb' as string]: `${kb.height}px` } as React.CSSProperties}>
         <TxComposer key={draft ? "on" : "off"} draft={draft} onDraft={setDraft} onClose={closeComposer} />
-        <BillComposer key={billDraft ? "bon" : "boff"} bill={billDraft} onBill={setBillDraft} onClose={closeBill} />
+        <BillComposer key={billDraft ? "bon" : "boff"} bill={billDraft} onBill={setBillDraft} onClose={closeBill}
+          lock={billLock} onFiled={(id) => billFiled.current?.(id)} />
         {moreMounted && (
           <>
             <div className={`mnav-scrim${moreOn ? ' on' : ''}`} onClick={closeMore} />
@@ -415,6 +426,9 @@ const CSS = `
   --clay:#B5472A;--clay-hi:#D4633E;--ease:cubic-bezier(.22,.8,.24,1);--nav-h:64px;--nav-gap:12px;
   position:fixed;inset:0;z-index:40;pointer-events:none;
   font-family:'DM Sans',system-ui,-apple-system,'Segoe UI',sans-serif}
+/* While a composer is up it owns the screen — including over a page's own sheet, which is where it
+   was opened from and must not be painted over by. */
+.mnav.over{z-index:70}
 .mnav,.mnav *{box-sizing:border-box}
 /* the bar and the action ride together; only they tuck away for a full-screen form */
 .mnav-dock{position:absolute;inset:0;pointer-events:none;transition:transform .28s cubic-bezier(.4,0,.2,1),opacity .28s}

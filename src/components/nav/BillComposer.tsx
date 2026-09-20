@@ -57,10 +57,17 @@ const SHEET = (
 const READ_ROWS: [keyof BillState['f'], string][] = [['vendor', 'Vendor'], ['no', 'Bill no.'], ['date', 'Bill date'], ['amount', 'Amount']];
 const shownDate = (iso: string) => (iso ? new Date(iso + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '');
 
-export function BillComposer({ bill, onBill, onClose }: {
+export function BillComposer({ bill, onBill, onClose, lock = null, onFiled }: {
   bill: BillState | null;
   onBill: (b: BillState | null) => void;
   onClose: (keep: boolean) => void;
+  /** A door that already knows who is billing, and for which site, says so instead of asking — a
+   *  payment being pointed at the bill it settles knows both. The read still fills the number, the
+   *  date and the amount; it may not change the party or the site, or the bill would file itself
+   *  away from the payment that opened this. */
+  lock?: { vendorId: string; vendorName: string; projectId: string; projectName: string } | null;
+  /** The bill that was just filed — for a caller that has something to do with it. */
+  onFiled?: (billId: string) => void;
 }) {
   const orgId = useOrgId();
   const { userId } = useAuth();
@@ -77,6 +84,13 @@ export function BillComposer({ bill, onBill, onClose }: {
   const buzz = (ms: number | number[] = 6) => { try { navigator.vibrate?.(ms); } catch { /* unsupported */ } };
   const calm = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
   const set = useCallback((patch: Partial<BillState>) => { onBill(B ? { ...B, ...patch } : null); }, [B, onBill]);
+  // What a fresh state starts as: empty, or already knowing the party and the site.
+  const seed = useMemo(() => ({
+    vendorId: lock?.vendorId ?? '',
+    vendor: lock?.vendorName ?? '',
+    site: lock?.projectId ?? '',
+    siteName: lock?.projectName ?? '',
+  }), [lock]);
 
   const { data: sites = [] } = useQuery<{ id: string; name: string }[]>({
     queryKey: ['txc_sites'], enabled: open, staleTime: 60_000,
@@ -102,15 +116,15 @@ export function BillComposer({ bill, onBill, onClose }: {
     const mine = ++seq.current;
     const url = file.type.startsWith('image/') ? URL.createObjectURL(file) : '';
     onBill({
-      stage: 'reading', file, img: url, vendorId: '', lines: [], unsure: [], openRow: '', dupe: null, kept: false, viewer: false,
-      f: { vendor: '', no: '', date: '', amount: '', site: '', siteName: '' }, got: [],
+      stage: 'reading', file, img: url, vendorId: seed.vendorId, lines: [], unsure: [], openRow: '', dupe: null, kept: false, viewer: false,
+      f: { vendor: seed.vendor, no: '', date: '', amount: '', site: seed.site, siteName: seed.siteName }, got: [],
     });
     try {
       const read: ExtractedBill = await extractBill(file);
       if (seq.current !== mine) return;
       const f = {
-        vendor: read.vendor ?? '', no: read.billNo ?? '', date: read.billDate ?? '',
-        amount: read.amount ? String(Math.round(read.amount)) : '', site: '', siteName: '',
+        vendor: lock ? seed.vendor : read.vendor ?? '', no: read.billNo ?? '', date: read.billDate ?? '',
+        amount: read.amount ? String(Math.round(read.amount)) : '', site: seed.site, siteName: seed.siteName,
       };
       // link the party the header names, the way every other door does
       const hit = read.vendor ? (searchPayees(vendors as never, read.vendor)[0] as { stakeholder_id?: string; name?: string } | undefined) : undefined;
@@ -118,18 +132,19 @@ export function BillComposer({ bill, onBill, onClose }: {
       if (seq.current !== mine) return;
       if (dupe) buzz([10, 40, 10]);
       onBill({
-        stage: 'check', file, img: url, vendorId: hit?.stakeholder_id ?? '', lines: read.lines,
-        unsure: unsureOf(f), openRow: '', dupe, kept: false, viewer: false, f: { ...f, vendor: hit?.name ?? f.vendor }, got: [],
+        stage: 'check', file, img: url, vendorId: lock ? seed.vendorId : hit?.stakeholder_id ?? '', lines: read.lines,
+        unsure: unsureOf(f).filter((k) => !(lock && (k === 'vendor' || k === 'site'))), openRow: '', dupe, kept: false, viewer: false,
+        f: { ...f, vendor: lock ? seed.vendor : hit?.name ?? f.vendor }, got: [],
       });
     } catch {
       if (seq.current !== mine) return;
       buzz([10, 40, 10]);
       onBill({
-        stage: 'bad', file, img: url, vendorId: '', lines: [], unsure: [], openRow: '', dupe: null, kept: false, viewer: false,
-        f: { vendor: '', no: '', date: '', amount: '', site: '', siteName: '' }, got: [],
+        stage: 'bad', file, img: url, vendorId: seed.vendorId, lines: [], unsure: [], openRow: '', dupe: null, kept: false, viewer: false,
+        f: { vendor: seed.vendor, no: '', date: '', amount: '', site: seed.site, siteName: seed.siteName }, got: [],
       });
     }
-  }, [onBill, orgId, vendors]);
+  }, [onBill, orgId, vendors, lock, seed]);
 
   // each field arrives as it is read, not all at once
   useEffect(() => {
@@ -193,6 +208,7 @@ export function BillComposer({ bill, onBill, onClose }: {
       qc.invalidateQueries({ queryKey: ['party_ledger'] });
       qc.invalidateQueries({ queryKey: ['party_topay_map'] });
       navAction.done(`Saved ₹${fmt(d.f.amount)}`);
+      if (res.status === 'minted') onFiled?.(res.billId);
       onBill(null);
     } catch (e) {
       if (typeof navigator !== 'undefined' && navigator.onLine === false) { navAction.offline('Offline · kept as draft', () => onBill({ ...d })); return; }
@@ -276,9 +292,10 @@ export function BillComposer({ bill, onBill, onClose }: {
               <button type="button" className="manLink" onClick={() => {
                 buzz(4);
                 onBill({
-                  stage: 'check', file: null, img: '', vendorId: '', lines: [], unsure: ['vendor', 'no', 'date', 'amount'],
-                  openRow: 'vendor', dupe: null, kept: false, viewer: false,
-                  f: { vendor: '', no: '', date: '', amount: '', site: '', siteName: '' }, got: READ_ROWS.map(([k]) => k),
+                  stage: 'check', file: null, img: '', vendorId: seed.vendorId, lines: [],
+                  unsure: (['vendor', 'no', 'date', 'amount'] as string[]).filter((k) => !(lock && k === 'vendor')),
+                  openRow: lock ? 'amount' : 'vendor', dupe: null, kept: false, viewer: false,
+                  f: { vendor: seed.vendor, no: '', date: '', amount: '', site: seed.site, siteName: seed.siteName }, got: READ_ROWS.map(([k]) => k),
                 });
               }}>or enter it manually</button>
               <p className="waLine">
