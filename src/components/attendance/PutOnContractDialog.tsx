@@ -35,7 +35,6 @@ export function PutOnContractDialog({ ctx, onClose, onDone, onError, onToast }: 
   const [woId, setWoId] = useState<string>('');
   const [stages, setStages] = useState<Stage[] | null>(null);
   const [stageIds, setStageIds] = useState<string[]>([]);
-  const [mode, setMode] = useState<ContractMode>('keep_wages');   // fate of prior wages (percent mode)
   const [measure, setMeasure] = useState<MeasureMode>('percent');
   const [busy, setBusy] = useState(false);
 
@@ -47,8 +46,8 @@ export function PutOnContractDialog({ ctx, onClose, onDone, onError, onToast }: 
     return () => { off = true; };
   }, [ctx.projectId, ctx.stakeholderId, onError]);
 
-  // On picking a contract, load its stages WITH units (for the chips) and default every phase checked
-  // (the artifact's shape). Un-checking narrows what shows in their payments.
+  // On picking a contract, load its stages WITH units (for the chips). Phases start UNCHECKED — the
+  // supervisor picks the ones this crew actually works; only those show in their payments.
   useEffect(() => {
     if (!woId) { setStages(null); setStageIds([]); return; }
     let off = false;
@@ -56,7 +55,7 @@ export function PutOnContractDialog({ ctx, onClose, onDone, onError, onToast }: 
       .then(({ data }) => {
         if (off) return;
         const s: Stage[] = (data ?? []).map((m: any) => ({ milestone_id: m.milestone_id, name: m.name, unit: (m.unit_type || 'LS') }));
-        setStages(s); setStageIds(s.map((x) => x.milestone_id));
+        setStages(s); setStageIds([]);
       });
     return () => { off = true; };
   }, [woId]);
@@ -64,11 +63,13 @@ export function PutOnContractDialog({ ctx, onClose, onDone, onError, onToast }: 
   const startNew = () => navigate('/work-orders/new', { state: { projectId: ctx.projectId, stakeholderId: ctx.stakeholderId } });
   const toggleStage = (id: string) => setStageIds((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
   const phasesOk = !!stages && (stages.length <= 1 || stageIds.length > 0);
-  const showWages = measure === 'percent' && ctx.accrued.amount > 0;
   const canConfirm = !!woId && phasesOk && !busy;
 
   async function confirm() {
     if (!canConfirm || !woId) return;
+    // The measure choice IS the decision: measuring the work folds prior day-wages into the contract;
+    // measuring as wages keeps counting them off against it. No separate "keep/fold" question.
+    const mode: ContractMode = measure === 'percent' ? 'fold' : 'keep_wages';
     const picked = measure === 'wages'
       ? (stageIds.length ? stageIds : null)
       : (stages && stageIds.length && stageIds.length < stages.length ? stageIds : null);
@@ -112,6 +113,20 @@ export function PutOnContractDialog({ ctx, onClose, onDone, onError, onToast }: 
             </>
           )}
 
+          {woId && (
+            <>
+              <label className="q">How do we measure it?</label>
+              <label className={`opt${measure === 'percent' ? ' on' : ''}`}>
+                <input type="radio" name="meas" checked={measure === 'percent'} onChange={() => setMeasure('percent')} />
+                <div><div className="l">Measure the work — lessen from the contract</div><div className="s">Certify each phase as it completes; the contract value comes down.</div></div>
+              </label>
+              <label className={`opt${measure === 'wages' ? ' on' : ''}`}>
+                <input type="radio" name="meas" checked={measure === 'wages'} onChange={() => setMeasure('wages')} />
+                <div><div className="l">Measure as wages — lessen from the contract</div><div className="s">Keep counting daily attendance; each wage is set off against the contract.</div></div>
+              </label>
+            </>
+          )}
+
           {woId && stages && stages.length > 1 && (
             <>
               <label className="q">Which stages will they work? <span className="mute">— only these show in their payments</span></label>
@@ -124,34 +139,6 @@ export function PutOnContractDialog({ ctx, onClose, onDone, onError, onToast }: 
                 ))}
               </div>
             </>
-          )}
-
-          {showWages && (
-            <>
-              <label className="q">The <span className="mono">{ctx.accrued.days} day{ctx.accrued.days === 1 ? '' : 's'} · {INR(ctx.accrued.amount)}</span> already logged as wages</label>
-              <label className={`opt${mode === 'keep_wages' ? ' on' : ''}`}>
-                <input type="radio" name="prior" checked={mode === 'keep_wages'} onChange={() => setMode('keep_wages')} />
-                <div><div className="l">Keep as wages</div><div className="s">{INR(ctx.accrued.amount)} stays owed for those days.</div></div>
-              </label>
-              <label className={`opt${mode === 'fold' ? ' on' : ''}`}>
-                <input type="radio" name="prior" checked={mode === 'fold'} onChange={() => setMode('fold')} />
-                <div><div className="l">Fold into the contract</div><div className="s">The contract value covers that work — the day-wages drop off.</div></div>
-              </label>
-            </>
-          )}
-
-          {woId && (
-            <details className="adv">
-              <summary>{measure === 'percent' ? 'Paid by certified stages' : 'Paid by counting days'} — change</summary>
-              <label className={`opt${measure === 'percent' ? ' on' : ''}`}>
-                <input type="radio" name="meas" checked={measure === 'percent'} onChange={() => setMeasure('percent')} />
-                <div><div className="l">By certified stages</div><div className="s">Certify each stage in its own unit as work completes. The usual flow.</div></div>
-              </label>
-              <label className={`opt${measure === 'wages' ? ' on' : ''}`}>
-                <input type="radio" name="meas" checked={measure === 'wages'} onChange={() => setMeasure('wages')} />
-                <div><div className="l">Keep counting days, settle against the contract</div><div className="s">Daily attendance continues; wages are set off against a stage, capped, rolling to the next.</div></div>
-              </label>
-            </details>
           )}
 
           <div className="foot">

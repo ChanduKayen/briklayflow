@@ -30,6 +30,10 @@ import { useSignedDocs, isPdf, type Paper } from './docSigning';
 import { useSheetDrag } from '../../lib/sheetDrag';
 import { useSheetFlag } from '../../lib/sheetFlag';
 import { toEntry, type Entry, type LedgerRaw } from './toEntry';
+import { useOrgId } from '../../lib/auth/AuthProvider';
+import { PayableOptions } from '../payables/PayableOptions';
+import { applyAttribution, prefetchAttrTargets, type Selection } from '../../lib/payableAttribution';
+import { useQueryClient } from '@tanstack/react-query';
 
 const inr = (n: number) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');
 const initials = (n: string) => n.replace(/[^A-Za-z ]/g, ' ').trim().split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase();
@@ -74,6 +78,7 @@ export function LedgerMobile({ rows, wallets, categories, sites, loading, refetc
   const [ledger, setLedger] = useState('');              // a wallet holder's own ledger
   const [F, setF] = useState<{ site: string; clip: boolean; min: number }>({ site: '', clip: false, min: 0 });
   const [panel, setPanel] = useState<Panel>(null);
+  const qc = useQueryClient();
   useSheetFlag(!!panel);   // the page's dark headers step aside while a card is up
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [selecting, setSelecting] = useState(false);
@@ -329,6 +334,10 @@ export function LedgerMobile({ rows, wallets, categories, sites, loading, refetc
           if (!selecting && (ev.target as HTMLElement).closest('.clipx')) { buzz(5); setPeek({ e, at: 0 }); return; }
           if (!selecting && (ev.target as HTMLElement).closest('.wtag')) { openWallet(e.wallet); return; }
           if (selecting) { toggle(e.id); buzz(4); return; }
+          // Warm the attribution options so tapping "Payable for"/"Bill for" opens instantly.
+          if (e.stakeholderId && e.src !== 'topup' && e.dir === 'out') {
+            prefetchAttrTargets(qc, { id: e.stakeholderId, type: e.payeeType === 'Vendor' ? 'Vendor' : 'Worker' }, e.siteId, e.date, e.amt);
+          }
           setPanel({ kind: 'entry', e });
         }}>
         <span className="mark" aria-hidden="true">{front}<span className="k">{TICK}</span></span>
@@ -512,7 +521,7 @@ export function LedgerMobile({ rows, wallets, categories, sites, loading, refetc
 
       {panel && <div className="lmx-scrim on" onClick={() => setPanel(null)} />}
       {panel && <PanelView
-        panel={panel} close={() => setPanel(null)} wallets={wallets} sites={sites} categories={categories} F={F} setF={setF}
+        panel={panel} close={() => setPanel(null)} refetch={refetch} wallets={wallets} sites={sites} categories={categories} F={F} setF={setF}
         shown={visible.length} openWallet={openWallet} onOpenEntry={onOpenEntry} onPeek={(e, at) => setPeek({ e, at })} onImport={onImport}
         onExportShown={() => { csv(visible, 'transactions'); say('Downloaded what is shown'); }}
         onSelect={() => { setPanel(null); enterSelect(); say('Tap entries to select them'); }}
@@ -563,12 +572,14 @@ function Attachments({ e, onPeek }: { e: Entry; onPeek: (at: number) => void }) 
 }
 
 // ── the panels: the bar opens, as everywhere ──────────────────────────────────
-function PanelView({ panel, close, wallets, sites, categories, F, setF, shown, openWallet, onOpenEntry, onPeek, onImport, onExportShown, onSelect, onCategory, onSite, n }: {
-  panel: NonNullable<Panel>; close: () => void; wallets: WalletBalance[]; sites: { id: string; name: string }[]; categories: [string, string][];
+function PanelView({ panel, close, refetch, wallets, sites, categories, F, setF, shown, openWallet, onOpenEntry, onPeek, onImport, onExportShown, onSelect, onCategory, onSite, n }: {
+  panel: NonNullable<Panel>; close: () => void; refetch: () => void; wallets: WalletBalance[]; sites: { id: string; name: string }[]; categories: [string, string][];
   F: { site: string; clip: boolean; min: number }; setF: (f: { site: string; clip: boolean; min: number }) => void;
   shown: number; openWallet: (n: string) => void; onOpenEntry: (id: string) => void; onPeek: (e: Entry, at: number) => void; onImport: () => void;
   onExportShown: () => void; onSelect: () => void; onCategory: (code: string) => void; onSite: (id: string) => void; n: number;
 }) {
+  const orgId = useOrgId();
+  const [attrStep, setAttrStep] = useState(false);   // the entry card's "next state": choose the payable
   const [on, setOn] = useState(false);
   useEffect(() => { const r = requestAnimationFrame(() => setOn(true)); return () => cancelAnimationFrame(r); }, []);
   // Pull it down to put it back — from anywhere on the sheet (sheetDrag), which stands aside while
@@ -582,7 +593,33 @@ function PanelView({ panel, close, wallets, sites, categories, F, setF, shown, o
   if (panel.kind === 'entry') {
     const e = panel.e;
     const from = e.src === 'wallet' ? `${e.wallet}'s wallet` : e.src === 'topup' ? `You → ${e.wallet}'s wallet` : `You · ${e.via || '—'}`;
-    body = (
+    // A party payment out can be attributed to a payable — the row below is the entry point, and
+    // tapping it turns THIS card into its next state (the options), not a new screen.
+    const isVendorEntry = e.payeeType === 'Vendor';
+    const canAttr = e.src !== 'topup' && !!e.stakeholderId && e.dir === 'out';
+    const rowLabel = isVendorEntry ? 'Bill for' : 'Payable for';
+    const onAttr = (sel: Selection) => { void (async () => {
+      setAttrStep(false);
+      if (sel.type !== 'skip') {
+        try { await applyAttribution(e.id, orgId ?? '', e.amt, e.siteId || null, sel); }
+        catch (err) { window.alert(err instanceof Error ? err.message : 'Could not attribute'); }
+      }
+      refetch(); close();
+    })(); };
+
+    body = attrStep && canAttr ? (
+      <>
+        <div className="p-head">
+          <button type="button" className="x" aria-label="Back" onClick={() => setAttrStep(false)} style={{ order: -1 }}>{CHEVR}</button>
+          <div className="t"><h2>{rowLabel}</h2><span>{e.name}{e.site ? ` · ${e.site}` : ''} · {inr(e.amt)}</span></div>{X}
+        </div>
+        <PayableOptions
+          payee={{ id: e.stakeholderId as string, name: e.name, type: isVendorEntry ? 'Vendor' : 'Worker' }}
+          projectId={e.siteId} projectName={e.site || null} txnDate={e.date} amount={e.amt} selfPaid={e.amt}
+          allowSkip={false} onConfirm={onAttr}
+        />
+      </>
+    ) : (
       <>
         <div className="p-head"><div className="t"><h2>{e.name}</h2><span>{e.day}, {e.dow}</span></div>{X}</div>
         <div className="figure"><span>₹</span>{Math.round(e.amt).toLocaleString('en-IN')}</div>
@@ -590,15 +627,19 @@ function PanelView({ panel, close, wallets, sites, categories, F, setF, shown, o
           ? <div className="s"><span>Kind</span><b>Top-up · not an expense</b></div>
           : <><div className="s"><span>Site</span><b>{e.site || '—'}</b></div><div className="s"><span>Category</span><b>{e.cat || '—'}</b></div></>}
         <div className="s"><span>Paid from</span><b>{from}</b></div>
-        {e.src !== 'topup' && <div className="s"><span>Bill</span><b className={e.linked ? '' : 'warn'}>{e.linked ? 'Linked' : 'Not linked'}</b></div>}
+        {canAttr ? (
+          <button type="button" className="s sx" onClick={() => setAttrStep(true)}>
+            <span>{rowLabel}</span>
+            <b className={e.linked ? '' : 'warn'}>{e.linked ? 'Linked · change' : 'Choose'}</b>
+            <svg className="c" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>
+          </button>
+        ) : e.src !== 'topup' ? (
+          <div className="s"><span>Bill</span><b className={e.linked ? '' : 'warn'}>{e.linked ? 'Linked' : 'Not linked'}</b></div>
+        ) : null}
         <Attachments e={e} onPeek={(at) => { close(); onPeek(e, at); }} />
         {e.wa && <p className="quote">WhatsApp: “{e.wa}”</p>}
-        {/* One way on, unless there is something specific left undone with this entry. */}
         <div className="p-acts">
-          {e.src !== 'topup' && !e.linked && <button type="button" className="sec" onClick={() => { close(); onOpenEntry(e.id); }}>Open the entry</button>}
-          <button type="button" className="pri" onClick={() => { close(); onOpenEntry(e.id); }}>
-            {e.src !== 'topup' && !e.linked ? 'Link a bill' : 'Open the entry'}
-          </button>
+          <button type="button" className="pri" onClick={() => { close(); onOpenEntry(e.id); }}>Open the entry</button>
         </div>
       </>
     );

@@ -514,13 +514,20 @@ export default function AttendanceSheet({ session }: { session: Session }) {
     const el = rowmenu();
     el.innerHTML = `<button data-rates>Rates for ${escapeHtml((r.trade.split(' · ')[0] || r.trade).toLowerCase())}</button><button data-wa>Message on WhatsApp</button><hr>`
       + (r.contractWages
-        ? `<div class="note" title="${escapeHtml(wagesContractName(r.crew))}">${escapeHtml(WAGES_ASK.standingHead)}<b>${escapeHtml(shortContract(wagesContractName(r.crew), 30))}</b></div>`
+        ? `<div class="note" title="${escapeHtml(wagesContractName(r.crew))}">${escapeHtml(WAGES_ASK.standingHead)}<b>${escapeHtml(shortContract(wagesContractName(r.crew), 30))}</b></div><button data-back>Move back to daily wages (no contract)…</button>`
         : `<button data-ctr>Put on a contract…</button>`)
       + `<hr><button class="danger" data-rm>Remove from this week</button>`;
     (el.querySelector('[data-rates]') as HTMLElement).onclick = () => { closeAll(); setRcOpen(true); };
     (el.querySelector('[data-wa]') as HTMLElement).onclick = () => { closeAll(); toast('Message on WhatsApp'); };
     const ctr = el.querySelector('[data-ctr]') as HTMLElement | null;
     if (ctr) ctr.onclick = () => { closeAll(); openPutOnContract(r); };
+    // Wages-mode-on-contract crew: let them go back to plain daily wages (clears the contract link).
+    const back = el.querySelector('[data-back]') as HTMLElement | null;
+    if (back) back.onclick = async () => {
+      closeAll();
+      try { if (r.crew) { await setCrewBasis(r.crew.crewId, 'labour'); await load(); toast('Back to daily wages from today · no contract'); } }
+      catch (e) { fail(e); }
+    };
     (el.querySelector('[data-rm]') as HTMLElement).onclick = async () => {
       closeAll();
       const days = rowDays(r);

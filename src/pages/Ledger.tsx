@@ -31,6 +31,8 @@ import { V, font, serif, nums, terraGrad } from '../components/txn-ledger/ledger
 import { useCursorLamp } from '../components/nav/useCursorLamp';
 import { DirMedallion, Amount, AnchorChip, FilterChip } from '../components/txn-ledger/LedgerAtoms';
 import { TrackChip, TRACK_CHIP_CSS } from '../components/txn-ledger/TrackChip';
+import { PayablePicker } from '../components/payables/PayablePicker';
+import { applyAttribution, prefetchAttrTargets } from '../lib/payableAttribution';
 import { unlinkTxnOrder } from '../lib/trackingApi';
 import { useOrgId } from '../lib/auth/AuthProvider';
 import WalletRail from '../components/wallets/WalletRail';
@@ -238,6 +240,28 @@ function EntryRow(p: EntryProps) {
         <ChevronRight className="bk-go" size={16} strokeWidth={2} aria-hidden="true" />
       </div>
     </div>
+  );
+}
+
+/* ---------- worker row chip: "Towards which payable?" — a nudge, or the linked target ----------
+   A worker is paid against work done, not a vendor-style contract line. The chip attributes the
+   payment to a phase (contract worker) or a bucket (day-wage) via the shared picker — it never shows
+   a burn-down. Linked → the target's name (tap to change); unlinked → a quiet nudge. */
+function tagLabel(tag: string | undefined | null): string | undefined {
+  return tag === 'this_week' ? 'This week' : tag === 'past' ? 'Past balance' : tag === 'other' ? 'Other' : undefined;
+}
+function WorkerPayableChip({ label, onClick, onHover }: { label?: string; onClick: () => void; onHover?: () => void }) {
+  const linked = !!label;
+  return (
+    <button type="button" onClick={(e) => { e.stopPropagation(); onClick(); }} onMouseEnter={onHover}
+      className="inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-md"
+      title="Towards which payable? — from work done"
+      style={{ background: linked ? V.field : 'transparent', color: linked ? V.inkSoft : V.sys,
+        border: `1px dashed ${linked ? 'transparent' : V.line}`, cursor: 'pointer', ...font }}>
+      {linked
+        ? <><span className="shrink-0 rounded-full" style={{ width: 5, height: 5, background: V.sage }} />{label}</>
+        : <>Towards a payable <span style={{ color: V.faint }}>›</span></>}
+    </button>
   );
 }
 
@@ -604,7 +628,7 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
     queryFn: async () => {
       const { data, error } = await supabase
         .from('transactions')
-        .select('*, stakeholders(name, type, category), wallets(holder_name), txn_allocations(allocation_id, project_id, allocated_amount, order_type, order_ref, bill_id, projects(name))')
+        .select('*, stakeholders(name, type, category), wallets(holder_name), txn_allocations(allocation_id, project_id, allocated_amount, order_type, order_ref, bill_id, milestone_id, projects(name), wo_milestones(name))')
         .order('created_at', { ascending: false });
       if (error) throw error;
       return data;
@@ -770,6 +794,28 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
       return counts;
     },
   });
+
+  // Workers carry a "Towards which payable?" chip, not a contract burn-down. Its LINKED state (which
+  // phase / tag a payment was attributed to) is read once for all visible worker payments.
+  const workerTxnIds = useMemo(() => {
+    const ids: string[] = [];
+    for (const t of ledger ?? []) if (t.stakeholder_id && t.stakeholders?.type === 'Worker' && deriveDirection(t) === 'out') ids.push(t.txn_id);
+    return ids;
+  }, [ledger]);
+  const { data: phaseByTxn = {} } = useQuery<Record<string, string>>({
+    queryKey: ['ledger_payment_phase', workerTxnIds],
+    enabled: workerTxnIds.length > 0,
+    queryFn: async () => {
+      const out: Record<string, string> = {};
+      const { data, error } = await supabase.from('work_certifications')
+        .select('txn_id, phase:wo_milestones!attributed_milestone_id(name)')
+        .in('txn_id', workerTxnIds).eq('source', 'payment');
+      if (error) return out;   // column/table not present yet → chip just reads as a nudge
+      for (const r of (data ?? []) as any[]) if (r.txn_id) out[r.txn_id] = r.phase?.name || 'Contract';
+      return out;
+    },
+  });
+  const [attrPicker, setAttrPicker] = useState<{ txnId: string; payee: { id: string; name: string; type: 'Worker' | 'Vendor' }; projectId: string; projectName: string | null; amount: number; date: string | null; selfPaid: number } | null>(null);
 
   // Deep-link focus: the Day Book's filed "View →" links to /ledger?txn=<id>. Scroll to
   // and ring that row once the ledger has loaded (once — survives realtime refetches).
@@ -1666,6 +1712,27 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
                         ? <span className="inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-md" style={{ background: V.field, color: V.inkSoft, ...font }}><span className="shrink-0 rounded-full" style={{ width: 5, height: 5, background: V.faint }} />Overhead <span style={{ color: V.faint }}>· no party</span></span>
                         : billAttached
                           ? <span className="inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-md" style={{ background: V.field, color: V.inkSoft, ...font }}>🧾 <span>Bill</span></span>
+                          // Workers: one "Towards which payable?" chip — the linked phase/tag, or a nudge.
+                          // Never a contract burn-down, never a "link to contract" prompt.
+                          : (txn.stakeholders?.type === 'Worker' && dir === 'out' && !isWTransfer && txn.status !== 'Voided')
+                            ? <WorkerPayableChip
+                                label={(() => {
+                                  // Linked → the contract phase (from the WO allocation, set for BOTH formats),
+                                  // else a day-wage tag, else a nudge.
+                                  const woA = (txn.txn_allocations || []).find((a: any) => a.order_type === 'WO');
+                                  if (woA) return (woA as any).wo_milestones?.name || 'Contract';
+                                  return tagLabel((txn.ai_flag_data as { payable_tag?: string } | null)?.payable_tag);
+                                })()}
+                                onClick={() => setAttrPicker({
+                                  txnId: txn.txn_id,
+                                  payee: { id: String(txn.stakeholder_id), name: txn.stakeholders?.name || 'Worker', type: 'Worker' },
+                                  projectId: String((txn.txn_allocations || [])[0]?.project_id ?? ''),
+                                  projectName: projName, amount: Number(txn.total_amount), date: txn.date ?? null,
+                                  // Add this payment back UNLESS a phase-cert already offsets it (billed rose with paid).
+                                  selfPaid: phaseByTxn[txn.txn_id] ? 0 : Number(txn.total_amount),
+                                })}
+                                onHover={() => prefetchAttrTargets(qc, { id: String(txn.stakeholder_id), type: 'Worker' }, String((txn.txn_allocations || [])[0]?.project_id ?? ''), txn.date ?? null, phaseByTxn[txn.txn_id] ? 0 : Number(txn.total_amount))}
+                              />
                           : (anchor === null && dir === 'out' && txn.stakeholder_id && (txn.txn_allocations || []).length > 0 && txn.status !== 'Voided')
                             ? <TrackChip txn={txn} onLinked={() => { qc.invalidateQueries({ queryKey: ['ledger'] }); }} />
                             : undefined;
@@ -1847,6 +1914,31 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
 
       {drawerStk && (
         <StakeholderLedgerDrawer isOpen={!!drawerStk} onClose={() => setDrawerStk(null)} stakeholderId={drawerStk} projectId={drawerProject} />
+      )}
+
+      {attrPicker && (
+        <PayablePicker
+          payee={attrPicker.payee}
+          projectId={attrPicker.projectId}
+          projectName={attrPicker.projectName}
+          txnDate={attrPicker.date}
+          amount={attrPicker.amount}
+          selfPaid={attrPicker.selfPaid}
+          allowSkip={false}
+          onClose={() => setAttrPicker(null)}
+          onConfirm={async (sel) => {
+            const a = attrPicker; setAttrPicker(null);
+            if (!a || sel.type === 'skip') return;
+            try {
+              await applyAttribution(a.txnId, orgId ?? '', a.amount, a.projectId || null, sel);
+              qc.invalidateQueries({ queryKey: ['ledger'] });
+              qc.invalidateQueries({ queryKey: ['ledger_payment_phase'] });
+              qc.invalidateQueries({ queryKey: ['party_ledger'] });
+              qc.invalidateQueries({ queryKey: ['weekly_payments'] });
+              qc.invalidateQueries({ queryKey: ['v_party_balance'] });
+            } catch (e) { window.alert(e instanceof Error ? e.message : 'Could not attribute the payment'); }
+          }}
+        />
       )}
 
       {/* bulk action bar */}

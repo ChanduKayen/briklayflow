@@ -15,6 +15,9 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { RoughEntry } from '../../types';
 import { fileRoughEntry, fileRoughEntrySplit, rejectRoughEntry, createParty, errMessage, type ProjectSplit } from './fileEntry';
 import { resolveEntry, type ProjectLite, type StakeholderLite } from './resolveEntry';
+import { usePayablePreview } from './payablePreview';
+import { PayablePicker } from '../payables/PayablePicker';
+import { applyAttribution, type Selection } from '../../lib/payableAttribution';
 import { BillRowCard } from './BillRowCard';
 import { NatureChip, natureOf } from './atoms';
 import DragSheet from '../DragSheet';
@@ -444,6 +447,12 @@ function Card({
   const message = (entry.transcribed_text || entry.raw_text || '').trim();
   const projectRaw = resolveEntry(entry, stakeholders, projects).projectRaw;
 
+  // Already owed to this party on this site — read before filing. Vendor: against bills. Worker:
+  // derived from attendance / work done. Shown as quiet context on the card.
+  const { data: payable = 0 } = usePayablePreview(draft.payeeId || null, draft.projectId || null);
+  const payeeType = draft.payeeId ? (stakeholders.find((s) => s.stakeholder_id === draft.payeeId)?.type ?? null) : null;
+  const showPayable = !draft.split && !!draft.payeeId && !!draft.projectId && payable > 0.5;
+
   const suggestions = useMemo(() => suggestionsOf(entry), [entry]);
 
   /** What a pick means: an overhead head files party-less; anything else is a party (or a new name). */
@@ -542,6 +551,11 @@ function Card({
             </div>
 
             <div className="kv"><div className="k">For</div><div className="v" style={{ fontWeight: 500 }}>{draft.description || '—'}</div></div>
+            {showPayable && (
+              <div className="kv"><div className="k">Pending</div>
+                <div className="v" style={{ fontWeight: 500 }}>₹{Math.round(payable).toLocaleString('en-IN')}
+                  <span style={{ opacity: .6, fontWeight: 400 }}> · {payeeType === 'Vendor' ? 'from bills' : 'from work done'}</span></div></div>
+            )}
           </div>
         )}
 
@@ -621,6 +635,8 @@ export default function ReviewMobile(p: ReviewMobileProps) {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [acted, setActed] = useState(false);
+  // "Towards which payable?" — asked before a party+site entry is filed.
+  const [picker, setPicker] = useState<{ entryId: string; payeeId: string; payeeName: string; payeeType: 'Vendor' | 'Worker'; projectId: string; projectName: string | null; amount: number; date: string | null } | null>(null);
   const wraps = useRef<Record<string, HTMLDivElement | null>>({});
   const qc = useQueryClient();
   // Pull the deck down to read the inbox again. The deck is its own scroller (the page doesn't move),
@@ -736,7 +752,25 @@ export default function ReviewMobile(p: ReviewMobileProps) {
       if (!d.projectId && !w.refill && !isCompanyHead(d.genHead)) { nudge('site'); return; }
       // An overhead files under its head with no party — there is nobody to create.
       if (!d.payeeId && !d.genHead) { setActiveId(e.id); setNpName(d.payeeName ?? ''); setSheet('np'); return; }
+      // Ask "towards which payable?" before filing a party+site payment. Overheads / refills / new
+      // parties skip it and file plain.
+      if (d.payeeId && d.projectId && !w.refill && !isCompanyHead(d.genHead)) {
+        const pt = p.stakeholders.find(s => s.stakeholder_id === d.payeeId)?.type;
+        setPicker({
+          entryId: e.id, payeeId: d.payeeId, payeeName: d.payeeName || 'Party',
+          payeeType: (pt === 'Vendor' ? 'Vendor' : 'Worker'),
+          projectId: d.projectId, projectName: projects.find(x => x.project_id === d.projectId)?.name ?? null,
+          amount: d.amount, date: e.ai_extracted?.date ?? null,
+        });
+        return;
+      }
     }
+    await commitFile(e, d, w, null);
+  };
+
+  // The single write path. `sel` (from the picker) is applied to the just-filed txn; null = file plain.
+  const commitFile = async (e: RoughEntry, d: Draft, w: ReturnType<typeof walletPlan>, sel: Selection | null) => {
+    if (busy) return;
     setBusy(true);
     try {
       if (d.split) {
@@ -749,11 +783,15 @@ export default function ReviewMobile(p: ReviewMobileProps) {
           generalExpense: !!d.genHead, generalExpenseHead: d.genHead || undefined,
         }, splits);
       } else {
-        await fileRoughEntry(e, p.orgId, {
+        const txnId = await fileRoughEntry(e, p.orgId, {
           payeeId: d.payeeId || '', projectId: d.projectId || '', amount: d.amount, description: d.description,
           generalExpense: !!d.genHead, generalExpenseHead: d.genHead || undefined,
           funding: w.funding, topUpWalletId: w.topUpWalletId,
         });
+        if (sel && sel.type !== 'skip') {
+          try { await applyAttribution(txnId, p.orgId, d.amount, d.projectId || null, sel); }
+          catch (err) { p.onError(errMessage(err, 'Filed — but could not attribute it')); }
+        }
       }
       setFiledSum(s => s + d.amount);
       // A refill lands IN a wallet, a wallet spend goes OUT of one — either way the balances the
@@ -1037,6 +1075,22 @@ export default function ReviewMobile(p: ReviewMobileProps) {
         <button type="button" className="b2" disabled={!splitOk} onClick={doSplit}>File {spLines.length} entries</button>
         <div className="autonote">Each transaction is described automatically —<br />purpose · site · part of the original amount.</div>
       </DragSheet>
+
+      {picker && (
+        <PayablePicker
+          payee={{ id: picker.payeeId, name: picker.payeeName, type: picker.payeeType }}
+          projectId={picker.projectId}
+          projectName={picker.projectName}
+          txnDate={picker.date}
+          amount={picker.amount}
+          onConfirm={(sel) => {
+            const e = p.entries.find(x => x.id === picker.entryId);
+            setPicker(null);
+            if (e) { const d = draftOf(e); void commitFile(e, d, walletPlan(e, d), sel); }
+          }}
+          onClose={() => setPicker(null)}
+        />
+      )}
     </div>
   );
 }

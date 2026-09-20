@@ -40,6 +40,9 @@ import { useSwipeTriage } from './useSwipeTriage';
 import { CardSplitPanel } from './CardSplitPanel';
 import { useSignedDocUrl } from '../../lib/storage';
 import { resolveEntry } from './resolveEntry';
+import { usePayablePreview } from './payablePreview';
+import { PayablePicker } from '../payables/PayablePicker';
+import { applyAttribution, type Selection } from '../../lib/payableAttribution';
 
 export interface StakeholderLite { stakeholder_id: string; name: string; type?: string; category?: string; aliases?: string[] | null }
 export interface ProjectLite { project_id: string; name: string }
@@ -144,6 +147,14 @@ export function ReviewCard({
   const gaps = archived ? [] : gapsOf(resolved);
   const ready = !archived && isResolved(resolved);
 
+  // What we already owe this party on this site, read before the entry is filed. For a vendor the
+  // pending is against bills (and the file can offer to attach this payment to them); for a worker
+  // it is derived from attendance / work done, so it is shown as context only.
+  const payeeType = payeeId ? (stakeholders.find((s) => s.stakeholder_id === payeeId)?.type ?? null) : null;
+  const isVendorPayee = payeeType === 'Vendor';
+  const { data: payable = 0 } = usePayablePreview(payeeId || null, projectId || null);
+  const hasPayable = !archived && !!payeeId && !!projectId && payable > 0.5;
+
   /**
    * APPROVE ALWAYS WORKS.
    *
@@ -161,6 +172,7 @@ export function ReviewCard({
   const [menu, setMenu] = useState(false);         // the ⋯ — where "Not a transaction" now lives
   const [slide, setSlide] = useState(false);       // the card is leaving the desk
   const [splitOpen, setSplitOpen] = useState(false); // the inline "split into transactions" panel
+  const [pickerOpen, setPickerOpen] = useState(false); // "Towards which payable?" — asked before filing
 
   /**
    * THE VOUCHER IS THREE COLUMNS WIDE, AND THREE COLUMNS NEED THE ROOM FOR IT.
@@ -220,6 +232,29 @@ export function ReviewCard({
     try { await runFileWith(resolved); }
     catch (err: unknown) { onError(errMessage(err, "Couldn't file, try again")); }
   };
+
+  // "Towards which payable?" — asked BEFORE filing when there is a party + site to attribute to.
+  // Nothing is auto-linked: the picker returns the user's choice, we file, then apply it (Skip files
+  // with no attribution — the balance nets either way). Overheads / top-ups / new parties file plain.
+  const needsPicker = ready && !!payeeId && !!projectId;
+  const fileThenAttribute = async (sel: Selection) => {
+    setPickerOpen(false);
+    if (leaving) return;
+    const reduced = swipe.reducedMotion;
+    setLeaving('file'); setPhase('filing');
+    try {
+      const txnId = await fileRoughEntry(entry, orgId, resolved);
+      onFiled(txnId);
+      if (sel.type !== 'skip') {
+        try { await applyAttribution(txnId, orgId, amountNum, projectId || null, sel); }
+        catch (e) { onError(errMessage(e, 'Filed — but could not attribute it')); }
+      }
+      leave(txnId, reduced);
+    } catch (err: unknown) {
+      setLeaving(null); setPhase(null);
+      onError(errMessage(err, "Couldn't file, try again"));
+    }
+  };
   /**
    * THE WHOLE OF APPROVE. It files, or it asks — it never simply refuses.
    *
@@ -234,7 +269,7 @@ export function ReviewCard({
     // children (a double count; a double wallet debit for a wallet-holder). Split and Approve are the
     // two ways to file one entry; only one may run.
     if (leaving || splitOpen) return;
-    if (ready) { void runFile(); return; }
+    if (ready) { if (needsPicker) setPickerOpen(true); else void runFile(); return; }
     onConfirm(gaps);
   };
   const runReject = async () => {
@@ -549,6 +584,16 @@ export function ReviewCard({
               </>
             ) : blank('which site?')}
           </div>
+
+          {/* Already owed to this party on this site — the pending payable, read before filing.
+              Vendor: against bills (the file offers to attach). Worker: derived from work done. */}
+          {hasPayable && (
+            <div className="mt-2 inline-flex items-baseline gap-1.5" style={{ ...font, fontSize: 12, color: V.sys }}>
+              <span style={{ ...mono, fontWeight: 600, color: V.ink }}>₹{inr(payable)}</span>
+              <span>pending{projectName ? ` on ${projectName}` : ''}</span>
+              <span style={{ color: V.faint }}>· {isVendorPayee ? 'from bills' : 'from work done'}</span>
+            </div>
+          )}
         </div>
 
         {/* ═══ COLUMN 2 — THE STORY ═══════════════════════════════════════════════════════════════
@@ -719,6 +764,18 @@ export function ReviewCard({
           </div>
         )}
       </div>
+
+      {pickerOpen && payeeId && projectId && (
+        <PayablePicker
+          payee={{ id: payeeId, name: payeeName || 'Party', type: payeeType as 'Vendor' | 'Worker' }}
+          projectId={projectId}
+          projectName={projectName}
+          txnDate={entry.ai_extracted?.date ?? null}
+          amount={amountNum}
+          onConfirm={(sel) => void fileThenAttribute(sel)}
+          onClose={() => setPickerOpen(false)}
+        />
+      )}
     </div>
   );
 }

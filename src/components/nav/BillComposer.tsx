@@ -201,7 +201,7 @@ export function BillComposer({ bill, onBill, onClose }: {
     }
   };
 
-  const height = B?.stage === 'capture' ? 388 : B?.stage === 'reading' ? 376 : B?.stage === 'bad' ? 420 : 548;
+  const height = B?.stage === 'capture' ? 424 : B?.stage === 'reading' ? 376 : B?.stage === 'bad' ? 420 : 548;
   const step = B?.stage === 'capture' ? 1 : B?.stage === 'reading' || B?.stage === 'bad' ? 2 : 3;
   const img = B?.img ?? '';
   const paper = useMemo(() => (img ? <img alt="" src={img} /> : SHEET), [img]);
@@ -273,6 +273,14 @@ export function BillComposer({ bill, onBill, onClose }: {
                     onChange={(e) => { const f = e.target.files?.[0]; if (f) { buzz(6); void readNow(f); } }} />
                 </label>
               </div>
+              <button type="button" className="manLink" onClick={() => {
+                buzz(4);
+                onBill({
+                  stage: 'check', file: null, img: '', vendorId: '', lines: [], unsure: ['vendor', 'no', 'date', 'amount'],
+                  openRow: 'vendor', dupe: null, kept: false, viewer: false,
+                  f: { vendor: '', no: '', date: '', amount: '', site: '', siteName: '' }, got: READ_ROWS.map(([k]) => k),
+                });
+              }}>or enter it manually</button>
               <p className="waLine">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 0 0-7.7 13.6L3 21l4.6-1.2A9 9 0 1 0 12 3Z" /></svg>
                 <span>Or forward the bill to Briklay on WhatsApp. It reads it and files it here by itself.</span>

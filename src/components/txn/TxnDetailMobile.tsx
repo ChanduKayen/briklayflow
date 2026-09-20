@@ -6,6 +6,8 @@
 import { useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import DragSheet from '../DragSheet';
+import { PayableOptions } from '../payables/PayableOptions';
+import type { Selection as PayableSelection } from '../../lib/payableAttribution';
 
 const CSS = `
 .txm{--tint:#C4502B;--tint-press:#A8431F;--ink:#1B1713;--ink-2:#87807A;--ink-3:#B5AEA7;
@@ -82,6 +84,15 @@ const CSS = `
 .txm .status.linked .s1{color:var(--good)}
 .txm .status.linked .act{display:none}
 .txm .status.linked{cursor:default}
+.txm .status.tappable{cursor:pointer}
+.txm .status.tappable .act.chev{display:block;font-size:22px;line-height:1;color:var(--ink-3);font-weight:400}
+.txm .txm-attr{position:absolute;inset:0;z-index:20;background:var(--bg);color:var(--ink);display:flex;flex-direction:column;animation:txm-slidein .22s var(--sheet)}
+.txm .txm-attr main{flex:1;min-height:0;display:flex;flex-direction:column;padding:4px 20px calc(16px + env(safe-area-inset-bottom))}
+.txm .txm-attr .pyo{--pyo-accent:var(--tint)}
+@keyframes txm-slidein{from{transform:translateX(100%)}to{transform:none}}
+.txm .statusacts{display:flex;gap:8px;margin-top:8px;padding-left:20px}
+.txm .statusacts button{flex:1;border:1px solid var(--hair);background:var(--card);color:var(--tint);border-radius:12px;padding:10px 0;font-size:14px;font-weight:600;cursor:pointer}
+.txm .statusacts button:active{background:var(--bg)}
 
 .txm .note{padding:16px 18px}
 .txm .note .src{font-size:12.5px;font-weight:600;color:var(--ink-2);margin-bottom:8px;display:flex;align-items:center;gap:6px}
@@ -179,6 +190,13 @@ export interface TxnDetailMobileProps {
   statusTitle: string;
   statusSub: string;
   onLink: (() => void) | null;
+  /** tapping the status row turns the card into its next state (the attribution options), in-place */
+  attrCtx?: {
+    payee: { id: string; name: string; type: 'Worker' | 'Vendor' };
+    projectId: string; projectName: string | null; txnDate: string | null; amount: number; selfPaid: number;
+    onConfirm: (sel: PayableSelection) => void;
+  } | null;
+  onUnlink?: (() => void) | null;      // linked → clear the attribution
   details: TxmDetailRow[];
   noteSource: string | null;
   noteText: string | null;
@@ -205,6 +223,7 @@ export interface TxnDetailMobileProps {
 export default function TxnDetailMobile(p: TxnDetailMobileProps) {
   const [sheet, setSheet] = useState<'menu' | 'delete' | null>(null);
   const [noteOpen, setNoteOpen] = useState(false);
+  const [attrStep, setAttrStep] = useState(false);   // status row → the attribution options, in-place
   const close = () => setSheet(null);
 
   // Portalled to <body> for two reasons, both of which cost real behaviour when they were not:
@@ -277,15 +296,19 @@ export default function TxnDetailMobile(p: TxnDetailMobileProps) {
               <div className="amt">{st.amount}</div>
             </div>
           ))}
-          <button type="button" className={`status${p.linked ? ' linked' : ''}`}
-            onClick={() => { if (!p.linked && p.onLink) p.onLink(); }} disabled={p.linked || !p.onLink}>
+          <button type="button" className={`status${p.linked ? ' linked' : ''}${p.attrCtx ? ' tappable' : ''}`}
+            onClick={() => { if (p.attrCtx) setAttrStep(true); else if (!p.linked && p.onLink) p.onLink(); }}
+            disabled={!p.attrCtx && (p.linked || !p.onLink)}>
             <span className="sd" />
             <span className="st">
               <span className="s1" style={{ display: 'block' }}>{p.statusTitle}</span>
               <span className="s2" style={{ display: 'block' }}>{p.statusSub}</span>
             </span>
-            {!p.linked && p.onLink && <span className="act">Link</span>}
+            {p.attrCtx ? <span className="act chev" aria-hidden="true">›</span> : (!p.linked && p.onLink && <span className="act">Link</span>)}
           </button>
+          {p.linked && p.onUnlink && (
+            <div className="statusacts"><button type="button" onClick={p.onUnlink}>Unlink</button></div>
+          )}
         </div>
 
         {p.details.length > 0 && (
@@ -358,9 +381,10 @@ export default function TxnDetailMobile(p: TxnDetailMobileProps) {
       {p.showBar && (
         <div className="bar">
           {p.canEdit && <button type="button" className="b2 ghost" onClick={p.onEdit}>Edit</button>}
-          <button type="button" className={`b2 pri${p.linked ? ' done' : ''}`}
-            onClick={() => { if (!p.linked && p.onLink) p.onLink(); }} disabled={p.linked || !p.onLink}>
-            <span className="txt">{p.ctaLabel}</span>
+          <button type="button" className={`b2 pri${p.linked && !p.attrCtx ? ' done' : ''}`}
+            onClick={() => { if (p.attrCtx) setAttrStep(true); else if (!p.linked && p.onLink) p.onLink(); }}
+            disabled={!p.attrCtx && (p.linked || !p.onLink)}>
+            <span className="txt">{p.attrCtx ? (p.linked ? 'Change payable' : p.ctaLabel) : p.ctaLabel}</span>
           </button>
         </div>
       )}
@@ -387,6 +411,25 @@ export default function TxnDetailMobile(p: TxnDetailMobileProps) {
         </button>
         <button type="button" className="b2 ghost" style={{ width: '100%', marginTop: 8 }} onClick={close}>Cancel</button>
       </DragSheet>
+
+      {attrStep && p.attrCtx && (
+        <div className="txm-attr">
+          <div className="nav">
+            <button type="button" className="nbtn" aria-label="Back" onClick={() => setAttrStep(false)}>
+              <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 5l-7 7 7 7" /></svg>
+            </button>
+            <div className="ntitle">{p.attrCtx.payee.type === 'Vendor' ? 'Bill for' : 'Payable for'}<span>{p.attrCtx.payee.name}{p.attrCtx.projectName ? ` · ${p.attrCtx.projectName}` : ''}</span></div>
+            <span style={{ width: 40 }} />
+          </div>
+          <main>
+            <PayableOptions
+              payee={p.attrCtx.payee} projectId={p.attrCtx.projectId} projectName={p.attrCtx.projectName}
+              txnDate={p.attrCtx.txnDate} amount={p.attrCtx.amount} selfPaid={p.attrCtx.selfPaid} allowSkip={false}
+              onConfirm={(sel) => { setAttrStep(false); p.attrCtx!.onConfirm(sel); }}
+            />
+          </main>
+        </div>
+      )}
     </div>,
     document.body,
   );

@@ -13,6 +13,8 @@ import { searchPayees, rankPayeeName, PAYEE_SEARCH_FLOOR } from '../lib/payeeSea
 import { addStakeholderAlias } from '../lib/stakeholderMerge';
 import { fileRoughEntry, fileRoughEntrySplit } from './day-book/fileEntry';
 import { getCostCode, searchGenHeads, isCompanyHead } from '../lib/costCodes';
+import { PayablePicker } from './payables/PayablePicker';
+import { applyAttribution, type Selection } from '../lib/payableAttribution';
 
 // ── Walnut-ledger palette (mirrors NewTransaction.tsx) ──────────────────────────
 // Warm cream canvas, walnut ink, terracotta accent for money-out, sage for money-in.
@@ -885,6 +887,16 @@ export function ResolvePopup({ entry, onClose, onUpdated, only }: Props) {
    * worked. The success state is the receipt, and it is what earns the right to close.
    */
   const [approval, setApproval] = useState<'ask' | 'filing' | 'filed'>('ask');
+  // After filing a party+site payment from the editor, ask "Towards which payable?" (same picker as
+  // the card and the ledger) before the editor steps away. Closing/Skip finalizes without linking.
+  const [attrAfterFile, setAttrAfterFile] = useState<
+    { txnId: string; entry: RoughEntry; payee: { id: string; name: string; type: 'Worker' | 'Vendor' }; projectId: string; projectName: string | null; amount: number; date: string | null } | null
+  >(null);
+  const finalizeFiled = useCallback((updatedEntry: RoughEntry) => {
+    qc.invalidateQueries({ queryKey: ['inbox_badge'] });
+    onUpdated({ ...updatedEntry, status: 'POSTED' } as RoughEntry);
+    onClose();
+  }, [qc, onUpdated, onClose]);
 
   const handleApprove = useCallback(async () => {
     if (posting || !canFile) return;
@@ -907,6 +919,7 @@ export function ResolvePopup({ entry, onClose, onUpdated, only }: Props) {
         .update({ ai_extracted: nextAi }).eq('id', entry.id).select().single();
 
       const topUpId = topUp && payeeWallet ? payeeWallet.walletId : null;
+      let newTxnId: string | null = null;
       if (splitMode && !topUpId) {
         await fileRoughEntrySplit(
           updatedEntry as RoughEntry, orgId ?? '',
@@ -919,7 +932,7 @@ export function ResolvePopup({ entry, onClose, onUpdated, only }: Props) {
           })),
         );
       } else {
-        await fileRoughEntry(updatedEntry as RoughEntry, orgId ?? '', {
+        newTxnId = await fileRoughEntry(updatedEntry as RoughEntry, orgId ?? '', {
           payeeId, projectId, amount: Number(amount), description: description.trim(),
           generalExpense: isGeneral, generalExpenseHead: genHead || undefined,
           funding: senderWallet ? (fromWallet ? 'wallet' : 'bank') : undefined,
@@ -932,17 +945,26 @@ export function ResolvePopup({ entry, onClose, onUpdated, only }: Props) {
       // one approved on the card does. Two ways in, one way out.
       setApproval('filed');
       if (topUpId || senderWallet) { qc.invalidateQueries({ queryKey: ['wallets'] }); qc.invalidateQueries({ queryKey: ['wallets_party'] }); qc.invalidateQueries({ queryKey: ['wallet_ledger'] }); }
-      window.setTimeout(() => {
-        qc.invalidateQueries({ queryKey: ['inbox_badge'] });
-        onUpdated({ ...(updatedEntry as RoughEntry), status: 'POSTED' } as RoughEntry);
-        onClose();
-      }, 900);
+
+      // A party+site payment filed here → ask "Towards which payable?" (same picker as the card/ledger)
+      // before we finalize. Overheads / top-ups / splits skip it.
+      const payeeType = stakeholders.find((s: any) => s.stakeholder_id === payeeId)?.type;
+      const ask = !splitMode && !topUpId && !isGeneral && !!payeeId && !!projectId && !!newTxnId;
+      if (ask) {
+        setAttrAfterFile({
+          txnId: newTxnId as string, entry: updatedEntry as RoughEntry,
+          payee: { id: payeeId, name: payeeName || 'Party', type: payeeType === 'Vendor' ? 'Vendor' : 'Worker' },
+          projectId, projectName, amount: Number(amount), date: ai.date ?? null,
+        });
+        return;   // the picker finalizes when it closes
+      }
+      window.setTimeout(() => finalizeFiled(updatedEntry as RoughEntry), 900);
     } catch (err: any) {
       showSnackbar(err.message || 'Failed to file', { type: 'error' });
       setApproval('ask');
       setPosting(false);
     }
-  }, [posting, canFile, splitMode, splits, projects, projectId, ai, payeeId, payeeName, isGeneral, genHead, amount, description, mode, entry, orgId, qc, onUpdated, onClose, showSnackbar]);
+  }, [posting, canFile, splitMode, splits, projects, projectId, ai, payeeId, payeeName, isGeneral, genHead, amount, description, mode, entry, orgId, qc, onUpdated, onClose, showSnackbar, stakeholders, finalizeFiled, senderWallet, fromWallet, topUp, payeeWallet]);
 
   /**
    * "THEN CONFIRM AUTO." When adding the payee was the LAST thing standing between this payment and
@@ -1070,6 +1092,26 @@ export function ResolvePopup({ entry, onClose, onUpdated, only }: Props) {
         #resolve-amount-input::-webkit-outer-spin-button, #resolve-amount-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0 }
         #resolve-amount-input { -moz-appearance: textfield }
       `}</style>
+
+      {attrAfterFile && (
+        <PayablePicker
+          payee={attrAfterFile.payee}
+          projectId={attrAfterFile.projectId}
+          projectName={attrAfterFile.projectName}
+          txnDate={attrAfterFile.date}
+          amount={attrAfterFile.amount}
+          selfPaid={attrAfterFile.amount}
+          onConfirm={(sel: Selection) => { void (async () => {
+            const a = attrAfterFile; setAttrAfterFile(null);
+            if (a && sel.type !== 'skip') {
+              try { await applyAttribution(a.txnId, orgId ?? '', a.amount, a.projectId || null, sel); }
+              catch (e) { showSnackbar(e instanceof Error ? e.message : 'Could not attribute', { type: 'error' }); }
+            }
+            if (a) finalizeFiled(a.entry);
+          })(); }}
+          onClose={() => { const a = attrAfterFile; setAttrAfterFile(null); if (a) finalizeFiled(a.entry); }}
+        />
+      )}
     </>
   );
 }
