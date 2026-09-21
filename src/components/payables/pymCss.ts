@@ -179,6 +179,30 @@ export const PYM_CSS = `
 .pym-panel .big:disabled{opacity:.6}
 .pym-panel .big svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:3;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:22;stroke-dashoffset:22}
 .pym-panel .big.ok svg{animation:pymTick .4s ease-out forwards}
+/* add-a-payment-request form — the composer's card language on the dark sheet */
+.pym-panel .addf{flex:1;min-height:0;display:flex;flex-direction:column;gap:14px;padding:4px 2px 10px}
+.pym-panel .addf .fl{position:relative;display:flex;flex-direction:column;gap:7px}
+.pym-panel .addf .fl>span{font-size:12px;font-weight:600;letter-spacing:.02em;color:rgba(var(--cream),.55)}
+.pym-panel .addf input,.pym-panel .addf select{width:100%;height:50px;padding:0 14px;border-radius:14px;border:1px solid rgba(var(--cream),.16);
+  background:rgba(var(--cream),.06);color:rgb(var(--cream));font:inherit;font-size:16px;outline:none;-webkit-appearance:none;appearance:none}
+.pym-panel .addf input::placeholder{color:rgba(var(--cream),.4)}
+.pym-panel .addf input:focus,.pym-panel .addf select:focus{border-color:var(--clay-hi);background:rgba(var(--cream),.09)}
+.pym-panel .addf select{background-image:url("data:image/svg+xml,%3Csvg width='11' height='7' viewBox='0 0 11 7' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l4.5 4.5L10 1' stroke='%23C9BEB0' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 14px center}
+.pym-panel .addf .picked{display:flex;align-items:center;justify-content:space-between;height:50px;padding:0 14px;border-radius:14px;border:1px solid rgba(var(--cream),.16);
+  background:rgba(var(--cream),.06);color:rgb(var(--cream));font:inherit;font-size:16px;font-weight:600;cursor:pointer}
+.pym-panel .addf .picked i{font-style:normal;font-size:13px;font-weight:600;color:var(--clay-hi)}
+.pym-panel .addf .pmenu{position:absolute;top:calc(100% + 6px);left:0;right:0;z-index:5;max-height:230px;overflow-y:auto;padding:5px;border-radius:14px;
+  background:#241812;border:1px solid rgba(var(--cream),.14);box-shadow:0 18px 44px -14px rgba(0,0,0,.6)}
+.pym-panel .addf .pmenu button{display:flex;flex-direction:column;gap:2px;width:100%;padding:9px 11px;border:0;border-radius:10px;background:none;color:rgb(var(--cream));font:inherit;text-align:left;cursor:pointer}
+.pym-panel .addf .pmenu button:hover{background:rgba(var(--cream),.08)}
+.pym-panel .addf .pmenu button b{font-size:15px;font-weight:600}
+.pym-panel .addf .pmenu button span{font-size:12px;color:rgba(var(--cream),.5)}
+.pym-panel .addf .amtin{display:flex;align-items:center;gap:8px;height:56px;padding:0 14px;border-radius:14px;border:1px solid rgba(var(--cream),.16);background:rgba(var(--cream),.06)}
+.pym-panel .addf .amtin:focus-within{border-color:var(--clay-hi);background:rgba(var(--cream),.09)}
+.pym-panel .addf .amtin em{font-style:normal;font-family:var(--mono);font-size:22px;color:var(--clay-hi)}
+.pym-panel .addf .amtin input{height:auto;padding:0;border:0;background:none;font-family:var(--mono);font-size:24px;font-variant-numeric:tabular-nums}
+.pym-panel .addf .amtin input:focus{background:none}
+.pym-panel .addf .ferr{margin:0;font-size:13px;color:var(--clay-hi)}
 .pym-panel .linkb{align-self:center;height:38px;padding:0 12px;border:0;background:none;color:rgba(var(--cream),.6);font:inherit;font-size:13.5px;font-weight:600;
   text-decoration:underline;text-underline-offset:3px;cursor:pointer}
 .pym-panel .rowS{display:flex;align-items:center;gap:10px;width:100%;min-height:52px;padding:0 4px;border:0;background:none;color:rgb(var(--cream));font:inherit;

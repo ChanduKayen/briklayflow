@@ -170,25 +170,25 @@ html, body {
   align-items: center;
   column-gap: 12px;
   row-gap: 2px;
-  grid-template-columns: 28px minmax(0, 1.4fr) minmax(0, 1.6fr) minmax(120px, auto);
+  grid-template-columns: 28px minmax(0, 1.7fr) minmax(0, 1.3fr) minmax(120px, auto);
   grid-template-areas: "med main anchor amount";
   min-height: 56px;
-  padding-left: 16px;
+  padding-left: 18px;
   padding-right: 16px;
 }
 .bk-ledger-med    { grid-area: med; display: flex; align-items: center; }
 .bk-ledger-main   { grid-area: main; min-width: 0; }
-.bk-ledger-anchor { grid-area: anchor; min-width: 0; }
+.bk-ledger-anchor { grid-area: anchor; min-width: 0; padding-left: 34px; }
 .bk-ledger-amount { grid-area: amount; }
 
-/* ── the row under a finger ──
-   A tap must answer instantly and settle like a physical thing: the surface tints
-   from the point of contact, the row gives a little, then springs back. Press is
-   driven by a class rather than :active because iOS withholds :active from
-   non-anchor elements unless a touch listener is bound to them. */
+/* ── the row when it is touched ──
+   Not a press-DOWN (that read as squashing the row) but a gentle acknowledgement: a warm
+   bloom lights up from the exact point of contact and the row lifts a hair on a soft shadow —
+   a thing rising to meet you, then it opens. Press is a class rather than :active because iOS
+   withholds :active from non-anchor elements unless a touch listener is bound to them. */
 .bk-ledger-row {
   -webkit-tap-highlight-color: transparent;
-  transition: background .2s ease, transform .34s cubic-bezier(.34, 1.32, .4, 1);
+  transition: background .22s ease, transform .4s cubic-bezier(.2, .8, .2, 1), box-shadow .4s ease;
 }
 .bk-ledger-row::before {
   content: '';
@@ -197,15 +197,17 @@ html, body {
   border-radius: inherit;
   pointer-events: none;
   opacity: 0;
-  background: radial-gradient(130px circle at var(--px, 50%) var(--py, 50%), rgba(200, 96, 58, .15), rgba(200, 96, 58, .05) 55%, transparent 74%);
-  transition: opacity .4s ease;
+  transform: scale(.96);
+  background: radial-gradient(200px circle at var(--px, 50%) var(--py, 50%), rgba(200, 96, 58, .18), rgba(200, 96, 58, .05) 48%, transparent 70%);
+  transition: opacity .45s ease, transform .45s cubic-bezier(.2, .8, .2, 1);
 }
 .bk-ledger-row.is-press {
-  transform: scale(.977);
-  transition: background .1s ease, transform .13s cubic-bezier(.3, 0, .2, 1);
+  transform: translateY(-1.5px);
+  box-shadow: 0 10px 26px -16px rgba(196, 97, 58, .55);
+  transition: background .16s ease, transform .22s cubic-bezier(.2, .8, .2, 1), box-shadow .22s ease;
 }
-.bk-ledger-row.is-press::before { opacity: 1; transition: opacity .07s ease; }
-.bk-ledger-row.is-press .bk-go { transform: translateX(2px); }
+.bk-ledger-row.is-press::before { opacity: 1; transform: scale(1); transition: opacity .18s ease, transform .5s cubic-bezier(.2, .8, .2, 1); }
+.bk-ledger-row.is-press .bk-go { transform: translateX(3px); }
 
 .bk-go {
   display: none;
@@ -219,7 +221,7 @@ html, body {
 
 @media (prefers-reduced-motion: reduce) {
   .bk-ledger-row, .bk-ledger-row::before, .bk-go { transition: none; }
-  .bk-ledger-row.is-press { transform: none; }
+  .bk-ledger-row.is-press { transform: none; box-shadow: none; }
 }
 
 @media (max-width: 639px) {

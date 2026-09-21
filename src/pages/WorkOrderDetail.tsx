@@ -7,9 +7,11 @@ import autoTable from 'jspdf-autotable';
 import type { Session } from '@supabase/supabase-js';
 import { useUserProfile } from '../App';
 import { useOrgId } from '../lib/auth/AuthProvider';
-import type { StatusHistoryEntry, PaymentMode } from '../types';
+import type { StatusHistoryEntry } from '../types';
 import StakeholderLedgerDrawer from '../components/StakeholderLedgerDrawer';
 import { wagesSetAgainstContract } from '../lib/attendanceApi';
+import { loadContractLinkablePayments, linkPaymentToContract, adjustContractPayment } from '../lib/payableAttribution';
+import type { LinkablePayment } from '../lib/billsApi';
 import {
   fmtDate as pdfFmtDate, fmtRupee,
   MARGIN, CONTENT, RIGHT, C,
@@ -22,6 +24,14 @@ import { parseAmount } from '../lib/money';
 // work-done estimate falls back to how much of it has been paid. Honest, from real status.
 const DONE_STATUSES = new Set(['Completed', 'Approved', 'Paid']);
 const SETTLE_TOLERANCE = 50;
+
+// One PAYMENT (txn) and how its money sits on THIS contract: what is still open (an advance, not on
+// a stage) vs what has been placed on each stage. The Payments section shows one row per group; the
+// Adjust sheet re-slices the whole group across stages.
+interface PayGroup {
+  txnId: string; date: string | null; mode: string | null; note: string | null;
+  total: number; open: number; byMs: Record<string, number>;
+}
 
 const fmt = (n: number) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');
 // Placeholder strings some contracts carry as a stage name / condition — treated as empty.
@@ -36,24 +46,6 @@ function fmtLogTime(iso: string | null | undefined): string {
   const day = d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
   const hasTime = iso.length > 10;
   return hasTime ? `${day} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` : day;
-}
-
-function bricks(x: number, y: number) {
-  if (reduced) return;
-  const cs = ['#C4613A', '#E0906A', '#5F7F5B', '#B8862E', '#F1D8CB'];
-  for (let i = 0; i < 24; i++) {
-    const b = document.createElement('span');
-    b.className = 'cdx-brick';
-    b.style.cssText = `background:${cs[i % 5]};left:${x}px;top:${y}px`;
-    document.body.appendChild(b);
-    const a = -Math.PI / 2 + (Math.random() - .5) * 1.6, sp = 240 + Math.random() * 240;
-    const vx = Math.cos(a) * sp, vy = Math.sin(a) * sp, rot = (Math.random() - .5) * 720;
-    b.animate([
-      { transform: 'translate(0,0)', opacity: 1 },
-      { transform: `translate(${vx * .6}px,${vy * .6 + 130}px) rotate(${rot}deg)`, opacity: 1, offset: .6 },
-      { transform: `translate(${vx}px,${vy + 480}px) rotate(${rot * 1.4}deg)`, opacity: 0 },
-    ], { duration: 1050 + Math.random() * 400, easing: 'cubic-bezier(.2,.7,.3,1)' }).onfinish = () => b.remove();
-  }
 }
 
 const CDX_CSS = `
@@ -217,6 +209,43 @@ const CDX_CSS = `
 .cdx-card h3{font:600 17px "Playfair Display",Georgia,serif;margin:0 0 8px;color:var(--ink)}
 .cdx-card p{margin:0 0 16px;font-size:13.5px;color:var(--ink-2);line-height:1.5}
 .cdx-card .row{display:flex;gap:8px;justify-content:flex-end}
+.cdx-card.wide{max-width:460px}
+.cdx-card .empty{padding:20px 0}
+/* Placed-on chips + open amount in the Payments table */
+.cdx .placed{display:flex;flex-wrap:wrap;gap:5px}
+.cdx .pchip{display:inline-flex;align-items:center;gap:5px;font-size:12px;background:var(--sage-tint);color:var(--sage);border-radius:999px;padding:2px 8px}
+.cdx .pchip em{font-style:normal;color:var(--ink-2)}
+.cdx .openamt{color:var(--gold);font-weight:500}
+/* Per-row "Adjust" action — a quiet outlined pill, not a loud filled CTA on every row */
+.cdx .adjbtn{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 12px;border-radius:999px;border:1px solid var(--line);background:var(--paper);color:var(--terra-deep);font-size:12.5px;font-weight:500;cursor:pointer;white-space:nowrap;transition:background .15s,border-color .15s,transform .12s,box-shadow .15s}
+.cdx .adjbtn:hover{background:var(--terra-tint);border-color:var(--terra);box-shadow:0 4px 12px -7px rgba(196,97,58,.7);transform:translateY(-1px)}
+.cdx .adjbtn:active{transform:scale(.96)}
+.cdx .adjbtn svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+/* Link-a-payment picker */
+.cdx .linklist{display:flex;flex-direction:column;gap:6px;max-height:260px;overflow-y:auto;margin:0 0 4px}
+.cdx .linkrow{display:flex;align-items:center;gap:11px;width:100%;text-align:left;padding:10px 12px;background:var(--paper-2);border:1px solid var(--line);border-radius:9px;cursor:pointer;transition:background .15s,border-color .15s}
+.cdx .linkrow:hover{background:var(--terra-tint)}
+.cdx .linkrow.on{background:var(--terra-tint);border-color:var(--terra)}
+.cdx .pyo-rd{width:18px;height:18px;flex:none;border:1.5px solid var(--ink-3);border-radius:50%;display:grid;place-items:center}
+.cdx .linkrow.on .pyo-rd{border-color:var(--terra)}
+.cdx .pyo-rd i{width:9px;height:9px;border-radius:50%;background:var(--terra)}
+.cdx .lr-m{display:flex;flex-direction:column;gap:1px;min-width:0}
+.cdx .lr-m b{font-weight:500;font-size:14px}
+.cdx .lr-m small{color:var(--ink-3);font-size:12px}
+.cdx .linkamt{margin:10px 0 0}
+.cdx .linkamt label{display:block;font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-2);margin-bottom:5px}
+.cdx .linkamt input{width:100%;height:38px;border:1px solid var(--line);border-radius:6px;background:var(--paper);padding:0 10px;text-align:right;outline:none}
+.cdx .linkamt input:focus{border-color:var(--terra);box-shadow:0 0 0 3px var(--terra-tint)}
+.cdx .linkamt small{display:block;margin-top:4px}
+.cdx .lerr{color:var(--terra-deep);font-size:13px;margin:10px 0 0}
+/* Adjust-onto-stages sheet */
+.cdx .adjlist{display:flex;flex-direction:column;gap:8px;max-height:280px;overflow-y:auto;margin:4px 0}
+.cdx .adjrow{display:flex;align-items:center;gap:12px}
+.cdx .ar-n{flex:1;font-size:14px;color:var(--ink)}
+.cdx .adjrow input{width:140px;flex:none;margin-top:0}
+.cdx .adjsum{display:flex;justify-content:space-between;gap:16px;margin-top:10px;padding-top:10px;border-top:1px solid var(--line-2);font-size:13px;color:var(--ink-2)}
+.cdx .adjsum b{color:var(--ink);font-weight:600;margin-left:6px}
+.cdx .adjsum .bad b{color:var(--terra-deep)}
 .cdx-toast{position:fixed;left:50%;bottom:28px;transform:translate(-50%,10px);background:#2F2622;color:#FFFDF9;padding:10px 16px;border-radius:999px;font-size:13.5px;opacity:0;pointer-events:none;transition:opacity .2s,transform .3s cubic-bezier(.2,.7,.2,1);z-index:70;display:flex;gap:10px;align-items:center}
 .cdx-toast.show{opacity:1;transform:translate(-50%,0)}
 .cdx-toast i{width:6px;height:6px;border-radius:50%;background:#5F7F5B}
@@ -254,13 +283,10 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
   const [editScope, setEditScope] = useState('');
   const [editStages, setEditStages] = useState<EStage[]>([]);
 
-  // Inline release row — the milestone whose "Release" was tapped.
-  const [releaseFor, setReleaseFor] = useState<{ milestone: any; remaining: number } | null>(null);
-  const [releaseAmount, setReleaseAmount] = useState('');
-  const [releaseMode, setReleaseMode] = useState<PaymentMode>('NEFT');
-  const [releaseDate, setReleaseDate] = useState(() => new Date().toISOString().split('T')[0]);
-  const [releaseRemarks, setReleaseRemarks] = useState('');
-  const [releaseBad, setReleaseBad] = useState(false);
+  // Link a payment (find an existing payment to this party on this project) and adjust an open one
+  // onto stages. A contract no longer creates payments — it links and places money already recorded.
+  const [linkOpen, setLinkOpen] = useState(false);
+  const [adjustFor, setAdjustFor] = useState<PayGroup | null>(null);
 
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -364,46 +390,15 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
     onError: (err: any) => toast(err.message || 'Update failed'),
   });
 
-  const releaseMutation = useMutation({
-    mutationFn: async () => {
-      if (!releaseFor || !wo) throw new Error('No stage selected.');
-      const amount = parseAmount(releaseAmount);
-      if (!amount || amount <= 0) throw new Error('Enter a valid amount.');
-      if (!releaseDate) throw new Error('Select a payment date.');
-      const txnId = `TXN-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
-      const { error: rpcError } = await supabase.rpc('insert_transaction_with_allocations', {
-        p_txn: {
-          txn_id: txnId, org_id: orgId, stakeholder_id: wo.stakeholder_id,
-          date: releaseDate, total_amount: amount, payment_mode: releaseMode,
-          category: 'Running Bill',
-          remarks: releaseRemarks || `Payment for ${releaseFor.milestone.name}`,
-          ai_flag_status: 'Clean', ai_flag_data: {},
-        },
-        p_allocations: [{
-          project_id: wo.project_id, order_type: 'WO', order_ref: wo.wo_id,
-          milestone_id: releaseFor.milestone.milestone_id, allocated_amount: amount,
-        }],
-      });
-      if (rpcError) throw rpcError;
-      return amount;
-    },
-    onSuccess: (amount) => {
-      const settledAll = (totalPaid + (amount ?? 0)) >= orderValue - SETTLE_TOLERANCE && orderValue > 0;
-      const stageName = releaseFor?.milestone?.name ?? 'stage';
-      const leftOnStage = (releaseFor?.remaining ?? 0) - (amount ?? 0);
-      queryClient.invalidateQueries({ queryKey: ['wo_allocations', woId] });
-      queryClient.invalidateQueries({ queryKey: ['transactions'] });
-      queryClient.invalidateQueries({ queryKey: ['stakeholder_txns', wo?.stakeholder_id] });
-      setReleaseFor(null); setReleaseAmount(''); setReleaseRemarks(''); setReleaseBad(false);
-      if (settledAll) {
-        const el = document.getElementById('cdx-total-paid');
-        if (el) { const r = el.getBoundingClientRect(); bricks(r.left, r.top); }
-        toast('Contract fully settled');
-      } else if (leftOnStage <= SETTLE_TOLERANCE) toast(`${stageName} settled in full`);
-      else toast(`${fmt(amount ?? 0)} released · ${fmt(leftOnStage)} left on ${stageName}`);
-    },
-    onError: (err: any) => toast(err.message || 'Failed to release payment'),
-  });
+  // A payment was linked, or an open one adjusted onto stages: re-read the money on the contract and
+  // the party's ledger (a link/adjust moves the certified side too).
+  const refreshMoney = () => {
+    queryClient.invalidateQueries({ queryKey: ['wo_allocations', woId] });
+    queryClient.invalidateQueries({ queryKey: ['wo_wage_settled', woId] });
+    queryClient.invalidateQueries({ queryKey: ['transactions'] });
+    queryClient.invalidateQueries({ queryKey: ['stakeholder_txns', wo?.stakeholder_id] });
+    queryClient.invalidateQueries({ queryKey: ['party_ledger'] });
+  };
 
   const editSaveMutation = useMutation({
     mutationFn: async () => {
@@ -508,6 +503,26 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
   const workDoneEst = stageRows.reduce((a, r) => a + r.estP * r.agreed, 0);
   const workAhead = workDoneEst - totalPaid;
   const releaseCount = allocations?.length ?? 0;
+
+  // Payments on this contract, one row per txn: what of each sits open (advance) vs on stages.
+  const msName: Record<string, string> = {};
+  sortedMs.forEach((m) => { msName[m.milestone_id] = singlePhaseFill ? 'Full contract' : (cleanText(m.name) || 'Stage'); });
+  const payGroups: PayGroup[] = (() => {
+    const map = new Map<string, PayGroup>();
+    (allocations ?? []).forEach((a: any) => {
+      const t = a.transactions;
+      const txnId = t?.txn_id ?? a.txn_id;
+      if (!txnId) return;
+      const amt = Number(a.allocated_amount) || 0;
+      const g: PayGroup = map.get(txnId) ?? { txnId, date: t?.date ?? null, mode: t?.payment_mode ?? null, note: (t?.remarks ?? '')?.trim() || null, total: 0, open: 0, byMs: {} };
+      g.total += amt;
+      if (a.milestone_id) g.byMs[String(a.milestone_id)] = (g.byMs[String(a.milestone_id)] || 0) + amt;
+      else g.open += amt;
+      map.set(txnId, g);
+    });
+    return [...map.values()].sort((x, y) => (y.date || '').localeCompare(x.date || ''));
+  })();
+  const openTotal = payGroups.reduce((s, g) => s + g.open, 0);
 
   const handleDownloadPdf = () => {
     if (!wo) return;
@@ -638,21 +653,9 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
   const workerName = wo.stakeholders?.name || 'Contractor';
   const startLabel = wo.date_issued ? new Date(wo.date_issued).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
 
-  const openRelease = (r: typeof stageRows[number]) => {
-    setReleaseFor({ milestone: r.m, remaining: r.bal });
-    setReleaseAmount(String(Math.round(r.bal)));
-    setReleaseRemarks(''); setReleaseBad(false);
-    setTimeout(() => document.getElementById('cdx-rel-amt')?.focus(), 30);
-  };
-  const submitRelease = () => {
-    const amt = parseAmount(releaseAmount);
-    if (!(amt > 0)) { setReleaseBad(true); setTimeout(() => setReleaseBad(false), 450); return; }
-    releaseMutation.mutate();
-  };
-
   const enterEdit = () => {
     setMenuOpen(false);
-    setReleaseFor(null);
+    setLinkOpen(false); setAdjustFor(null);
     setEditScope(wo.scope_of_work || '');
     const seed: EStage[] = sortedMs.map((m) => ({
       key: m.milestone_id, milestone_id: m.milestone_id,
@@ -760,9 +763,9 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
         </div>
         <div className="sheet clip stgwrap">
           <table className="stg">
-            <colgroup><col style={{ width: 40 }} /><col style={{ width: '22%' }} /><col style={{ width: '26%' }} /><col style={{ width: '12%' }} /><col style={{ width: '12%' }} /><col style={{ width: '12%' }} /><col style={{ width: 130 }} /></colgroup>
+            <colgroup><col style={{ width: 40 }} /><col style={{ width: '22%' }} /><col style={{ width: '26%' }} /><col style={{ width: '12%' }} /><col style={{ width: '12%' }} /><col style={{ width: '12%' }} />{editMode && <col style={{ width: 60 }} />}</colgroup>
             <thead><tr>
-              <th>#</th><th>Stage</th><th>Work done vs paid</th><th className="num">Agreed</th><th className="num">Paid</th><th className="num">Balance</th><th />
+              <th>#</th><th>Stage</th><th>Work done vs paid</th><th className="num">Agreed</th><th className="num">Paid</th><th className="num">Balance</th>{editMode && <th />}
             </tr></thead>
             <tbody>
               {editMode ? (
@@ -788,7 +791,7 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
                   );
                 })
               ) : stageRows.length === 0 ? (
-                <tr><td colSpan={7}><div className="empty">No stages on this contract.</div></td></tr>
+                <tr><td colSpan={6}><div className="empty">No stages on this contract.</div></td></tr>
               ) : stageRows.map((r, i) => {
                 const pct = Math.round(r.estP * 100);
                 const paidPct = r.agreed > 0 ? Math.round((r.paid / r.agreed) * 100) : 0;
@@ -812,12 +815,6 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
                     <td className="num">{fmt(r.agreed)}</td>
                     <td className="num paidcell">{r.paid ? fmt(r.paid) : '—'}{r.paid > 0 && !r.done ? <small>{paidPct}% of stage</small> : null}</td>
                     <td className="num">{r.done ? <span className="done-tick">✓ Settled</span> : fmt(r.bal)}</td>
-                    <td className="act">
-                      {!r.done && releasable && (
-                        <button className="next" onClick={() => openRelease(r)} disabled={releaseMutation.isPending}>Release</button>
-                      )}
-                      {!r.done && !releasable && isDraft && <span className="dim" style={{ fontSize: 12 }} title="Approve the contract first">—</span>}
-                    </td>
                   </tr>
                 );
               })}
@@ -827,7 +824,7 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
               <td className="num">{fmt(editMode ? editTotal : orderValue)}</td>
               <td className="num">{fmt(totalPaid)}</td>
               <td className="num">{fmt((editMode ? editTotal : orderValue) - totalPaid)}</td>
-              <td />
+              {editMode && <td />}
             </tr></tfoot>
           </table>
 
@@ -837,27 +834,6 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
             </button>
           )}
 
-          {!editMode && releaseFor && (
-            <div className="inline">
-              <div className="ctx">Releasing against <b>{releaseFor.milestone.name}</b> — balance {fmt(releaseFor.remaining)}</div>
-              <div className="f"><label>Amount</label><input id="cdx-rel-amt" className={`mono${releaseBad ? ' shake' : ''}`} inputMode="decimal" style={{ textAlign: 'right' }} value={releaseAmount} onChange={(e) => setReleaseAmount(e.target.value)} /></div>
-              <div className="f"><label>Paid on</label><input type="date" value={releaseDate} onChange={(e) => setReleaseDate(e.target.value)} /></div>
-              <div className="f"><label>Mode</label>
-                <select value={releaseMode} onChange={(e) => setReleaseMode(e.target.value as PaymentMode)}>
-                  <option value="UPI">UPI</option><option value="NEFT">NEFT / RTGS</option><option value="Cash">Cash</option><option value="Cheque">Cheque</option>
-                </select>
-              </div>
-              <div className="f"><label>Reference / note</label><input value={releaseRemarks} onChange={(e) => setReleaseRemarks(e.target.value)} placeholder="UTR, or 'part payment after measurement'" /></div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button className="btn ghost" onClick={() => setReleaseFor(null)}>Discard</button>
-                <button className={`btn primary${releaseMutation.isPending ? ' loading' : ''}`} onClick={submitRelease}>
-                  <span className="lbl">Release payment</span>
-                  <span className="alt spin"><span className="spinner" /></span>
-                  <span className="alt ok"><svg viewBox="0 0 24 24"><path d="M5 12l5 5L20 7" /></svg></span>
-                </button>
-              </div>
-            </div>
-          )}
         </div>
 
         {editMode && (
@@ -869,6 +845,72 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
               <span className="alt spin"><span className="spinner" /></span>
             </button>
           </div>
+        )}
+
+        {/* PAYMENTS — link existing payments to the contract; place open advances onto stages */}
+        {!editMode && (
+          <>
+            <div className="sec">
+              <h2>Payments on this contract</h2>
+              {releasable && (
+                <button className="btn" onClick={() => setLinkOpen(true)}>
+                  <svg viewBox="0 0 24 24"><path d="M9 15l6-6M10.5 6.5l1-1a4 4 0 0 1 6 6l-1 1M13.5 17.5l-1 1a4 4 0 0 1-6-6l1-1" /></svg>
+                  Link a payment
+                </button>
+              )}
+            </div>
+            <div className="sheet clip stgwrap">
+              {payGroups.length === 0 ? (
+                <div className="empty">
+                  No payments placed on this contract yet.
+                  {releasable ? <> A payment already made to {workerName} can be linked here, then put on a stage.</> : null}
+                </div>
+              ) : (
+                <table className="pay">
+                  <colgroup><col style={{ width: 110 }} /><col /><col style={{ width: '30%' }} /><col style={{ width: 120 }} /><col style={{ width: 110 }} /></colgroup>
+                  <thead><tr>
+                    <th>Date</th><th>Payment</th><th>Placed on</th><th className="num">Open</th><th />
+                  </tr></thead>
+                  <tbody>
+                    {payGroups.map((g) => {
+                      const onStages = Object.entries(g.byMs).filter(([, v]) => v > 0.5);
+                      return (
+                        <tr key={g.txnId}>
+                          <td>{g.date ? new Date(g.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: '2-digit' }) : '—'}</td>
+                          <td>
+                            <b className="mono">{fmt(g.total)}</b>
+                            <small className="dim" style={{ display: 'block' }}>{[g.mode, g.note].filter(Boolean).join(' · ') || g.txnId}</small>
+                          </td>
+                          <td>
+                            {onStages.length === 0
+                              ? <span className="dim">not on a stage yet</span>
+                              : <div className="placed">{onStages.map(([ms, v]) => (
+                                  <span key={ms} className="pchip">{msName[ms] || 'Stage'} <em className="mono">{fmt(v)}</em></span>
+                                ))}</div>}
+                          </td>
+                          <td className="num">{g.open > 0.5 ? <span className="openamt mono">{fmt(g.open)}</span> : <span className="dim">—</span>}</td>
+                          <td className="act">
+                            {releasable && sortedMs.length > 0 && (
+                              <button className="adjbtn" onClick={() => setAdjustFor(g)}>
+                                <svg viewBox="0 0 24 24"><path d="M4 6h8M16 6h4M4 12h4M12 12h8M4 18h10M18 18h2" /><circle cx="14" cy="6" r="2" /><circle cx="10" cy="12" r="2" /><circle cx="16" cy="18" r="2" /></svg>
+                                {onStages.length ? 'Re-adjust' : 'Adjust'}
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                  {openTotal > 0.5 && (
+                    <tfoot><tr>
+                      <td colSpan={3} style={{ textAlign: 'right' }}>Open — advance not yet on any stage</td>
+                      <td className="num">{fmt(openTotal)}</td><td />
+                    </tr></tfoot>
+                  )}
+                </table>
+              )}
+            </div>
+          </>
         )}
 
         {/* ACTIVITY */}
@@ -899,11 +941,175 @@ export default function WorkOrderDetail({ session }: { session: Session }) {
         </div>
       )}
 
+      {linkOpen && (
+        <LinkPaymentSheet
+          wo={wo} orgId={orgId} target={Math.max(0, balance)}
+          onClose={() => setLinkOpen(false)}
+          onDone={(m) => { refreshMoney(); toast(m); }}
+        />
+      )}
+
+      {adjustFor && (
+        <AdjustSheet
+          wo={wo} group={adjustFor}
+          stages={sortedMs.map((m) => ({ milestoneId: m.milestone_id, name: singlePhaseFill ? 'Full contract' : (cleanText(m.name) || 'Stage') }))}
+          onClose={() => setAdjustFor(null)}
+          onDone={(m) => { refreshMoney(); toast(m); }}
+        />
+      )}
+
       {toastMsg && <div className="cdx-toast show"><i /><span>{toastMsg}</span></div>}
 
       {wo.stakeholder_id && (
         <StakeholderLedgerDrawer isOpen={showStakeholderDrawer} onClose={() => setShowStakeholderDrawer(false)} stakeholderId={wo.stakeholder_id} />
       )}
+    </div>
+  );
+}
+
+// ─── Link a payment: point an existing payment (to this party, this project) at the contract ───────
+function LinkPaymentSheet({ wo, orgId, target, onClose, onDone }: {
+  wo: any; orgId: string | undefined; target: number; onClose: () => void; onDone: (msg: string) => void;
+}) {
+  const qc = useQueryClient();
+  const [pickId, setPickId] = useState<string | null>(null);
+  const [amount, setAmount] = useState('');
+  const { data: pays, isLoading } = useQuery({
+    queryKey: ['wo_linkable', wo.wo_id, target],
+    queryFn: () => loadContractLinkablePayments(wo.stakeholder_id, wo.project_id ?? null, target),
+    enabled: !!wo.stakeholder_id,
+  });
+  const picked = (pays ?? []).find((p) => p.txnId === pickId) || null;
+  const choose = (p: LinkablePayment) => {
+    setPickId(p.txnId);
+    const suggest = target > 0 ? Math.min(p.free, target) : p.free;
+    setAmount(String(Math.round(suggest)));
+  };
+  const link = useMutation({
+    mutationFn: async () => {
+      if (!picked) throw new Error('Pick a payment');
+      const amt = parseAmount(amount) || picked.free;
+      await linkPaymentToContract(orgId ?? '', picked, wo.wo_id, wo.project_id ?? null, amt);
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['wo_allocations', wo.wo_id] }); onDone('Payment linked as an open advance'); onClose(); },
+  });
+  const amtN = parseAmount(amount) || 0;
+  const bad = !!picked && (amtN <= 0 || amtN > picked.free + 0.5);
+
+  return (
+    <div className="scrim" onClick={onClose}>
+      <div className="cdx-card wide" onClick={(e) => e.stopPropagation()}>
+        <h3>Link a payment</h3>
+        <p>A payment already made to <b>{wo.stakeholders?.name || 'this party'}</b>{wo.projects?.name ? <> on <b>{wo.projects.name}</b></> : null}, with money not yet placed. It lands as an open advance on the contract — put it on stages next.</p>
+        {isLoading ? (
+          <div className="empty">Looking for payments…</div>
+        ) : (pays ?? []).length === 0 ? (
+          <div className="empty">No unplaced payment to this party on this project. Record the payment in Day Book first, then link it here.</div>
+        ) : (
+          <div className="linklist">
+            {(pays ?? []).map((p) => {
+              const on = p.txnId === pickId;
+              return (
+                <button key={p.txnId} type="button" className={`linkrow${on ? ' on' : ''}`} onClick={() => choose(p)}>
+                  <span className="pyo-rd">{on ? <i /> : null}</span>
+                  <span className="lr-m">
+                    <b>{fmt(p.free)} free {p.free < p.total ? <span className="dim">of {fmt(p.total)}</span> : null}</b>
+                    <small>{[p.date ? new Date(p.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: '2-digit' }) : null, p.mode, p.sameProject ? 'this site' : (p.projectId ? 'other site' : 'no site yet'), p.note].filter(Boolean).join(' · ')}</small>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+        {picked && (
+          <div className="linkamt">
+            <label>Amount to place on this contract</label>
+            <input className={`mono${bad ? ' shake' : ''}`} inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} />
+            <small className="dim">up to {fmt(picked.free)} free on that payment</small>
+          </div>
+        )}
+        <div className="row" style={{ marginTop: 16 }}>
+          <button className="btn ghost" onClick={onClose}>Cancel</button>
+          <button className={`btn primary${link.isPending ? ' loading' : ''}`} disabled={!picked || bad || link.isPending} onClick={() => link.mutate()}>
+            <span className="lbl">Link payment</span>
+            <span className="alt spin"><span className="spinner" /></span>
+          </button>
+        </div>
+        {link.isError && <p className="lerr">{(link.error as any)?.message || 'Could not link that payment'}</p>}
+      </div>
+    </div>
+  );
+}
+
+// ─── Adjust an open payment onto stages: distribute the money + certify the placed portion ─────────
+function AdjustSheet({ wo, group, stages, onClose, onDone }: {
+  wo: any; group: PayGroup; stages: { milestoneId: string; name: string }[]; onClose: () => void; onDone: (msg: string) => void;
+}) {
+  const qc = useQueryClient();
+  const [amt, setAmt] = useState<Record<string, string>>(() => {
+    const s: Record<string, string> = {};
+    stages.forEach((st) => { s[st.milestoneId] = group.byMs[st.milestoneId] ? String(Math.round(group.byMs[st.milestoneId])) : ''; });
+    return s;
+  });
+  const [confirming, setConfirming] = useState(false);
+  const pool = group.total;   // all of this payment's money on this contract, re-sliced from scratch
+  const dist = stages.reduce((a, st) => a + (parseAmount(amt[st.milestoneId]) || 0), 0);
+  const openLeft = Math.round((pool - dist) * 100) / 100;
+  const over = dist > pool + 0.5;
+  const contractValue = Number(wo.order_value) || 0;
+  const pct = contractValue > 0 ? Math.min(100, Math.round((dist / contractValue) * 100)) : 0;
+
+  const adjust = useMutation({
+    mutationFn: () => adjustContractPayment(group.txnId, wo.wo_id, stages.map((st) => ({ milestoneId: st.milestoneId, amount: parseAmount(amt[st.milestoneId]) || 0 }))),
+    onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ['wo_allocations', wo.wo_id] });
+      onDone(r.certified > 0.5 ? `${fmt(r.certified)} placed as work done${r.open > 0.5 ? ` · ${fmt(r.open)} left open` : ''}` : 'Payment set back to open advance');
+      onClose();
+    },
+  });
+
+  const setStage = (id: string, v: string) => setAmt((p) => ({ ...p, [id]: v }));
+
+  return (
+    <div className="scrim" onClick={onClose}>
+      <div className="cdx-card wide" onClick={(e) => e.stopPropagation()}>
+        {confirming ? (
+          <>
+            <h3>Confirm the work is done</h3>
+            <p>You're placing <b>{fmt(dist)}</b> of this payment as <b>accepted work</b> on <b>{wo.wo_id}</b> — that's confirming work done to about <b>{pct}%</b> of the {fmt(contractValue)} contract. {openLeft > 0.5 ? <>The remaining <b>{fmt(openLeft)}</b> stays an open advance.</> : null} This certifies the work; it's reversible by adjusting back to open.</p>
+            <div className="row">
+              <button className="btn ghost" onClick={() => setConfirming(false)} disabled={adjust.isPending}>Back</button>
+              <button className={`btn primary${adjust.isPending ? ' loading' : ''}`} onClick={() => adjust.mutate()}>
+                <span className="lbl">Yes, work done to {pct}%</span>
+                <span className="alt spin"><span className="spinner" /></span>
+              </button>
+            </div>
+            {adjust.isError && <p className="lerr">{(adjust.error as any)?.message || 'Could not adjust the payment'}</p>}
+          </>
+        ) : (
+          <>
+            <h3>Put this payment on stages</h3>
+            <p>Distribute <b>{fmt(pool)}</b> from this payment across the stages it paid for. What you place becomes accepted work; the rest stays an open advance.</p>
+            <div className="adjlist">
+              {stages.map((st) => (
+                <div key={st.milestoneId} className="adjrow">
+                  <span className="ar-n">{st.name}</span>
+                  <input className="ecell num mono" inputMode="decimal" placeholder="₹0" value={amt[st.milestoneId] ?? ''} onChange={(e) => setStage(st.milestoneId, e.target.value)} />
+                </div>
+              ))}
+            </div>
+            <div className="adjsum">
+              <span>Placed on stages <b className="mono">{fmt(dist)}</b></span>
+              <span className={over ? 'bad' : ''}>Open left <b className="mono">{fmt(openLeft)}</b></span>
+            </div>
+            {over && <p className="lerr">That's more than this payment has on the contract ({fmt(pool)}).</p>}
+            <div className="row" style={{ marginTop: 14 }}>
+              <button className="btn ghost" onClick={onClose}>Cancel</button>
+              <button className="btn primary" disabled={over || dist <= 0.5} onClick={() => setConfirming(true)}>Review</button>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }

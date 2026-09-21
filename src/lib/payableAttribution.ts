@@ -14,11 +14,14 @@
  */
 import type { QueryClient } from '@tanstack/react-query';
 import { supabase } from './supabase';
-import { loadUnpaidBillsForVendor, saveBillAllocations, type BillPick } from './billsApi';
+import { loadUnpaidBillsForVendor, saveBillAllocations, loadLinkablePayments, type BillPick, type LinkablePayment } from './billsApi';
 import { loadWeeklyPayments } from './weeklyPaymentsApi';
 
 export type PayeeType = 'Vendor' | 'Worker' | null | undefined;
-export type PayableTag = 'this_week' | 'past' | 'other';
+export type PayableTag = 'this_week' | 'past' | 'advance' | 'other';
+
+/** One of the party's open contracts (work orders) on this site — an advance can sit on it. */
+export interface ContractTarget { woId: string; label: string; value: number; paid: number; outstanding: number }
 
 export interface BillTarget {
   id: string; kind: 'bill' | 'po'; billNo: string | null; date: string | null;
@@ -32,8 +35,8 @@ export interface PhaseTarget { milestoneId: string; name: string; value: number;
 
 export type AttributionTargets =
   | { kind: 'vendor'; bills: BillTarget[] }
-  | { kind: 'worker_day'; thisWeek: number; pastBalance: number; owedBefore: number; isAdvance: boolean }
-  | { kind: 'worker_contract'; woId: string; woLabel: string; tracked: boolean; wagesMode: boolean; phases: PhaseTarget[]; thisWeek: number; pastBalance: number; owedBefore: number; isAdvance: boolean };
+  | { kind: 'worker_day'; thisWeek: number; pastBalance: number; owedBefore: number; isAdvance: boolean; contracts: ContractTarget[] }
+  | { kind: 'worker_contract'; woId: string; woLabel: string; tracked: boolean; wagesMode: boolean; phases: PhaseTarget[]; thisWeek: number; pastBalance: number; owedBefore: number; isAdvance: boolean; contracts: ContractTarget[] };
 
 const num = (v: unknown) => Number(v) || 0;
 
@@ -138,7 +141,10 @@ export async function loadAttributionTargets(
     }
   } catch { /* weekly unavailable → fall back to the site balance below */ }
 
-  const eng = await workerEngagement(payee.id, projectId);
+  const [eng, contracts] = await Promise.all([
+    workerEngagement(payee.id, projectId),
+    loadPartyContracts(payee.id, projectId),
+  ]);
   // This payment reduced the CARRIED balance (not this week's gross earned) — add it back so the
   // figures are what was owed BEFORE it.
   let pastBalance = Math.max(0, wkBalanceBf + selfPaid);
@@ -156,9 +162,34 @@ export async function loadAttributionTargets(
       supabase.from('work_orders').select('title, scope_of_work').eq('wo_id', eng.woId).maybeSingle(),
     ]);
     const w = woRow.data as { title?: string; scope_of_work?: string } | null;
-    return { kind: 'worker_contract', woId: eng.woId, woLabel: w?.title || w?.scope_of_work || 'Contract', tracked, wagesMode: eng.wagesMode, phases, thisWeek, pastBalance, owedBefore, isAdvance };
+    return { kind: 'worker_contract', woId: eng.woId, woLabel: w?.title || w?.scope_of_work || 'Contract', tracked, wagesMode: eng.wagesMode, phases, thisWeek, pastBalance, owedBefore, isAdvance, contracts };
   }
-  return { kind: 'worker_day', thisWeek, pastBalance, owedBefore, isAdvance };
+  return { kind: 'worker_day', thisWeek, pastBalance, owedBefore, isAdvance, contracts };
+}
+
+/** The party's open contracts on this site (work orders that aren't draft/cancelled), with what's still
+ *  outstanding on each — so an advance can be placed on a specific one. Paid = Σ order_type='WO' allocs. */
+async function loadPartyContracts(stakeholderId: string, projectId: string): Promise<ContractTarget[]> {
+  const { data: wos } = await supabase.from('work_orders')
+    .select('wo_id, title, scope_of_work, order_value, status')
+    .eq('stakeholder_id', stakeholderId).eq('project_id', projectId);
+  const rows = ((wos ?? []) as Array<{ wo_id: string; title: string | null; scope_of_work: string | null; order_value: number | null; status: string | null }>)
+    .filter((w) => { const s = (w.status || '').toLowerCase(); return s !== 'draft' && s !== 'cancelled'; });
+  if (!rows.length) return [];
+  const ids = rows.map((r) => r.wo_id);
+  const { data: al } = await supabase.from('txn_allocations')
+    .select('order_ref, allocated_amount, transactions(status)').eq('order_type', 'WO').in('order_ref', ids);
+  const paidByWo: Record<string, number> = {};
+  (al ?? []).forEach((a: { order_ref: string; allocated_amount: number; transactions?: { status?: string } | { status?: string }[] | null }) => {
+    const t = Array.isArray(a.transactions) ? a.transactions[0] : a.transactions;
+    if (t?.status === 'Voided') return;
+    paidByWo[a.order_ref] = (paidByWo[a.order_ref] || 0) + num(a.allocated_amount);
+  });
+  return rows.map((r) => {
+    const value = num(r.order_value);
+    const paid = paidByWo[r.wo_id] || 0;
+    return { woId: r.wo_id, label: r.title || r.scope_of_work || 'Contract', value, paid, outstanding: Math.max(0, value - paid) };
+  });
 }
 
 // The one query key both the picker's useQuery and any prefetch share (so a prefetch warms the exact
@@ -194,6 +225,59 @@ export async function attributeTag(txnId: string, tag: PayableTag | null): Promi
 }
 
 /**
+ * Advance onto a CONTRACT: allocate the whole payment to a work order with NO milestone — an OPEN
+ * payment on the contract. It reduces the contract's Outstanding (WorkOrderDetail sums order_type='WO'
+ * allocations) but certifies nothing; the open amount can later be adjusted onto phases (which certifies).
+ * Uses set_txn_allocations, which replaces the txn's allocation set, so the full amount lands on the WO.
+ */
+export async function attributeAdvanceToContract(txnId: string, orgId: string, amount: number, woId: string, projectId: string | null): Promise<void> {
+  const parts = [{ project_id: projectId ?? '', order_type: 'WO', order_ref: woId, milestone_id: '', bill_id: '', allocated_amount: amount }];
+  const { data, error } = await supabase.rpc('set_txn_allocations', { p_txn_id: txnId, p_org_id: orgId, p_parts: parts });
+  const r = data as { success?: boolean; error?: string } | null;
+  if (error || !r?.success) throw new Error(r?.error || error?.message || 'Could not place the advance on the contract');
+}
+
+// ── the contract page's own door: link an existing payment, then adjust it onto stages ─────────────
+
+/** The party's loose payments on this project that could be linked to this contract — the SAME reader
+ *  the bill linker uses (money not yet spoken for by a bill or an order), ranked nearest the target. */
+export function loadContractLinkablePayments(stakeholderId: string, projectId: string | null, target: number): Promise<LinkablePayment[]> {
+  return loadLinkablePayments(stakeholderId, projectId, target);
+}
+
+/**
+ * Link an existing payment to a contract as an OPEN advance (milestone_id = NULL).
+ * set_txn_allocations replaces the whole set, so everything the payment already carries (bills, other
+ * orders) is handed back untouched and only the free part is pointed at the WO; any remainder falls
+ * back to the without-bills bucket. Mirrors billsApi.linkPaymentToBill, for a contract.
+ */
+export async function linkPaymentToContract(orgId: string, pay: LinkablePayment, woId: string, projectId: string | null, amount: number): Promise<void> {
+  const apply = Math.round(Math.min(Math.max(0, amount), pay.free) * 100) / 100;
+  if (apply <= 0.5) throw new Error('Nothing left on that payment to link');
+  const keep = pay.parts.filter((p) => p.bill_id || p.order_ref);
+  const parts = [...keep, { project_id: projectId ?? '', order_type: 'WO', order_ref: woId, milestone_id: '', bill_id: '', allocated_amount: apply }];
+  const placed = parts.reduce((s, p) => s + p.allocated_amount, 0);
+  const rest = Math.round((pay.total - placed) * 100) / 100;
+  if (rest > 0.5) parts.push({ project_id: pay.projectId ?? '', order_type: '', order_ref: '', milestone_id: '', bill_id: '', allocated_amount: rest });
+  const { data, error } = await supabase.rpc('set_txn_allocations', { p_txn_id: pay.txnId, p_org_id: orgId, p_parts: parts });
+  const r = data as { success?: boolean; error?: string } | null;
+  if (error || !r?.success) throw new Error(r?.error || error?.message || 'Could not link that payment');
+}
+
+/**
+ * Adjust an OPEN contract payment onto stage(s): distribute the money across phases (display + paid
+ * side) and certify the distributed portion as accepted work (WO-level, capped, muster-guarded). The
+ * undistributed rest stays open. Returns what was certified so the caller can confirm "work done to X%".
+ */
+export async function adjustContractPayment(txnId: string, woId: string, parts: Array<{ milestoneId: string; amount: number }>): Promise<{ distributed: number; open: number; certified: number }> {
+  const p_parts = parts.filter((p) => p.amount > 0).map((p) => ({ milestone_id: p.milestoneId, amount: p.amount }));
+  const { data, error } = await supabase.rpc('adjust_contract_payment', { p_txn_id: txnId, p_wo_id: woId, p_parts });
+  const r = data as { success?: boolean; error?: string; distributed?: number; open?: number; certified?: number } | null;
+  if (error || !r?.success) throw new Error(r?.error || error?.message || 'Could not adjust the payment');
+  return { distributed: r.distributed ?? 0, open: r.open ?? 0, certified: r.certified ?? 0 };
+}
+
+/**
  * Worker contract: point the payment at a phase.
  *  · certify=true  (work-done): settle that stage — a contract-level accepted-work cert + phase for display.
  *  · certify=false (wages)    : link the allocation to the WO + phase for DISPLAY only (no cert; the wage
@@ -212,6 +296,7 @@ export type Selection =
   | { type: 'bills'; picks: BillPick[] }
   | { type: 'tag'; tag: PayableTag }
   | { type: 'phase'; woId: string; milestoneId: string | null; certify: boolean }
+  | { type: 'advance_contract'; woId: string; projectId: string | null }
   | { type: 'other' }
   | { type: 'skip' };
 
@@ -224,6 +309,7 @@ export async function applyAttribution(
   if (sel.type === 'bills') await attributeToBills(txnId, orgId, amount, sel.picks, projectId);
   else if (sel.type === 'tag') await attributeTag(txnId, sel.tag);
   else if (sel.type === 'phase') await attributeToPhase(txnId, sel.woId, sel.milestoneId, true, sel.certify);
+  else if (sel.type === 'advance_contract') await attributeAdvanceToContract(txnId, orgId, amount, sel.woId, sel.projectId);
   else if (sel.type === 'other') await attributeTag(txnId, 'other');
   // 'skip' → nothing
 }
@@ -233,7 +319,7 @@ export async function applyAttribution(
 /** The tag a payment carries, if the owner has said what it settles. */
 export function payableTagOf(txn: { ai_flag_data?: unknown } | null | undefined): PayableTag | null {
   const t = (txn?.ai_flag_data as { payable_tag?: string } | null | undefined)?.payable_tag;
-  return t === 'this_week' || t === 'past' || t === 'other' ? t : null;
+  return t === 'this_week' || t === 'past' || t === 'advance' || t === 'other' ? t : null;
 }
 
 /** The tag, in words. Short for a chip; `long` for a line that stands on its own. Written in the
@@ -241,6 +327,7 @@ export function payableTagOf(txn: { ai_flag_data?: unknown } | null | undefined)
 export function payableTagLabel(tag: PayableTag | null | undefined, long = false): string | null {
   if (tag === 'this_week') return long ? "This week's wages" : 'This week';
   if (tag === 'past') return long ? 'Earlier dues' : 'Earlier dues';
+  if (tag === 'advance') return long ? 'Advance — paid ahead of work' : 'Advance';
   if (tag === 'other') return long ? 'On account — not against work done' : 'On account';
   return null;
 }

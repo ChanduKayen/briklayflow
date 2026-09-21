@@ -38,7 +38,6 @@ import {
 import { PYR_CSS } from '../components/payables/pyrCss';
 import { PayablesMobile } from '../components/payables/PayablesMobile';
 import { loadApprovals } from '../lib/paymentApprovals';
-import { composer } from '../components/nav/txDraft';
 import { isNewLedgerOrg } from '../lib/ledgerRead';
 import { addAdjustment } from '../lib/partyLedgerApi';
 import { PendingCertifications } from '../components/attendance/PendingCertifications';
@@ -413,8 +412,8 @@ export default function Payables({ session }: { session: Session }) {
           rows={rowsAll} paid={serverPaid} approvals={approvals} monday={monday} setMonday={setMonday}
           readOnly={readOnly} newLedger={!!newLedger} orgId={orgId} loading={isLoading}
           who={{ id: null, name: (profile as { full_name?: string } | undefined)?.full_name ?? null }}
+          projects={projects ?? []} parties={parties ?? []}
           onDone={() => { refetch(); refetchPaid(); refetchApprovals(); }}
-          onCompose={() => (composer.available ? composer.open('out') : navigate('/ledger/new', { state: { direction: 'out' } }))}
         />
       </div>
     );

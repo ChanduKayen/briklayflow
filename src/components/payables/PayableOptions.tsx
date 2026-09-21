@@ -8,7 +8,7 @@
  */
 import { useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { loadAttributionTargets, attrTargetsKey, type Selection, type PayeeType } from '../../lib/payableAttribution';
+import { loadAttributionTargets, attrTargetsKey, type Selection, type PayeeType, type ContractTarget } from '../../lib/payableAttribution';
 import type { BillPick } from '../../lib/billsApi';
 import { useOrgId } from '../../lib/auth/AuthProvider';
 import NewBillModal, { type BillDraft } from '../bills/NewBillModal';
@@ -93,6 +93,29 @@ export function PayableOptions({
     setAddBill(true);
   };
 
+  // "Advance" as its own active option: paid ahead of work. If the party has open contracts on this
+  // project it reveals them — pick one and the money lands as an OPEN payment on that contract (no
+  // stage certified yet; it waits on the contract page to be adjusted onto a phase). No contract →
+  // it stays a party-level advance (a recoverable). Kept alongside "On account", which is the escape
+  // hatch for money not tied to this party's work at all.
+  const advanceRows = (contracts: ContractTarget[]) => (
+    <>
+      <Radio id="advance" choice={choice?.startsWith('advance') ? 'advance' : choice} set={() => setChoice('advance')}
+        title="Advance" note={contracts.length ? 'paid ahead of work — put it on a contract' : 'paid ahead of work — recoverable'} />
+      {choice?.startsWith('advance') && contracts.length > 0 && (
+        <div className="pyo-sub">
+          {contracts.map((c) => (
+            <button key={c.woId} type="button" className={`pyo-row sub${choice === `advance:${c.woId}` ? ' on' : ''}`}
+              onClick={() => setChoice(`advance:${c.woId}`)}>
+              <span className="pyo-rd">{choice === `advance:${c.woId}` ? <i /> : null}</span>
+              <span className="pyo-m"><b>{c.label}</b><span>{inr(c.outstanding)} outstanding of {inr(c.value)}</span></span>
+            </button>
+          ))}
+        </div>
+      )}
+    </>
+  );
+
   const confirm = () => {
     if (!targets) return;
     if (targets.kind === 'vendor') {
@@ -100,10 +123,14 @@ export function PayableOptions({
       onConfirm({ type: 'bills', picks });
     } else if (targets.kind === 'worker_day') {
       if (choice === 'other') onConfirm({ type: 'other' });
+      else if (choice === 'advance') onConfirm({ type: 'tag', tag: 'advance' });
+      else if (choice?.startsWith('advance:')) onConfirm({ type: 'advance_contract', woId: choice.slice(8), projectId });
       else onConfirm({ type: 'tag', tag: choice as 'this_week' | 'past' });
     } else {
       if (choice === 'other') onConfirm({ type: 'other' });
       else if (choice === 'past') onConfirm({ type: 'tag', tag: 'past' });
+      else if (choice === 'advance') onConfirm({ type: 'tag', tag: 'advance' });
+      else if (choice?.startsWith('advance:')) onConfirm({ type: 'advance_contract', woId: choice.slice(8), projectId });
       else onConfirm({ type: 'phase', woId: targets.woId, milestoneId: choice, certify: !targets.wagesMode });
     }
   };
@@ -160,7 +187,8 @@ export function PayableOptions({
               title="This week's wages" note={targets.thisWeek > 0.5 ? inr(targets.thisWeek) + ' — from the muster this week' : 'nothing owed this week'} />
             <Radio id="past" choice={choice} set={setChoice} disabled={targets.pastBalance <= 0.5}
               title="Earlier dues" note={targets.pastBalance > 0.5 ? inr(targets.pastBalance) + ' — carried from before this week' : 'nothing carried'} />
-            <Radio id="other" choice={choice} set={setChoice} title="On account" note="advance, or not tied to specific work yet" />
+            {advanceRows(targets.contracts)}
+            <Radio id="other" choice={choice} set={setChoice} title="On account" note="not tied to specific work yet" />
           </>
         ) : (
           <>
@@ -184,7 +212,8 @@ export function PayableOptions({
             {targets.pastBalance > 0.5 && (
               <Radio id="past" choice={choice} set={setChoice} title="Earlier dues" note={`${inr(targets.pastBalance)} — carried from before this week`} />
             )}
-            <Radio id="other" choice={choice} set={setChoice} title="On account" note="advance, or settle later" />
+            {advanceRows(targets.contracts)}
+            <Radio id="other" choice={choice} set={setChoice} title="On account" note="not tied to specific work yet" />
           </>
         )}
       </div>
@@ -251,6 +280,9 @@ const CSS = `
 .pyo-m span{font-size:.76rem;opacity:.62;overflow:hidden;text-overflow:ellipsis}
 .pyo-row em{font-style:normal;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:.85rem;flex:none}
 .pyo-none{font-size:.85rem;opacity:.6;padding:6px 2px 4px;margin:0;line-height:1.5}
+/* Contracts revealed under "Advance": a nested list, marked by a left rail so they read as belonging to it. */
+.pyo-sub{display:flex;flex-direction:column;gap:6px;margin:-2px 0 2px;padding-left:14px;border-left:2px solid rgba(200,96,58,.28)}
+.pyo-sub .pyo-row{padding:10px 12px}
 /* The same row the choices are cut from, without their fill: this is an action, not an option. */
 .pyo-add{display:flex;align-items:center;gap:11px;width:100%;text-align:left;padding:12px 13px;background:none;
   border:1px solid rgba(128,128,128,.22);border-radius:12px;font:inherit;color:inherit;cursor:pointer;margin-top:2px;

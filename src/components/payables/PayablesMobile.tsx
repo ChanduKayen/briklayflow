@@ -23,6 +23,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import { recordWeeklyPayment, settleWeeklyPaymentOnLedger, undoWeeklyPayment, mondayOf, weekLabel, type PayRow, type RunPaid } from '../../lib/weeklyPaymentsApi';
 import { approve as approveRow, unapprove as unapproveRow, isMissingTable, type Approval } from '../../lib/paymentApprovals';
+import { addAdjustment } from '../../lib/partyLedgerApi';
 import { PYM_CSS } from './pymCss';
 import { useSheetDrag } from '../../lib/sheetDrag';
 import { useSheetFlag } from '../../lib/sheetFlag';
@@ -56,7 +57,7 @@ type Panel =
   | { view: 'weeks' };
 
 export function PayablesMobile({
-  rows, paid, approvals, monday, setMonday, readOnly, newLedger, orgId, who, onDone, onCompose, loading,
+  rows, paid, approvals, monday, setMonday, readOnly, newLedger, orgId, who, onDone, loading, projects, parties,
 }: {
   rows: PayRow[];
   paid: Record<string, RunPaid>;
@@ -69,14 +70,16 @@ export function PayablesMobile({
   who: { id?: string | null; name?: string | null };
   /** something was written: reload the run, the paid stamps and the approvals */
   onDone: () => void;
-  /** "+ Add a payment request" — the composer asks who, how much, what for */
-  onCompose: () => void;
   loading: boolean;
+  /** the sites + parties the "add a payment request" form offers */
+  projects: { project_id: string; name: string }[];
+  parties: { stakeholder_id: string; name: string; type?: string | null; category?: string | null }[];
 }) {
   const [stage, setStage] = useState<'all' | Stage>('all');
   const [foldOpen, setFoldOpen] = useState(false);
   const [panel, setPanel] = useState<Panel | null>(null);
-  useSheetFlag(!!panel);
+  const [addOpen, setAddOpen] = useState(false);   // the "add a payment request" sheet
+  useSheetFlag(!!panel || addOpen);
   const [busy, setBusy] = useState<string | null>(null);
   const [folded, setFolded] = useState(false);
   const [fab, setFab] = useState<{ cls: string; label: string } | null>(null);
@@ -390,7 +393,7 @@ export function PayablesMobile({
           <div className="empty"><b>{EMPTY[stage][0]}</b><span>{EMPTY[stage][1]}</span></div>
         )}
         {(stage === 'approve' || stage === 'all') && !readOnly && (
-          <button type="button" className="addreq" onClick={onCompose}>+ Add a payment request</button>
+          <button type="button" className="addreq" onClick={() => { setAddOpen(true); buzz(8); }}>+ Add a payment request</button>
         )}
       </main>
 
@@ -412,7 +415,119 @@ export function PayablesMobile({
         onApprove={async (it, amt, via) => { const ok = await doApprove(it, amt, via); return ok; }}
         onUnapprove={doUnapprove} onPay={doPay} monday={monday} setMonday={setMonday}
       />}
+
+      {addOpen && <div className="pym-scrim on" onClick={() => setAddOpen(false)} />}
+      {addOpen && (
+        <AddPayableSheet
+          orgId={orgId} projects={projects} parties={parties}
+          close={() => setAddOpen(false)}
+          onAdded={() => { setAddOpen(false); say('Payment request added'); onDone(); }}
+        />
+      )}
     </div>
+  );
+}
+
+// ── add a payment request — a payable OBLIGATION, in the composer's own card language ──────────────
+// Not a transaction (money out), a PAYABLE: for a known party it persists as a certified-side ledger
+// adjustment (addAdjustment) — the same write the desktop run uses — so it enters v_party_balance and
+// this week's carry. The old mobile button opened the money-out composer, which recorded a payment.
+function AddPayableSheet({ orgId, projects, parties, close, onAdded }: {
+  orgId: string;
+  projects: { project_id: string; name: string }[];
+  parties: { stakeholder_id: string; name: string; type?: string | null; category?: string | null }[];
+  close: () => void;
+  onAdded: () => void;
+}) {
+  const [on, setOn] = useState(false);
+  useEffect(() => { const r = requestAnimationFrame(() => setOn(true)); return () => cancelAnimationFrame(r); }, []);
+  const drag = useSheetDrag<HTMLElement>(close, on);
+  const [projectId, setProjectId] = useState('');
+  const [q, setQ] = useState('');
+  const [picked, setPicked] = useState<{ id: string; name: string } | null>(null);
+  const [amount, setAmount] = useState('');
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const buzz = (ms: number | number[] = 6) => { try { navigator.vibrate?.(ms); } catch { /* unsupported */ } };
+
+  const amt = parseInt(amount.replace(/[^\d]/g, ''), 10) || 0;
+  const ready = !!projectId && !!picked && amt > 0;
+  const matches = useMemo(() => {
+    const t = q.trim().toLowerCase();
+    if (!t) return [] as typeof parties;
+    return parties.filter((p) => p.name.toLowerCase().includes(t)).slice(0, 8);
+  }, [q, parties]);
+
+  const submit = async () => {
+    if (!ready || busy || !picked) return;
+    setBusy(true); setErr(null);
+    try {
+      await addAdjustment(orgId, picked.id, {
+        projectId, adjDate: new Date().toISOString().slice(0, 10), side: 'certified', amount: amt, note: note.trim() || 'Payment request',
+      });
+      buzz([10, 40, 18]);
+      onAdded();
+    } catch (e) { setErr((e as Error)?.message || 'Could not add the payment request'); setBusy(false); }
+  };
+
+  return (
+    <section ref={drag} className={`pym-panel${on ? ' on' : ''}`} role="dialog" aria-modal="true" aria-label="Add a payment request" style={{ ['--h' as string]: '560px' } as React.CSSProperties}>
+      <div className="grab" aria-hidden="true"><i /></div>
+      <div className="p-head">
+        <button type="button" className="ico" aria-label="Close" onClick={close}>{CROSS}</button>
+        <div className="t"><h2>Add a payment request</h2><span>What we owe — not a payment yet</span></div>
+      </div>
+      <div className="p-body">
+        <div className="addf">
+          <label className="fl">
+            <span>Site</span>
+            <select value={projectId} onChange={(e) => setProjectId(e.target.value)}>
+              <option value="">Choose a site…</option>
+              {projects.map((p) => <option key={p.project_id} value={p.project_id}>{p.name}</option>)}
+            </select>
+          </label>
+
+          <label className="fl">
+            <span>Party</span>
+            {picked ? (
+              <button type="button" className="picked" onClick={() => { setPicked(null); setQ(''); }}>
+                {picked.name}<i>change</i>
+              </button>
+            ) : (
+              <input type="text" placeholder="Search a worker or vendor…" value={q} onChange={(e) => setQ(e.target.value)} autoComplete="off" />
+            )}
+            {!picked && matches.length > 0 && (
+              <div className="pmenu">
+                {matches.map((m) => (
+                  <button key={m.stakeholder_id} type="button" onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => { setPicked({ id: m.stakeholder_id, name: m.name }); setQ(''); buzz(4); }}>
+                    <b>{m.name}</b>{m.category || m.type ? <span>{m.category || m.type}</span> : null}
+                  </button>
+                ))}
+              </div>
+            )}
+          </label>
+
+          <div className="frow">
+            <label className="fl amtf">
+              <span>Amount</span>
+              <div className="amtin"><em>₹</em><input inputMode="numeric" placeholder="0" value={amount} onChange={(e) => setAmount(e.target.value)} /></div>
+            </label>
+          </div>
+
+          <label className="fl">
+            <span>For what</span>
+            <input type="text" placeholder="e.g. advance · flat 501 tiles" value={note} onChange={(e) => setNote(e.target.value)} />
+          </label>
+
+          {err && <p className="ferr">{err}</p>}
+        </div>
+        <button type="button" className="big" disabled={!ready || busy} onClick={submit}>
+          {busy ? 'Adding…' : ready ? `Add ₹${grouped(amt)} request` : 'Add payment request'}
+        </button>
+      </div>
+    </section>
   );
 }
 

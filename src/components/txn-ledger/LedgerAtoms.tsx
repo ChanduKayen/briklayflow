@@ -4,7 +4,7 @@
  */
 import { useState, useRef, type ReactNode, type MouseEvent, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowUpRight, ArrowDownLeft, Link2, Unlink, ChevronDown, Hammer, Package } from 'lucide-react';
+import { Link2, Unlink, ChevronDown, Hammer, Package } from 'lucide-react';
 import { V, font, nums } from './ledgerTokens';
 import type { TxnAnchor, TxnDirection } from '../../lib/transactions';
 
@@ -26,23 +26,28 @@ export type AnchorInfo = { kind: 'WO' | 'PO'; title: string; total: number; paid
  * an object rather than merely a palette. Direction stays in the tint — and in the amount, where
  * it always was. A row with no party to name (a general expense) keeps the arrow.
  */
-export function DirMedallion({ dir, name }: { dir: TxnDirection; name?: string | null }) {
+export function DirMedallion({ dir, name, transfer }: { dir: TxnDirection; name?: string | null; transfer?: boolean }) {
   const out = dir === 'out';
   const initials = (name ?? '')
     .trim().split(/\s+/).map((w) => w[0]).filter(Boolean).slice(0, 2).join('').toUpperCase();
+  // Modelled on the phone list: one calm cream disc for everyone — the direction is read from the
+  // (coloured) amount, not the circle. A transfer between bank and wallet shows a move arrow instead
+  // of initials; a payment with no party shows a dashed ring.
   return (
     <span
       className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 relative"
       style={{
-        background: out ? V.terraWash : V.sageWash,
-        boxShadow: `0 0 0 3px ${V.surface}`, // ring masks the spine behind it
+        background: transfer ? 'transparent' : '#F3EEE5',
+        boxShadow: transfer ? 'none' : `0 0 0 3px ${V.surface}`, // ring masks the spine behind it
         zIndex: 1,
       }}
-      aria-label={`${name ? `${name} — ` : ''}${out ? 'money out' : 'money in'}`}
+      aria-label={`${name ? `${name} — ` : ''}${transfer ? 'transfer' : out ? 'money out' : 'money in'}`}
     >
-      {initials
-        ? <span style={{ fontSize: 11.5, fontWeight: 700, letterSpacing: '-0.01em', color: out ? V.terraDeep : V.sage, ...font }}>{initials}</span>
-        : out ? <ArrowUpRight size={14} color={V.terraDeep} /> : <ArrowDownLeft size={14} color={V.sage} />}
+      {transfer
+        ? <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={V.sys} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 12h14M13 7l5 5-5 5" /></svg>
+        : initials
+          ? <span style={{ fontSize: 11.5, fontWeight: 600, letterSpacing: '-0.01em', color: V.inkSoft, ...font }}>{initials}</span>
+          : <span className="w-7 h-7 rounded-full" style={{ border: `1.25px dashed ${V.line}` }} />}
     </span>
   );
 }
@@ -65,10 +70,10 @@ export function AnchorChip({ anchor, info, siblings = 0, partyName, siteName, on
       <button
         type="button"
         onClick={onClick}
-        className="inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-md"
-        style={{ background: V.askWash, border: `1px solid ${V.askLine}`, color: V.ask, ...font }}
+        className="attr-chip attr-nudge inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-md"
+        style={{ background: 'transparent', border: `1px solid ${V.askLine}`, color: V.ask, ...font }}
       >
-        not linked yet · link it
+        Payable for <span style={{ color: V.faint }}>›</span>
       </button>
     );
   }

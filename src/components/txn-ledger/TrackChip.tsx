@@ -152,7 +152,7 @@ export function TrackChip({ txn, onLinked }: { txn: TrackTxn; onLinked: () => vo
   // Worker → contract; Vendor → order. Both share one gate; "one-time payment" (worker)
   // and "direct purchase" (vendor) are the SAME mechanism (fileAsLabour → is_one_time).
   const isWO = kind === 'WO';
-  const linkLabel = isWO ? 'Link to a contract' : 'Attach a bill';
+  const linkLabel = isWO ? 'Link to a contract' : 'Bill for';
   const oneLabel = isWO ? 'Labour payment' : 'Direct purchase';
 
   // ONE shape, shared with the worker row (AttributeChip): resolved = a calm dot+label tag; unresolved =

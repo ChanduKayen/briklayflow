@@ -34,11 +34,11 @@ export const AttributeChip = forwardRef<HTMLButtonElement, AttributeChipProps>(f
       onClick={(e) => { e.stopPropagation(); onClick?.(e); }}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
-      className="attr-chip inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-md"
+      className={`attr-chip inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-md${linked ? '' : ' attr-nudge'}`}
       style={{
         background: linked ? V.field : 'transparent',
-        color: linked ? V.inkSoft : V.sys,
-        border: `1px dashed ${linked ? 'transparent' : V.line}`,
+        color: linked ? V.inkSoft : V.ask,
+        border: `1px solid ${linked ? 'transparent' : V.askLine}`,
         cursor: 'pointer',
         ...font,
       }}
@@ -53,4 +53,7 @@ export const AttributeChip = forwardRef<HTMLButtonElement, AttributeChipProps>(f
 export const ATTR_CHIP_CSS = `
 .attr-chip{transition:background .15s ease,border-color .15s ease,color .15s ease}
 .attr-chip:hover{background:${V.field};border-color:${V.line}}
+/* The unresolved nudge ("Attach a bill" / "Towards a payable") is a warm call to act:
+   a soft amber outline that fills with the amber wash on hover. */
+.attr-nudge:hover{background:${V.askWash} !important;border-color:${V.ask} !important}
 `;

@@ -17,7 +17,7 @@ import { useUserProfile } from '../App';
 import { useSnackbar } from '../components/Snackbar';
 import { getCostCode, GEN_HEADS, costCodeLabel, MAT_DIVISIONS, WRK_DIVISIONS } from '../lib/costCodes';
 import { searchPayees } from '../lib/payeeSearch';
-import { Plus, Download, Paperclip, Check, ArrowRight, ChevronRight, X, SlidersHorizontal } from 'lucide-react';
+import { Plus, Download, Paperclip, Check, ArrowRight, ChevronRight, X, SlidersHorizontal, Wallet } from 'lucide-react';
 import { useIsMobile } from '../lib/useIsMobile';
 import { LedgerMobile } from '../components/txn-ledger/LedgerMobile';
 import { composer } from '../components/nav/txDraft';
@@ -30,10 +30,10 @@ import { deriveDirection, cashDirection, isNotLinked, resolveAnchor, isGeneralEx
 import { V, font, serif, nums, terraGrad } from '../components/txn-ledger/ledgerTokens';
 import { useCursorLamp } from '../components/nav/useCursorLamp';
 import { DirMedallion, Amount, AnchorChip, FilterChip } from '../components/txn-ledger/LedgerAtoms';
-import { TrackChip, TRACK_CHIP_CSS } from '../components/txn-ledger/TrackChip';
+import { TRACK_CHIP_CSS } from '../components/txn-ledger/TrackChip';
 import { AttributeChip, ATTR_CHIP_CSS } from '../components/txn-ledger/AttributeChip';
 import { PayablePicker } from '../components/payables/PayablePicker';
-import { applyAttribution, prefetchAttrTargets, payableTagOf, payableTagLabel } from '../lib/payableAttribution';
+import { applyAttribution, prefetchAttrTargets, payableTagOf } from '../lib/payableAttribution';
 import { unlinkTxnOrder } from '../lib/trackingApi';
 import { useOrgId } from '../lib/auth/AuthProvider';
 import WalletRail from '../components/wallets/WalletRail';
@@ -52,7 +52,7 @@ const inr = (n: number) => Math.round(n).toLocaleString('en-IN');
 
 // What the redesigned AnchorChip needs to show a title, a burn-down bar, and the
 // remaining balance — keyed by order id (wo_id / po_id). Total/paid drive the bar.
-export type OrderInfo = { kind: 'WO' | 'PO'; title: string; total: number; paid: number; project: string };
+export type OrderInfo = { kind: 'WO' | 'PO'; title: string; total: number; paid: number; project: string; billId?: string | null };
 
 // A WO's scope is a long paragraph; show the opening ~40 chars as a human header
 // when the AI/user title is missing.
@@ -102,6 +102,11 @@ type EntryProps = {
   anchorNode?: ReactNode;
   remark: string | null;
   amount: string;
+  /** a bank↔wallet move — the medallion shows an arrow, not initials (mobile's language) */
+  transfer?: boolean;
+  /** paid FROM a site wallet — a small wallet glyph sits beside the payee name */
+  walletSpend?: boolean;
+  walletHolder?: string | null;
   attach: boolean;
   voided: boolean;
   flagged: boolean;
@@ -179,7 +184,7 @@ function EntryRow(p: EntryProps) {
             {p.selected && <span style={{ color: '#fff', fontSize: 11, lineHeight: 1 }}>✓</span>}
           </button>
         ) : (
-          <DirMedallion dir={p.dir} name={p.payee} />
+          <DirMedallion dir={p.dir} name={p.payee} transfer={p.transfer} />
         )}
       </div>
 
@@ -206,12 +211,28 @@ function EntryRow(p: EntryProps) {
           ) : (
             p.payee
           )}
+          {p.walletSpend && (
+            <span
+              title={`Paid from ${p.walletHolder ? `${p.walletHolder}'s` : 'a site'} wallet`}
+              className="inline-flex align-middle ml-1.5"
+              style={{ color: V.faint, transform: 'translateY(-1px)' }}
+            >
+              <Wallet size={12.5} strokeWidth={1.9} aria-hidden="true" />
+            </span>
+          )}
           {p.voided && <span className="ml-1.5 text-xs" style={{ color: V.faint, ...font }}>· voided</span>}
         </p>
         {/* A phone has no room for trade · note · site on one truncated line. It gets the two
             that place the money — the site, then what it was for — a line each, each with its
             own truncation. The desktop grid keeps its single context line. */}
-        <p className="text-xs truncate hidden sm:block" style={{ color: V.faint, ...font }}>{p.context}</p>
+        {/* Second line leads with the SITE (a touch stronger, its own column down the list), then the
+            context prose — placed here after weighing a chip, a new column and a colour, all of which
+            you'd asked to avoid. This reuses the line already here and mirrors the phone. */}
+        <p className="text-xs truncate hidden sm:block" style={{ color: V.faint, ...font }}>
+          {p.site ? <span style={{ color: V.sys, fontWeight: 500 }}>{p.site}</span> : null}
+          {p.site && p.context ? <span style={{ margin: '0 6px', opacity: .55 }}>·</span> : null}
+          {p.context}
+        </p>
         {p.site && <p className="text-xs truncate sm:hidden" style={{ color: V.sys, ...font }}>{p.site}</p>}
         {p.note && <p className="text-xs truncate sm:hidden" style={{ color: V.faint, ...font }}>{p.note}</p>}
       </div>
@@ -254,14 +275,48 @@ function WorkerPayableChip({ label, onClick, onHover }: { label?: string; onClic
   return (
     <AttributeChip
       linked={!!label}
-      label={label || 'Towards a payable'}
+      label={label || 'Payable for'}
       dot={V.sage}
-      title="Towards which payable? — from work done"
+      title="Payable for — pick what this payment settles"
       onClick={onClick}
       onMouseEnter={onHover}
     />
   );
 }
+
+/**
+ * PayableLine — what a linked payment SETTLES, written as a sentence, not a coloured chip.
+ *
+ * The old chips mixed vocabularies and hues ("On account", "Bill", a bare project name) and read as
+ * unrelated category tags. This reads as one grammar in one voice: a muted verb ("Paid against" /
+ * "Advance against" / "On account") and, where there is one, the actual thing it points at — the ONLY
+ * emphasised, clickable part, which opens that bill / contract / statement. Monochrome; the meaning is
+ * in the words, the "why" is the hover tooltip. A quiet pencil (on hover) still lets the owner change it.
+ */
+function PayableLine({ verb, refText, refTo, tooltip, onHover, navigate }: {
+  verb: string; refText?: string | null; refTo?: string | null; tooltip: string;
+  onHover?: () => void; navigate: (to: string) => void;
+}) {
+  return (
+    <span className="pay-line" title={tooltip} onMouseEnter={onHover} style={{ ...font }}>
+      <span className="pay-verb">{verb}</span>
+      {refText ? (
+        <button type="button" className="pay-ref" onClick={(e) => { e.stopPropagation(); if (refTo) navigate(refTo); }}>
+          {refText}
+        </button>
+      ) : null}
+    </span>
+  );
+}
+
+// The middle column is left-aligned into a clean vertical line of labels; the referent is the only
+// styled part — a fine dotted underline that firms up on hover (subtle, no ↗, no layout shift).
+const PAY_LINE_CSS = `
+.pay-line{display:inline-flex;align-items:baseline;gap:4px;font-size:12px;color:${V.sys};white-space:nowrap}
+.pay-verb{color:${V.sys}}
+.pay-ref{padding:0;background:none;border:none;color:${V.inkSoft};font:inherit;cursor:pointer;border-bottom:1px dotted ${V.faint};transition:color .14s ease,border-color .14s ease}
+.pay-ref:hover{color:${V.terra};border-bottom-color:${V.terra}}
+`;
 
 /* ---------- empty ledger: teach how it fills, using the day's own spine ---------- */
 
@@ -713,6 +768,13 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
           project: String(w.project_id ?? ''),
         };
       }
+      // Each PO's bill (if one is on file) — so a PO-linked payment can open the BILL directly,
+      // rather than routing through the PO. First bill per PO wins.
+      const billByPo: Record<string, string> = {};
+      if (poRefs.length) {
+        const { data: pbills } = await supabase.from('bills').select('id, po_id').in('po_id', poRefs);
+        (pbills ?? []).forEach((b: any) => { const k = String(b.po_id ?? ''); if (k && !billByPo[k]) billByPo[k] = String(b.id); });
+      }
       for (const p of poData) {
         map[String(p.po_id)] = {
           kind: 'PO',
@@ -720,6 +782,7 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
           total: Number(p.total_value) || Number(p.order_value) || 0,
           paid: 0,
           project: String(p.project_id ?? ''),
+          billId: billByPo[String(p.po_id)] ?? null,
         };
       }
       // Paid-to-date: sum every allocation booked against these orders.
@@ -1376,6 +1439,7 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
       {pullView}
       <style>{TRACK_CHIP_CSS}</style>
       <style>{ATTR_CHIP_CSS}</style>
+      <style>{PAY_LINE_CSS}</style>
       {importOpen && (
         <Suspense fallback={<div className="fixed inset-0 z-[1000]" style={{ background: 'rgba(30,26,21,0.55)' }} />}>
           <ImportTransactions session={session} onClose={closeImport} />
@@ -1700,7 +1764,10 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
                     // leads with its KIND (the GEN head) on the bold line, so the context
                     // carries its free-text description.
                     const ctxParts = genExp ? [txn.remarks] : [trade, txn.remarks];
-                    if (!(filterProject.length === 1) && projName) ctxParts.push(projName);
+                    // The site is NOT crammed into the context prose any more — it LEADS the second line
+                    // as its own element (see EntryRow), so it forms a scannable column and matches the
+                    // phone. Only when you're looking across sites; filtered to one, it would just repeat.
+                    const siteLead = (filterProject.length === 1) ? null : projName;
                     // Wallet marker: a transfer shows the money movement (accounting); a spend notes it drew site cash.
                     if (isWalletTransfer(txn)) ctxParts.unshift(txn.wallet_dir === 'in' ? 'Bank → wallet · site advance' : 'Wallet → bank · cash returned');
                     else if (isWalletSpend(txn)) ctxParts.unshift(`paid from ${txn.wallets?.holder_name ? txn.wallets.holder_name + "'s" : ''} wallet`.replace('  ', ' '));
@@ -1725,46 +1792,95 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
                     // A payment that settles a recorded bill (bill_id allocation) is already linked — show a
                     // calm "Bill" chip, never the "Attach bill" nudge (the detail already shows it attached).
                     const billAttached = (txn.txn_allocations || []).some((a: any) => a?.bill_id);
+                    // A payment linked to a PURCHASE ORDER reads like a bill (a PO is settled by its bill);
+                    // its referent opens that bill directly, not the PO. Bill-tagged allocs are caught above.
+                    const poAlloc = !billAttached ? (txn.txn_allocations || []).find((a: any) => a?.order_type === 'PO') : null;
                     // Wallet display: a transfer (float/return) names the wallet + carries a "Wallet transfer"
                     // chip; a spend keeps its payee but is tinted as site cash. Both get a slight warm tint.
                     const isWTransfer = isWalletTransfer(txn);
-                    const isWSpend = isWalletSpend(txn);
                     const walletHolder = walletNameOf(txn.wallet_id, txn.wallets?.holder_name);
+                    const isWSpend = isWalletSpend(txn);
                     const anchorNode: ReactNode =
                       txn.status === 'Voided'
                         ? <span className="inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-md" style={{ background: 'rgba(176,64,42,.08)', color: '#9A5140', ...font }}><span className="shrink-0 rounded-full" style={{ width: 5, height: 5, background: '#B4482F' }} />Voided</span>
                       : isWTransfer
-                        ? <span className="inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-md" style={{ background: '#EEEAF4', color: '#5E5473', ...font }}><span className="shrink-0 rounded-full" style={{ width: 5, height: 5, background: '#8A7BA6' }} />Wallet transfer</span>
+                        // a bank-to-wallet move: the arrow medallion + the "Bank to wallet" context line say it — no chip, like the phone
+                        ? <span aria-hidden="true" />
                       : genExp
-                        ? <span className="inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-md" style={{ background: V.field, color: V.inkSoft, ...font }}><span className="shrink-0 rounded-full" style={{ width: 5, height: 5, background: V.faint }} />Overhead <span style={{ color: V.faint }}>· no party</span></span>
+                        ? <PayableLine verb="Overhead" tooltip="A company overhead — not tied to a job or party" navigate={navigate} />
                         : billAttached
-                          ? <span className="inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-md" style={{ background: V.field, color: V.inkSoft, ...font }}><span className="shrink-0 rounded-full" style={{ width: 5, height: 5, background: V.terra }} />Bill</span>
-                          // Workers: one "Towards which payable?" chip — the linked phase/tag, or a nudge.
-                          // Never a contract burn-down, never a "link to contract" prompt.
+                          ? (() => {
+                              // "Paid against bill ↗" — the referent opens the bill it settles.
+                              const billA = (txn.txn_allocations || []).find((a: any) => a?.bill_id);
+                              return <PayableLine
+                                verb="Paid against"
+                                refText="bill"
+                                refTo={billA?.bill_id ? `/bills/${encodeURIComponent('bl~' + billA.bill_id)}` : null}
+                                tooltip="Settles this bill"
+                                navigate={navigate}
+                              />;
+                            })()
+                          // Workers: what this payment settles, as a sentence with a clickable referent
+                          // (contract·stage, earlier dues, this week) — or "Advance"/"On account", or a nudge.
                           : (txn.stakeholders?.type === 'Worker' && dir === 'out' && !isWTransfer && txn.status !== 'Voided')
-                            ? <WorkerPayableChip
-                                label={(() => {
-                                  // Linked → the contract phase (from the WO allocation, set for BOTH formats),
-                                  // else a day-wage tag, else a nudge.
-                                  const woA = (txn.txn_allocations || []).find((a: any) => a.order_type === 'WO');
-                                  if (woA) return (woA as any).wo_milestones?.name || 'Contract';
-                                  return payableTagLabel(payableTagOf(txn as { ai_flag_data?: unknown })) ?? undefined;
-                                })()}
-                                onClick={() => setAttrPicker({
+                            ? (() => {
+                                const openPicker = () => setAttrPicker({
                                   txnId: txn.txn_id,
                                   payee: { id: String(txn.stakeholder_id), name: txn.stakeholders?.name || 'Worker', type: 'Worker' },
                                   projectId: String((txn.txn_allocations || [])[0]?.project_id ?? ''),
                                   projectName: projName, amount: Number(txn.total_amount), date: txn.date ?? null,
-                                  // Add this payment back UNLESS a phase-cert already offsets it (billed rose with paid).
                                   selfPaid: phaseByTxn[txn.txn_id] ? 0 : Number(txn.total_amount),
-                                  // open on the answer already given, so it can be read and changed
                                   current: (txn.txn_allocations || []).find((a: { order_type?: string | null }) => a.order_type === 'WO')?.milestone_id
                                     ?? payableTagOf(txn as { ai_flag_data?: unknown }),
-                                })}
-                                onHover={() => prefetchAttrTargets(qc, { id: String(txn.stakeholder_id), type: 'Worker' }, String((txn.txn_allocations || [])[0]?.project_id ?? ''), txn.date ?? null, phaseByTxn[txn.txn_id] ? 0 : Number(txn.total_amount))}
-                              />
+                                });
+                                const onHover = () => prefetchAttrTargets(qc, { id: String(txn.stakeholder_id), type: 'Worker' }, String((txn.txn_allocations || [])[0]?.project_id ?? ''), txn.date ?? null, phaseByTxn[txn.txn_id] ? 0 : Number(txn.total_amount));
+                                const woA = (txn.txn_allocations || []).find((a: any) => a.order_type === 'WO');
+                                if (woA) {
+                                  const woId = String(woA.order_ref);
+                                  const placed = !!(woA as any).milestone_id;
+                                  return <PayableLine
+                                    verb={placed ? 'Paid against' : 'Advance against'}
+                                    refText="contract"
+                                    refTo={`/work-orders/${woId}`}
+                                    tooltip={placed ? 'Settles a stage of the contract — certifies the work' : 'Paid ahead of work — recoverable until it’s put on a stage'}
+                                    onHover={onHover} navigate={navigate}
+                                  />;
+                                }
+                                const tag = payableTagOf(txn as { ai_flag_data?: unknown });
+                                const sid = String(txn.stakeholder_id);
+                                if (tag === 'this_week') return <PayableLine verb="Paid against" refText="this week’s wages" refTo={`/stakeholders/${sid}`} tooltip="Settles this week’s wages" onHover={onHover} navigate={navigate} />;
+                                if (tag === 'past') return <PayableLine verb="Paid against" refText="earlier dues" refTo={`/stakeholders/${sid}`} tooltip="Clears the balance carried from before this week" onHover={onHover} navigate={navigate} />;
+                                if (tag === 'advance') return <PayableLine verb="Advance" tooltip="Paid ahead of work — recoverable" onHover={onHover} navigate={navigate} />;
+                                if (tag === 'other') return <PayableLine verb="On account" tooltip="Not tied to any work yet" onHover={onHover} navigate={navigate} />;
+                                return <WorkerPayableChip onClick={openPicker} onHover={onHover} />;
+                              })()
+                          : poAlloc
+                            ? (() => {
+                                const billId = orderMap[String(poAlloc.order_ref)]?.billId;
+                                return <PayableLine
+                                  verb="Paid against"
+                                  refText="bill"
+                                  refTo={billId ? `/bills/${encodeURIComponent('bl~' + billId)}` : null}
+                                  tooltip={billId ? 'Settles the bill on this purchase order' : 'Against a purchase order — no bill on file yet'}
+                                  navigate={navigate}
+                                />;
+                              })()
                           : (anchor === null && dir === 'out' && txn.stakeholder_id && (txn.txn_allocations || []).length > 0 && txn.status !== 'Voided')
-                            ? <TrackChip txn={txn} onLinked={() => { qc.invalidateQueries({ queryKey: ['ledger'] }); }} />
+                            // Vendor (or any non-worker) unlinked payment: the SAME dark wizard the worker
+                            // uses — "Bill for ›" opens PayablePicker on this vendor's bills. No separate sheet.
+                            ? <AttributeChip
+                                linked={false}
+                                label="Bill for"
+                                title="Bill for — attach the bill this payment settles"
+                                onClick={() => setAttrPicker({
+                                  txnId: txn.txn_id,
+                                  payee: { id: String(txn.stakeholder_id), name: txn.stakeholders?.name || 'Vendor', type: 'Vendor' },
+                                  projectId: String((txn.txn_allocations || [])[0]?.project_id ?? ''),
+                                  projectName: projName, amount: Number(txn.total_amount), date: txn.date ?? null,
+                                  selfPaid: 0, current: null,
+                                })}
+                                onMouseEnter={() => prefetchAttrTargets(qc, { id: String(txn.stakeholder_id), type: 'Vendor' }, String((txn.txn_allocations || [])[0]?.project_id ?? ''), txn.date ?? null, 0)}
+                              />
                             : undefined;
                     return (
                       <div
@@ -1772,17 +1888,20 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
                         id={`ledger-txn-${txn.txn_id}`}
                         data-search-row={txn.txn_id}
                         style={{ scrollMarginTop: 40,
-                          // A very slight warm-violet wash sets wallet rows apart without shouting.
-                          ...((isWTransfer || isWSpend) ? { borderRadius: 12, background: 'linear-gradient(90deg, rgba(138,123,166,.07) 0%, rgba(138,123,166,0) 60%)' } : {}),
+                          // Wallet rows carry NO special colour — the transfer's arrow medallion and its
+                          // "Bank → wallet" context line are enough; site-cash is just part of the book.
                           ...(focusTxn === txn.txn_id ? { borderRadius: 12, boxShadow: '0 0 0 2px #C8603A', transition: 'box-shadow .3s' } : {}) }}
                       >
                       <EntryRow
                         dir={dir}
+                        transfer={isWTransfer}
+                        walletSpend={isWSpend}
+                        walletHolder={walletHolder}
                         payee={isWTransfer ? `${walletHolder}'s wallet` : (genExp ? genLabel : (txn.stakeholders?.name || 'Unknown'))}
                         stakeholderId={genExp ? null : (txn.stakeholder_id ?? null)}
                         onPayeeClick={isPhone ? undefined : () => { if (txn.stakeholder_id) { setDrawerProject(txn.stakeholder_id === deepLinkStk ? deepLinkProject : null); setDrawerStk(txn.stakeholder_id); } }}
                         context={context}
-                        site={projName}
+                        site={siteLead}
                         note={txn.remarks || null}
                         anchor={anchor}
                         info={linkedInfo}
