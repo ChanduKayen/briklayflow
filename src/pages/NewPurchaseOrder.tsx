@@ -3590,7 +3590,10 @@ export default function NewPurchaseOrder({ session }: { session: Session }) {
           }}
           onSubmit={() => { if (poMode === 'rfq') setShowRfq(true); else void handleSubmit('ORDERED'); }}
           submitting={isGlobalMatching || saveMutation.isPending}
-          onBack={() => navigate(-1)}
+          // Once the order is written the screen is a receipt. Back then goes to the list it came
+          // from, rather than offering to discard an order that is already on the books.
+          placed={uiCeremonyOpen}
+          onBack={() => (uiCeremonyOpen ? navigate(returnTo) : navigate(-1))}
         />
         {/* The ceremony is what ENDS this page: saveMutation's onSuccess only opens it, and the
             navigate lives in its onLeave. The phone rendered everything else and not this, so a

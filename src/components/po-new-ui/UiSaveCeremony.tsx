@@ -47,7 +47,11 @@ export default function UiSaveCeremony({
   const canSend = !!poId && !!vendorId;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center sm:justify-center">
+    // z-index 80, not Tailwind's z-50: on a phone this dialog is a sibling of NewPoMobile, whose own
+    // root is a fixed, full-screen layer at z-index 60. At 50 the ceremony rendered, laid itself out
+    // as a bottom sheet — and sat entirely BEHIND the form it was announcing the end of, so placing
+    // an order looked like nothing had happened. 80 clears every full-screen takeover in this flow.
+    <div className="fixed inset-0 flex items-end sm:items-center sm:justify-center" style={{ zIndex: 80 }}>
       <div
         className="absolute inset-0"
         style={{ background: 'rgba(30,26,21,0.5)' }}

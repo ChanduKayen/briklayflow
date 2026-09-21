@@ -176,6 +176,13 @@ const CSS = `
 .npm-units button.on{background:var(--ink);color:#fff;font-weight:600}
 .npm-hint2{font-size:13px;color:var(--ink-2);margin:-4px 2px 14px}
 .npm-acts{display:flex;gap:10px;margin-top:6px}
+/* Stacked (one decision per line). It cannot be an inline flex-direction on .npm-acts: the buttons
+   carry flex:1, whose basis of 0 governs the MAIN axis — turn the row into a column and their 50px
+   height stops being the main size, so each one collapses to the height of its own text (24px) and
+   the sheet's two choices read as cramped strips instead of buttons. In a column they size
+   themselves. */
+.npm-acts.col{flex-direction:column}
+.npm-acts.col .npm-b2{flex:none;width:100%}
 .npm-b2{flex:1;height:50px;border:0;border-radius:15px;font-size:16px;font-weight:600;cursor:pointer;
   transition:transform .15s var(--spring),opacity .15s}
 .npm-b2:active{transform:scale(.97)}
@@ -232,6 +239,10 @@ export interface NewPoMobileProps {
   onSubmitAsTyped: () => void;
   onSubmit: () => void;
   submitting: boolean;
+  /** The order has been written. The screen is then a receipt, not a draft: Back leaves for the
+   *  list instead of offering to discard something that is already on the books, and the CTA
+   *  cannot fire a second time. */
+  placed?: boolean;
   onBack: () => void;
 }
 
@@ -378,7 +389,7 @@ export default function NewPoMobile(p: NewPoMobileProps) {
       <style>{CSS}</style>
 
       <div className="npm-nav">
-        <button type="button" className="npm-back" onClick={() => (dirty ? setSheet('discard') : p.onBack())}>
+        <button type="button" className="npm-back" onClick={() => (dirty && !p.placed ? setSheet('discard') : p.onBack())}>
           <svg width="12" height="20" viewBox="0 0 12 20" fill="none" aria-hidden="true">
             <path d="M10 2L3 10l7 8" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
@@ -493,7 +504,7 @@ export default function NewPoMobile(p: NewPoMobileProps) {
             ? <div className="npm-quoting">Vendors quote</div>
             : <div className="v">{inr(p.total)}</div>}
         </div>
-        <button type="button" className="npm-cta" disabled={!canSubmit} aria-busy={p.submitting}
+        <button type="button" className="npm-cta" disabled={!canSubmit || !!p.placed} aria-busy={p.submitting}
           onClick={() => (p.mode === 'po' && p.unresolved > 0 ? setSheet('typed') : p.onSubmit())}>
           {p.submitting ? <span className="npm-ring" aria-hidden="true" /> : null}
           <span>{p.submitting ? 'Placing…' : p.mode === 'rfq' ? 'Request quotes' : 'Create purchase order'}</span>
@@ -538,7 +549,7 @@ export default function NewPoMobile(p: NewPoMobileProps) {
         <h3>{p.unresolved === 1 ? 'One item is not in your catalogue' : `${p.unresolved} items are not in your catalogue`}</h3>
         <p>Matching an item to the catalogue keeps spend comparable across orders. You can place this
           order with the names exactly as they were said or typed, and match them later.</p>
-        <div className="npm-acts" style={{ flexDirection: 'column' }}>
+        <div className="npm-acts col">
           <button type="button" className="npm-b2 pri" onClick={() => { closeSheets(); p.onSubmitAsTyped(); }}>Place with names as typed</button>
           <button type="button" className="npm-b2 ghost" onClick={closeSheets}>Go back and edit</button>
         </div>
@@ -548,7 +559,7 @@ export default function NewPoMobile(p: NewPoMobileProps) {
         <div className="npm-grab" />
         <h3>Leave this order?</h3>
         <p>You&rsquo;ve started an order. Nothing is saved until you place it — go back and it is gone.</p>
-        <div className="npm-acts" style={{ flexDirection: 'column' }}>
+        <div className="npm-acts col">
           <button type="button" className="npm-b2 danger" onClick={() => { closeSheets(); p.onBack(); }}>Discard order</button>
           <button type="button" className="npm-b2 ghost" onClick={closeSheets}>Keep editing</button>
         </div>
