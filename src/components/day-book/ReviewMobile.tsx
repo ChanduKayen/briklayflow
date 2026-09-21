@@ -31,7 +31,14 @@ const CSS = `
 .rvm{--tint:#C4502B;--tint-press:#A8431F;--ink:#1B1713;--ink-2:#87807A;--ink-3:#B5AEA7;
   --bg:#F8F6F3;--card:#FFFFFF;--hair:rgba(50,42,35,.1);--good:#2FA04C;--warn:#B45309;
   --spring:cubic-bezier(.32,1.4,.5,1);--ease:cubic-bezier(.25,.1,.25,1);--sheet:cubic-bezier(.32,.72,0,1);
-  position:relative;min-height:100dvh;display:flex;flex-direction:column;line-height:normal;
+  /* HEIGHT, not min-height. The deck below is meant to be the scroller — the page itself does not
+     move — but with only a minimum the column grew to fit its cards, the deck's scrollHeight equalled
+     its clientHeight, and its scrollTop was pinned at 0 forever. Pull-to-refresh asks that scrollTop
+     whether it may start, so on this page the answer was always yes: every downward swipe anywhere
+     in the deck was taken for a pull, preventDefault swallowed the document's own scroll, and the
+     page behaved like no other. With a height the deck scrolls, and the pull only answers at the top
+     — the same bargain the ledger, bills and POs pages make. */
+  position:relative;height:100dvh;min-height:100dvh;display:flex;flex-direction:column;line-height:normal;
   background:var(--bg);color:var(--ink);
   font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','DM Sans',system-ui,sans-serif;
   -webkit-font-smoothing:antialiased}
@@ -50,8 +57,9 @@ const CSS = `
 
 /* ---------- the column of cards ---------- */
 .rvm .deckwrap{flex:1;display:flex;flex-direction:column;min-height:0}
-.rvm .deck{flex:1;display:flex;flex-direction:column;gap:14px;overflow-y:auto;
-  padding:18px 24px 24px;scrollbar-width:none}
+.rvm .deck{flex:1;min-height:0;display:flex;flex-direction:column;gap:14px;overflow-y:auto;
+  padding:18px 24px calc(24px + 64px + 12px + env(safe-area-inset-bottom));scrollbar-width:none;
+  overscroll-behavior-y:contain}
 .rvm .deck::-webkit-scrollbar{display:none}
 .rvm .cw{width:100%;
   transition:opacity .35s,transform .35s var(--ease),height .35s var(--ease),margin .35s var(--ease)}
