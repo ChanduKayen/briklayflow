@@ -22,8 +22,9 @@
 import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { Hammer, Package, ChevronRight, Check, Link2 } from 'lucide-react';
+import { Hammer, Link2 } from 'lucide-react';
 import { V, font } from './ledgerTokens';
+import { AttributeChip } from './AttributeChip';
 import type { TrackTxn } from '../../lib/trackingApi';
 import { clearOneTime, getTrackingOptions, fileAsLabour } from '../../lib/trackingApi';
 import { getTxnAllocations } from '../../lib/vendorTrackingApi';
@@ -151,57 +152,23 @@ export function TrackChip({ txn, onLinked }: { txn: TrackTxn; onLinked: () => vo
   // Worker → contract; Vendor → order. Both share one gate; "one-time payment" (worker)
   // and "direct purchase" (vendor) are the SAME mechanism (fileAsLabour → is_one_time).
   const isWO = kind === 'WO';
-  const Icon = isWO ? Hammer : Package;
-  const linkLabel = isWO ? 'Link to a contract' : 'Attach bill';
+  const linkLabel = isWO ? 'Link to a contract' : 'Attach a bill';
   const oneLabel = isWO ? 'Labour payment' : 'Direct purchase';
 
+  // ONE shape, shared with the worker row (AttributeChip): resolved = a calm dot+label tag; unresolved =
+  // a quiet dashed nudge. So a payment row reads the same whether it's a worker or a vendor.
   const gate = chosenOneTime ? (
-    // ── RESOLVED — uniform with the linked AnchorChip (calm grey, same size/shape).
-    //    Tap to change (clears is_one_time and reopens the choice). ──
-    <button
-      type="button"
-      disabled={busy}
-      onClick={(e) => { e.stopPropagation(); void undoOneTime(); }}
-      className="db-otp-pop inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-md disabled:opacity-60"
-      style={{ background: V.field, color: V.inkSoft, ...font }}
-      title="Change"
-    >
-      <Check size={11} className="shrink-0" style={{ color: V.faint }} />
-      <span>{oneLabel}</span>
-    </button>
+    <AttributeChip linked dot={V.sage} label={oneLabel} title="Change" onClick={() => { if (!busy) void undoOneTime(); }} />
   ) : (
-    // ── UNRESOLVED — the row carries ONE action: the link nudge. The "one-time" choice moved INTO the hub,
-    //    as a beautiful button at its head (ContractHub) — so a worker row is a single clean nudge, not a
-    //    two-button fork. Vendor rows keep their inline "direct purchase" (no hub head-button on that side). ──
-    <span className="inline-flex items-center gap-1.5 flex-wrap" onClick={(e) => e.stopPropagation()}>
-      {isWO ? (
-        <button
-          ref={(el) => { btnRef.current = el; }}
-          type="button"
-          onMouseEnter={openMenu}
-          onMouseLeave={scheduleCloseMenu}
-          onClick={(e) => { e.stopPropagation(); openMenu(); }}
-          className="db-link-btn inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg"
-          style={{ background: V.surface, border: `1px solid ${V.line}`, color: V.terraDeep, fontWeight: 600 }}
-        >
-          <Icon size={12} className="shrink-0" style={{ color: V.terra }} />
-          <span>{linkLabel}</span>
-          <ChevronRight size={12} className="shrink-0" style={{ opacity: 0.7, transform: 'rotate(90deg)' }} />
-        </button>
-      ) : (
-        <button
-          ref={(el) => { btnRef.current = el; }}
-          type="button"
-          onClick={(e) => { e.stopPropagation(); const p = computePos(); if (p) setPos(p); setOpen(true); }}
-          className="db-link-btn inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg"
-          style={{ background: V.surface, border: `1px solid ${V.line}`, color: V.terraDeep, fontWeight: 600 }}
-        >
-          <Icon size={12} className="shrink-0" style={{ color: V.terra }} />
-          <span>Attach bill</span>
-          <ChevronRight size={12} className="shrink-0" style={{ opacity: 0.7 }} />
-        </button>
-      )}
-    </span>
+    <AttributeChip
+      ref={(el) => { btnRef.current = el; }}
+      linked={false}
+      label={linkLabel}
+      title={isWO ? 'Link to a contract' : 'Attach the bill this payment settles'}
+      onMouseEnter={isWO ? openMenu : undefined}
+      onMouseLeave={isWO ? scheduleCloseMenu : undefined}
+      onClick={isWO ? () => openMenu() : () => { const p = computePos(); if (p) setPos(p); setOpen(true); }}
+    />
   );
 
   return (

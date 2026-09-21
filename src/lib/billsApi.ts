@@ -568,8 +568,22 @@ export async function unlinkBillFromPO(billId: string, poId: string): Promise<vo
 export interface UnpaidBill {
   id: string; kind: 'bill' | 'po'; billNo: string | null; billDate: string | null; amount: number; paid: number;
   remaining: number; projectId: string | null; site: string | null; docUrl: string | null;
+  /** a short read of the bill's line items — "Cement, Sand +2 more" — for the attribution picker */
+  items: string | null;
   /** What the payment being re-attributed (`forTxnId`) currently puts on this bill. 0 for everyone else. */
   ownAllocated: number;
+}
+
+/** A short read of a bill's line items — "Cement, Sand +2 more" — for the attribution picker. */
+function summarizeBillLines(lines: unknown): string | null {
+  if (!Array.isArray(lines) || !lines.length) return null;
+  const names = lines
+    .map((l) => (l && typeof l === 'object' ? String((l as { name?: unknown }).name ?? '').trim() : ''))
+    .filter(Boolean);
+  if (!names.length) return `${lines.length} item${lines.length === 1 ? '' : 's'}`;
+  const head = names.slice(0, 2).join(', ');
+  const more = names.length - Math.min(2, names.length);
+  return more > 0 ? `${head} +${more} more` : head;
 }
 
 /**
@@ -585,7 +599,7 @@ export interface UnpaidBill {
  */
 export async function loadUnpaidBillsForVendor(stakeholderId: string, projectId?: string | null, forTxnId?: string | null): Promise<UnpaidBill[]> {
   const [bR, projR, poR] = await Promise.all([
-    supabase.from('bills').select('id, po_id, project_id, bill_no, bill_date, amount, doc_url, created_at').eq('stakeholder_id', stakeholderId),
+    supabase.from('bills').select('id, po_id, project_id, bill_no, bill_date, amount, doc_url, created_at, lines').eq('stakeholder_id', stakeholderId),
     supabase.from('projects').select('project_id, name'),
     supabase.from('purchase_orders').select(`po_id, project_id, vendor_bill_number, vendor_bill_doc_url, vendor_bill_url, ${BILL_DATE_COLUMNS}, status, approval_status`)
       .eq('stakeholder_id', stakeholderId).eq('approval_status', 'APPROVED')
@@ -623,11 +637,11 @@ export async function loadUnpaidBillsForVendor(stakeholderId: string, projectId?
   const out: UnpaidBill[] = [];
   for (const b of billRows) {
     const amount = num(b.amount), paid = Math.min(amount, paidByBill[b.id] || 0);
-    out.push({ id: b.id, kind: 'bill', billNo: b.bill_no || null, billDate: b.bill_date || (b.created_at ? String(b.created_at).slice(0, 10) : null), amount, paid, remaining: amount - paid, projectId: b.project_id ?? null, site: b.project_id ? (projName[b.project_id] || b.project_id) : null, docUrl: b.doc_url || null, ownAllocated: ownByBill[b.id] || 0 });
+    out.push({ id: b.id, kind: 'bill', billNo: b.bill_no || null, billDate: b.bill_date || (b.created_at ? String(b.created_at).slice(0, 10) : null), amount, paid, remaining: amount - paid, projectId: b.project_id ?? null, site: b.project_id ? (projName[b.project_id] || b.project_id) : null, docUrl: b.doc_url || null, items: summarizeBillLines(b.lines), ownAllocated: ownByBill[b.id] || 0 });
   }
   for (const p of pos) {
     const amount = num(p.vendor_bill_amount), paid = Math.min(amount, paidByPo[p.po_id] || 0);
-    out.push({ id: p.po_id, kind: 'po', billNo: p.vendor_bill_number || p.po_id, billDate: billDateOf(p), amount, paid, remaining: amount - paid, projectId: p.project_id ?? null, site: p.project_id ? (projName[p.project_id] || p.project_id) : null, docUrl: p.vendor_bill_doc_url || p.vendor_bill_url || null, ownAllocated: ownByPo[p.po_id] || 0 });
+    out.push({ id: p.po_id, kind: 'po', billNo: p.vendor_bill_number || p.po_id, billDate: billDateOf(p), amount, paid, remaining: amount - paid, projectId: p.project_id ?? null, site: p.project_id ? (projName[p.project_id] || p.project_id) : null, docUrl: p.vendor_bill_doc_url || p.vendor_bill_url || null, items: null, ownAllocated: ownByPo[p.po_id] || 0 });
   }
   // When the payment is for a site, show only that vendor's bills for THAT site (plus any not yet
   // tagged to a site) — never another project's bills, even for the same vendor.

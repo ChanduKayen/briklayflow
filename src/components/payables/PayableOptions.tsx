@@ -129,7 +129,8 @@ export function PayableOptions({
                       onClick={() => setBills((p) => (p.includes(b.id) ? p.filter((x) => x !== b.id) : [...p, b.id]))}>
                       <span className="pyo-ck">{on ? '✓' : ''}</span>
                       <span className="pyo-m">
-                        <b>{b.billNo || 'Bill'}{b.date ? ` · ${fmtDate(b.date)}` : ''}</b>
+                        <b>{b.billNo ? `Bill #${b.billNo}` : 'Bill'}{b.date ? ` · ${fmtDate(b.date)}` : ''}</b>
+                        {b.items && <span>{b.items}</span>}
                         <span>{inr(b.remaining)} left of {inr(b.amount)}{b.earlier ? ' · payment predates this bill' : ''}</span>
                       </span>
                       <em>{inr(b.remaining)}</em>
@@ -153,37 +154,37 @@ export function PayableOptions({
         ) : targets.kind === 'worker_day' ? (
           <>
             {targets.isAdvance
-              ? <p className="pyo-note">Nothing is owed on this site before this payment — it looks like an <b>advance</b>.</p>
-              : <p className="pyo-hint">What is this payment settling? (Figures are what was owed <b>before</b> this payment.)</p>}
+              ? <p className="pyo-note">Nothing is owed on this site before this payment — it sits as an <b>advance</b> (a recoverable) until it is earned.</p>
+              : <p className="pyo-hint">What does this payment settle? (Figures are what was owed <b>before</b> it.)</p>}
             <Radio id="this_week" choice={choice} set={setChoice} disabled={targets.thisWeek <= 0.5}
-              title="This week's payable" note={targets.thisWeek > 0.5 ? inr(targets.thisWeek) + ' — this week from work done' : 'nothing owed this week'} />
+              title="This week's wages" note={targets.thisWeek > 0.5 ? inr(targets.thisWeek) + ' — from the muster this week' : 'nothing owed this week'} />
             <Radio id="past" choice={choice} set={setChoice} disabled={targets.pastBalance <= 0.5}
-              title="Past ledger balance" note={targets.pastBalance > 0.5 ? inr(targets.pastBalance) + ' — carried from before' : 'nothing carried'} />
-            <Radio id="other" choice={choice} set={setChoice} title="Other" note="Advance, or not against work done" />
+              title="Earlier dues" note={targets.pastBalance > 0.5 ? inr(targets.pastBalance) + ' — carried from before this week' : 'nothing carried'} />
+            <Radio id="other" choice={choice} set={setChoice} title="On account" note="advance, or not tied to specific work yet" />
           </>
         ) : (
           <>
             {targets.isAdvance
-              ? <p className="pyo-note">Nothing is owed on this contract before this payment — it looks like an <b>advance</b>.</p>
+              ? <p className="pyo-note">Nothing is owed on this contract before this payment — it sits as an <b>advance</b> (a recoverable) until it is earned.</p>
               : <p className="pyo-hint">
                   {targets.wagesMode
-                    ? `This week's payment of ${inr(amount)} — which phase of ${targets.woLabel} is it against?`
+                    ? `This week's payment of ${inr(amount)} — which stage of ${targets.woLabel} is it against?`
                     : targets.tracked
-                      ? `${targets.woLabel} · certified from site readings — a payment can't settle a phase here.`
-                      : `Pick a phase of ${targets.woLabel} to settle from this payment.`}
+                      ? `${targets.woLabel} · certified from site readings — a payment can't settle a stage here.`
+                      : `Pick a stage of ${targets.woLabel} this payment settles.`}
                 </p>}
             {targets.phases.map((ph) => (
               <Radio key={ph.milestoneId} id={ph.milestoneId} choice={choice} set={setChoice}
                 disabled={!targets.wagesMode && (targets.tracked || ph.remaining <= 0.5)}
                 title={ph.name}
                 note={targets.wagesMode
-                  ? (targets.thisWeek > 0.5 ? `${inr(targets.thisWeek)} — this week's work` : `This week's payment recorded here`)
-                  : ph.remaining > 0.5 ? `${inr(ph.remaining)} left of ${inr(ph.value)}` : 'fully certified'} />
+                  ? `${ph.spec}${targets.thisWeek > 0.5 ? ` · ${inr(targets.thisWeek)} this week` : ''}`
+                  : ph.remaining > 0.5 ? `${ph.spec} · ${inr(ph.remaining)} left` : `${ph.spec} · fully certified`} />
             ))}
             {targets.pastBalance > 0.5 && (
-              <Radio id="past" choice={choice} set={setChoice} title="Ledger balance" note={`${inr(targets.pastBalance)} — carried from before`} />
+              <Radio id="past" choice={choice} set={setChoice} title="Earlier dues" note={`${inr(targets.pastBalance)} — carried from before this week`} />
             )}
-            <Radio id="other" choice={choice} set={setChoice} title="Other" note="Advance, or settle later" />
+            <Radio id="other" choice={choice} set={setChoice} title="On account" note="advance, or settle later" />
           </>
         )}
       </div>

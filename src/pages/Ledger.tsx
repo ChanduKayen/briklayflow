@@ -31,8 +31,9 @@ import { V, font, serif, nums, terraGrad } from '../components/txn-ledger/ledger
 import { useCursorLamp } from '../components/nav/useCursorLamp';
 import { DirMedallion, Amount, AnchorChip, FilterChip } from '../components/txn-ledger/LedgerAtoms';
 import { TrackChip, TRACK_CHIP_CSS } from '../components/txn-ledger/TrackChip';
+import { AttributeChip, ATTR_CHIP_CSS } from '../components/txn-ledger/AttributeChip';
 import { PayablePicker } from '../components/payables/PayablePicker';
-import { applyAttribution, prefetchAttrTargets, payableTagOf } from '../lib/payableAttribution';
+import { applyAttribution, prefetchAttrTargets, payableTagOf, payableTagLabel } from '../lib/payableAttribution';
 import { unlinkTxnOrder } from '../lib/trackingApi';
 import { useOrgId } from '../lib/auth/AuthProvider';
 import WalletRail from '../components/wallets/WalletRail';
@@ -247,21 +248,18 @@ function EntryRow(p: EntryProps) {
    A worker is paid against work done, not a vendor-style contract line. The chip attributes the
    payment to a phase (contract worker) or a bucket (day-wage) via the shared picker — it never shows
    a burn-down. Linked → the target's name (tap to change); unlinked → a quiet nudge. */
-function tagLabel(tag: string | undefined | null): string | undefined {
-  return tag === 'this_week' ? 'This week' : tag === 'past' ? 'Past balance' : tag === 'other' ? 'Other' : undefined;
-}
+/** The worker row's control — the SAME shape the vendor row wears (AttributeChip), so the ledger reads
+ *  consistently. Linked → the target's name with a sage dot; unlinked → the quiet "Towards a payable" nudge. */
 function WorkerPayableChip({ label, onClick, onHover }: { label?: string; onClick: () => void; onHover?: () => void }) {
-  const linked = !!label;
   return (
-    <button type="button" onClick={(e) => { e.stopPropagation(); onClick(); }} onMouseEnter={onHover}
-      className="inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-md"
+    <AttributeChip
+      linked={!!label}
+      label={label || 'Towards a payable'}
+      dot={V.sage}
       title="Towards which payable? — from work done"
-      style={{ background: linked ? V.field : 'transparent', color: linked ? V.inkSoft : V.sys,
-        border: `1px dashed ${linked ? 'transparent' : V.line}`, cursor: 'pointer', ...font }}>
-      {linked
-        ? <><span className="shrink-0 rounded-full" style={{ width: 5, height: 5, background: V.sage }} />{label}</>
-        : <>Towards a payable <span style={{ color: V.faint }}>›</span></>}
-    </button>
+      onClick={onClick}
+      onMouseEnter={onHover}
+    />
   );
 }
 
@@ -626,12 +624,32 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
   const { data: ledger, isLoading, isError, refetch } = useQuery({
     queryKey: ['ledger'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('transactions')
-        .select('*, stakeholders(name, type, category), wallets(holder_name), txn_allocations(allocation_id, project_id, allocated_amount, order_type, order_ref, bill_id, milestone_id, projects(name), wo_milestones(name))')
-        .order('created_at', { ascending: false });
-      if (error) throw error;
-      return data;
+      // Fetch EVERY transaction, in pages — a single request is capped by PostgREST (Supabase's
+      // db-max-rows, often 1000), which silently truncated the ledger for larger orgs and made every
+      // total read LOW against Insights / the party ledger. We advance by however many rows actually
+      // came back and stop only on an empty page, so it works whatever the server's cap is.
+      const sel = '*, stakeholders(name, type, category), wallets(holder_name), txn_allocations(allocation_id, project_id, allocated_amount, order_type, order_ref, bill_id, milestone_id, projects(name), wo_milestones(name))';
+      const PAGE = 1000;
+      const all: any[] = [];
+      let from = 0;
+      for (let guard = 0; guard < 200; guard++) {   // guard caps at 200k rows, so a bug can't loop forever
+        const { data, error } = await supabase
+          .from('transactions')
+          .select(sel)
+          .order('created_at', { ascending: false })
+          .range(from, from + PAGE - 1);
+        if (error) throw error;
+        const rows = data ?? [];
+        all.push(...(rows as any));
+        if (rows.length === 0) break;   // no more rows
+        from += rows.length;            // advance by the ACTUAL count (cap-agnostic)
+        if (rows.length < PAGE && rows.length > 0) {
+          // A short page usually means the end; do one more request to be certain the server didn't
+          // just cap this page below PAGE. If that next page is empty, the loop breaks above.
+          continue;
+        }
+      }
+      return all;
     },
   });
   // A ledger row (transactions + its nested joins). The client is untyped, so this
@@ -1061,16 +1079,20 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
   })();
 
   // ── Filtering (per transaction; project filter matches any allocation) ───────
+  // "Voided" lives INSIDE the Type filter as an exclusive lens: pick it and the ledger shows ONLY
+  // voided (a closed record you went looking for); leave it and voided stay hidden as usual. The real
+  // type selections are everything else.
+  const showVoided = filterType.includes('Voided');
+  const realTypes = filterType.filter((t) => t !== 'Voided');
   const passesBase = (txn: LedgerRow): boolean => {
-    // A voided transaction is a closed record — it must never count toward the entry count, the
-    // in/out/net totals, or the visible ledger. It stays queryable on its own detail page.
-    if (txn.status === 'Voided') return false;
+    const isVoid = txn.status === 'Voided';
+    if (showVoided ? !isVoid : isVoid) return false;   // exclusive: voided-only, or non-voided-only
     if (partyFilter && txn.stakeholder_id !== partyFilter) return false;
     const term = searchTerm.toLowerCase();
     const matchesSearch = !term || txn.txn_id.toLowerCase().includes(term) || txn.stakeholders?.name?.toLowerCase().includes(term) || txn.category?.toLowerCase().includes(term) || (txn.remarks || '').toLowerCase().includes(term);
     const matchesFlagged = filterFlagged ? txn.ai_flag_status === 'Flagged' : true;
     const matchesNeedsAction = filterNeedsAction ? !!getNeedsAction(txn) : true;
-    const matchesType = filterType.length ? filterType.includes(getTxnType(txn)) : true;
+    const matchesType = realTypes.length ? realTypes.includes(getTxnType(txn)) : true;
     const matchesProject = filterProject.length ? (txn.txn_allocations || []).some((a: TxnAlloc) => filterProject.includes(a.projects?.name || '')) : true;
     const matchesDate = (() => {
       const { from, to } = activeDateRange;
@@ -1147,8 +1169,10 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
     onRefresh: () => qc.refetchQueries({ type: 'active' }),
   });
 
+  // Day totals stay on the voided-free set — a revealed voided row shows in the list but never in a
+  // "Day closed" sum.
   const dayTotals = new Map<string, { out: number; in: number }>();
-  for (const t of sortedTxns) {
+  for (const t of filteredTransactions) {
     const cur = dayTotals.get(t.date) ?? { out: 0, in: 0 };
     const d = cashDirection(t);
     if (d === 'in') cur.in += Number(t.total_amount); else if (d === 'out') cur.out += Number(t.total_amount);
@@ -1277,7 +1301,7 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
       .filter((a) => a.project_id && a.projects?.name)
       .map((a) => [String(a.project_id), { id: String(a.project_id), name: String(a.projects!.name) }])).values(),
   ).sort((a, b) => a.name.localeCompare(b.name));
-  const uniqueTypes = ['Worker Payment', 'Material Purchase', 'General Expense', 'Client Receipt'];
+  const uniqueTypes = ['Worker Payment', 'Material Purchase', 'General Expense', 'Client Receipt', 'Voided'];
 
   // ── Filter chip + dropdown (reference look, multi-select body) ───────────────
   const openDrop = (key: string, e: MouseEvent) => {
@@ -1351,6 +1375,7 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
     <div ref={elasticRef} className="min-h-screen" style={{ background: V.page, ...font, overscrollBehaviorY: 'contain' }}>
       {pullView}
       <style>{TRACK_CHIP_CSS}</style>
+      <style>{ATTR_CHIP_CSS}</style>
       {importOpen && (
         <Suspense fallback={<div className="fixed inset-0 z-[1000]" style={{ background: 'rgba(30,26,21,0.55)' }} />}>
           <ImportTransactions session={session} onClose={closeImport} />
@@ -1706,12 +1731,14 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
                     const isWSpend = isWalletSpend(txn);
                     const walletHolder = walletNameOf(txn.wallet_id, txn.wallets?.holder_name);
                     const anchorNode: ReactNode =
-                      isWTransfer
+                      txn.status === 'Voided'
+                        ? <span className="inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-md" style={{ background: 'rgba(176,64,42,.08)', color: '#9A5140', ...font }}><span className="shrink-0 rounded-full" style={{ width: 5, height: 5, background: '#B4482F' }} />Voided</span>
+                      : isWTransfer
                         ? <span className="inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-md" style={{ background: '#EEEAF4', color: '#5E5473', ...font }}><span className="shrink-0 rounded-full" style={{ width: 5, height: 5, background: '#8A7BA6' }} />Wallet transfer</span>
                       : genExp
                         ? <span className="inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-md" style={{ background: V.field, color: V.inkSoft, ...font }}><span className="shrink-0 rounded-full" style={{ width: 5, height: 5, background: V.faint }} />Overhead <span style={{ color: V.faint }}>· no party</span></span>
                         : billAttached
-                          ? <span className="inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-md" style={{ background: V.field, color: V.inkSoft, ...font }}>🧾 <span>Bill</span></span>
+                          ? <span className="inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-md" style={{ background: V.field, color: V.inkSoft, ...font }}><span className="shrink-0 rounded-full" style={{ width: 5, height: 5, background: V.terra }} />Bill</span>
                           // Workers: one "Towards which payable?" chip — the linked phase/tag, or a nudge.
                           // Never a contract burn-down, never a "link to contract" prompt.
                           : (txn.stakeholders?.type === 'Worker' && dir === 'out' && !isWTransfer && txn.status !== 'Voided')
@@ -1721,7 +1748,7 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
                                   // else a day-wage tag, else a nudge.
                                   const woA = (txn.txn_allocations || []).find((a: any) => a.order_type === 'WO');
                                   if (woA) return (woA as any).wo_milestones?.name || 'Contract';
-                                  return tagLabel((txn.ai_flag_data as { payable_tag?: string } | null)?.payable_tag);
+                                  return payableTagLabel(payableTagOf(txn as { ai_flag_data?: unknown })) ?? undefined;
                                 })()}
                                 onClick={() => setAttrPicker({
                                   txnId: txn.txn_id,
