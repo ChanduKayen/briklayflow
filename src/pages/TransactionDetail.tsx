@@ -1175,6 +1175,9 @@ export default function TransactionDetail({ session }: { session: Session }) {
                 const milestoneName = (a as any).wo_milestones?.name ?? null;
                 const picking = mappingAllocId === a.allocation_id;
                 const hasBill = isPO || isWO || isAdv || !!a.bill_id || !!txn.bill_doc_url;
+                // A worker day-wage payment has no linking allocation — what it settles is a tag on the
+                // transaction. Read it here too, or the desktop cell says "No bill" over an answer given.
+                const wtag = (!isVendor && !hasBill) ? payableTagOf(txn) : null;
                 return (
                   <tr key={a.allocation_id}>
                     <td><b style={{ fontWeight: 600 }}>{a.projects?.name || 'Unassigned'}</b></td>
@@ -1199,8 +1202,10 @@ export default function TransactionDetail({ session }: { session: Session }) {
                           </>
                         ) : isGenExp ? (
                           <span className="st">Overhead<small>{generalExpenseLabel(txn)} · nothing to settle against</small></span>
+                        ) : wtag ? (
+                          <span className="st ok">✓ {payableTagLabel(wtag, true)}<small>{wtag === 'other' ? 'recorded as not settling work' : 'what this payment settles'}</small></span>
                         ) : (
-                          <span className="st un">No bill<small>Link a PO bill or upload one</small></span>
+                          <span className="st un">{isVendor ? 'No bill' : 'Not linked to work yet'}<small>{isVendor ? 'Link a PO bill or upload one' : 'Choose the stage or balance'}</small></span>
                         )}
                         {!isVoided && !isGenExp && (
                           <span className="pickwrap">
@@ -1213,7 +1218,9 @@ export default function TransactionDetail({ session }: { session: Session }) {
                                     <button className="ghost" onClick={() => setPayablePicker({ projectId: a.project_id || '' })}>Change</button>
                                     <button className="ghost" onClick={() => void unlinkWorkerAlloc(a)}>Unlink</button>
                                   </>
-                                : <button className="linkbtn" onClick={() => setPayablePicker({ projectId: a.project_id || '' })}>Towards a payable</button>)}
+                                : (wtag
+                                  ? <button className="ghost" onClick={() => setPayablePicker({ projectId: a.project_id || '' })}>Change</button>
+                                  : <button className="linkbtn" onClick={() => setPayablePicker({ projectId: a.project_id || '' })}>Towards a payable</button>))}
                             {isVendor && picking && (
                               <>
                                 <div style={{ position: 'fixed', inset: 0, zIndex: 35 }} onClick={() => setMappingAllocId(null)} />
@@ -1529,6 +1536,7 @@ export default function TransactionDetail({ session }: { session: Session }) {
           txnDate={txn.date ?? null}
           amount={Number(effective.total_amount) || 0}
           selfPaid={Number(effective.total_amount) || 0}
+          current={allocs?.find((a) => a.order_type === 'WO')?.milestone_id ?? payableTagOf(txn)}
           onClose={() => setPayablePicker(null)}
           onConfirm={(sel) => { void (async () => {
             const proj = payablePicker.projectId; setPayablePicker(null);

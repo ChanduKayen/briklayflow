@@ -23,10 +23,12 @@ export type PayableTag = 'this_week' | 'past' | 'other';
 export interface BillTarget {
   id: string; kind: 'bill' | 'po'; billNo: string | null; date: string | null;
   amount: number; remaining: number; projectId: string | null;
+  /** a short read of what's ON the bill (its line items), so you attribute against something concrete */
+  items: string | null;
   /** the payment predates this bill — offered, but flagged (never hidden, never auto-linked) */
   earlier: boolean;
 }
-export interface PhaseTarget { milestoneId: string; name: string; value: number; certified: number; remaining: number }
+export interface PhaseTarget { milestoneId: string; name: string; value: number; certified: number; remaining: number; spec: string }
 
 export type AttributionTargets =
   | { kind: 'vendor'; bills: BillTarget[] }
@@ -82,12 +84,15 @@ async function loadPhases(woId: string, stageIds: string[] = []): Promise<{ trac
       else e.measured += num(wc.computed_amount);
     });
   }
+  const inrShort = (n: number) => '₹' + Math.round(n).toLocaleString('en-IN');
   const phases: PhaseTarget[] = rows.map((m) => {
     const isLump = (m.unit_type || 'LS') === 'LS';
     const value = isLump ? num(m.planned_amount) : num(m.quantity) * num(m.rate);
     const c = certByMs[m.milestone_id];
     const certified = isLump ? (c?.lump || 0) : (c?.measured || 0);
-    return { milestoneId: m.milestone_id, name: m.name, value, certified, remaining: Math.max(0, value - certified) };
+    // the quotation line for this stage — what was priced, so the picker shows what it's for.
+    const spec = isLump ? `Lump sum · ${inrShort(value)}` : `${num(m.quantity)} ${(m.unit_type || 'unit')} × ${inrShort(num(m.rate))}`;
+    return { milestoneId: m.milestone_id, name: m.name, value, certified, remaining: Math.max(0, value - certified), spec };
   });
   return { tracked, phases };
 }
@@ -118,7 +123,7 @@ export async function loadAttributionTargets(
       kind: 'vendor',
       bills: bills.map((b) => ({
         id: b.id, kind: b.kind, billNo: b.billNo, date: b.billDate, amount: b.amount,
-        remaining: b.remaining, projectId: b.projectId,
+        remaining: b.remaining, projectId: b.projectId, items: b.items ?? null,
         earlier: !!(txnDate && b.billDate && b.billDate > txnDate),
       })),
     };
@@ -231,11 +236,12 @@ export function payableTagOf(txn: { ai_flag_data?: unknown } | null | undefined)
   return t === 'this_week' || t === 'past' || t === 'other' ? t : null;
 }
 
-/** The tag, in words. Short for a chip; `long` for a line that stands on its own. */
+/** The tag, in words. Short for a chip; `long` for a line that stands on its own. Written in the
+ *  ledger's own voice: what the payment SETTLES, not a generic bucket. */
 export function payableTagLabel(tag: PayableTag | null | undefined, long = false): string | null {
-  if (tag === 'this_week') return long ? "This week's payable" : 'This week';
-  if (tag === 'past') return long ? 'Past ledger balance' : 'Past balance';
-  if (tag === 'other') return long ? 'Other — not against work done' : 'Other';
+  if (tag === 'this_week') return long ? "This week's wages" : 'This week';
+  if (tag === 'past') return long ? 'Earlier dues' : 'Earlier dues';
+  if (tag === 'other') return long ? 'On account — not against work done' : 'On account';
   return null;
 }
 
