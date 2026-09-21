@@ -403,7 +403,14 @@ function usePOListData(projectId?: string) {
       const cancelled = po.status === 'CANCELLED';
       const value = Number(po.total_value || po.order_value) || 0;
       const billed = billsByPo[po.po_id] != null ? billsByPo[po.po_id] : (Number(po.vendor_bill_amount) || 0);
-      const rfq = !cancelled && value === 0 && billed === 0;
+      // A quote request, read from the one thing that marks one: status 'RFQ' (added to the status
+      // CHECK by 20260522000000_add_rfq_status_to_po; useProcurement reads the same). It used to be
+      // guessed as "value is zero and nothing billed" — but a zero total is a rate nobody typed, not
+      // an enquiry, and this screen's own New order invites exactly that ("Leave the rate empty — the
+      // price is confirmed against the vendor before the order goes out"). Every such order was filed
+      // under Quotes, dressed in enquiry gold, labelled "Not ordered yet", and — because Active, Open,
+      // To send and On the way all exclude a quote — dropped out of the working list altogether.
+      const rfq = String(po.status || '').toUpperCase() === 'RFQ';
       const pct = Number(receipt[po.po_id]?.receipt_pct ?? 0);
       const fullyReceived = pct >= 100 || !!po.received_at_site;
 
@@ -600,7 +607,7 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
     active: (p) => !p.cancelled && !p.rfq && !settled(p),
     // Fulfilled: received in full, billed, and nothing left to pay — nothing more to do with it.
     fulfilled: settled,
-    // Quotes: a quotation/enquiry (a value-0 RFQ-style PO); open RFQ entities are merged in alongside.
+    // Quotes: a quotation/enquiry (a PO whose status is RFQ); open RFQ entities are merged in alongside.
     quotes: (p) => p.rfq,
     mine,
     late,
@@ -1012,7 +1019,7 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
           vendorName={sendRow.vendor}
           vendorContact={sendRow.vendorContact}
           projectName={sendRow.site}
-          totalLabel={sendRow.rfq ? undefined : fmt(sendRow.value)}
+          totalLabel={sendRow.rfq || sendRow.value <= 0 ? undefined : fmt(sendRow.value)}
           onClose={() => setSendRow(null)}
         />
       )}
