@@ -17,6 +17,7 @@ import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../../lib/supabase';
 import { useOrgId } from '../../lib/auth/AuthProvider';
 import { extractBill, type ExtractedBill, type DuplicateBill } from '../../lib/billsApi';
+import { createParty, errMessage } from '../day-book/fileEntry';
 import composerHtml from './addBillComposer.html?raw';
 
 export interface BillDraft {
@@ -28,7 +29,7 @@ export interface BillDraft {
   allowDuplicate: boolean;
 }
 
-interface Vendor { stakeholder_id: string; name: string }
+interface Vendor { stakeholder_id: string; name: string; aliases?: string[] | null }
 
 export interface NewBillModalProps {
   open: boolean;
@@ -73,7 +74,7 @@ export default function NewBillModal(props: NewBillModalProps) {
   // Vendors (typeahead) + active sites (chips) — the two lists the composer needs at init.
   const vq = useQuery<Vendor[]>({
     queryKey: ['bill_vendors'],
-    queryFn: async () => ((await supabase.from('stakeholders').select('stakeholder_id, name').eq('type', 'Vendor').is('merged_into', null).order('name')).data ?? []) as Vendor[],
+    queryFn: async () => ((await supabase.from('stakeholders').select('stakeholder_id, name, aliases').eq('type', 'Vendor').is('merged_into', null).order('name')).data ?? []) as Vendor[],
     enabled: open,
   });
   const pq = useQuery<{ project_id: string; name: string }[]>({
@@ -109,14 +110,22 @@ export default function NewBillModal(props: NewBillModalProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready]);
 
+  // A name the org has never billed before becomes a vendor — through createParty, the ONE place that
+  // mints a stakeholder. stakeholders.stakeholder_id is a text primary key the app assigns (STK-####);
+  // it has no database default, so a bare insert of { org_id, name, type } is rejected for a null key
+  // and the whole save fails. That is why adding a bill for a new (or differently-spelled) vendor died
+  // here on desktop while the phone — which always hands over a vendor already picked from the list —
+  // went through. Match on aliases too, so "SRI BALAJI STEELS & CO" finds the vendor it already is.
   async function resolveVendorId(name: string): Promise<string> {
     if (lockVendor) return lockVendor.id;
     const n = (name || '').trim();
-    const hit = vendors.find((v) => v.name.toLowerCase() === n.toLowerCase());
+    if (!n) throw new Error('Say who billed you');
+    const low = n.toLowerCase();
+    const hit = vendors.find((v) => v.name.trim().toLowerCase() === low)
+      ?? vendors.find((v) => (v.aliases ?? []).some((a) => String(a).trim().toLowerCase() === low));
     if (hit) return hit.stakeholder_id;
-    const { data, error } = await supabase.from('stakeholders').insert({ org_id: orgId, name: n, type: 'Vendor' }).select('stakeholder_id').single();
-    if (error) throw error;
-    return (data as { stakeholder_id: string }).stakeholder_id;
+    const made = await createParty(n, 'Vendor', orgId);
+    return made.id;
   }
 
   // The bridge: OCR + save happen here; a close message unmounts the modal.
@@ -158,7 +167,14 @@ export default function NewBillModal(props: NewBillModalProps) {
           else reply({ status: 'ok' });
         }
       } catch (err) {
-        reply({ ok: false, status: 'error', error: err instanceof Error ? err.message : 'failed', message: err instanceof Error ? err.message : 'Couldn’t save — try again' });
+        // Say WHY. A Supabase failure is a plain { message, details, hint, code } object, not an Error —
+        // testing `instanceof Error` threw every database reason away and left the composer showing a
+        // bare "Couldn't save", which is unactionable for the user and undiagnosable for us. errMessage
+        // is the app's usual reader for both shapes.
+        const full = errMessage(err, 'Couldn’t save — try again');
+        const msg = full.length > 200 ? full.slice(0, 197) + '…' : full;   // the status line is one strip, not a log
+        console.error('[NewBillModal] ' + (d.action ?? 'request') + ' failed', err);
+        reply({ ok: false, status: 'error', error: msg, message: msg });
       }
     };
     window.addEventListener('message', onMsg);
