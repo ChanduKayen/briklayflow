@@ -98,7 +98,8 @@ export default function NewBillModal(props: NewBillModalProps) {
       title,
       lockVendor: lockVendor ? { id: lockVendor.id, name: lockVendor.name } : null,
       lockProject: lockProject ? { id: lockProject.id, name: lockProject.name } : null,
-      vendors: vendors.map((v) => ({ name: v.name, open: 0, site: null })),
+      // aliases ride along so the composer's "on file" test is the same test resolveVendorId makes.
+      vendors: vendors.map((v) => ({ name: v.name, open: 0, site: null, aliases: v.aliases ?? [] })),
       vendorCount: vendors.length,
       sites: projects.map((p) => ({ id: p.project_id, name: p.name })),
       initialExtract: initialExtract ? { vendor: initialExtract.vendor, billNo: initialExtract.billNo, billDate: initialExtract.billDate, amount: initialExtract.amount } : null,

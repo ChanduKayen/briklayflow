@@ -26,6 +26,7 @@
   --clay:#c65a2e;       /* the one action colour */
   --clay-hi:#d86a3a;
   --error:#f0967a;
+  --warn:#e6b87f;       /* caution: true, but not a mistake — e.g. a party not on file yet */
   --ok:#9fd3a8;
   --paper:#faf6f0;      /* list background */
   --card:#fffdfa;
@@ -154,9 +155,16 @@ body.dragging .drop .release{display:block;color:var(--cream)}
 .rupee{font-family:var(--mono);font-size:20px;color:var(--label)}
 .tick{flex-shrink:0;width:20px;height:20px;border-radius:99px;display:grid;place-items:center;background:rgba(159,211,168,.14);color:var(--ok);transform:scale(0);opacity:0;transition:transform .4s var(--spring),opacity .2s}
 .field.valid .tick{transform:scale(1);opacity:1}
+/* A party that is not on file yet gets a caution, never a tick: the tick is this composer's word for
+   "checked, and it is what you think it is", and a name typed over an empty register has been checked
+   by nobody. The two marks share the slot — the tick stands down whenever the caution is up. */
+.warnmark{flex-shrink:0;width:20px;height:20px;border-radius:99px;display:grid;place-items:center;background:rgba(230,184,127,.16);color:var(--warn);transform:scale(0);opacity:0;transition:transform .4s var(--spring),opacity .2s}
+.field.isnew .warnmark{transform:scale(1);opacity:1}
+.field.isnew .tick{transform:scale(0);opacity:0}
 .f-hint{min-height:18px;font-size:13px;line-height:1.4;color:var(--hint);transition:color .2s}
 .f-hint.ok{color:var(--cream-2)}
 .f-hint.err{color:var(--error)}
+.f-hint.warn{color:var(--warn)}
 .field.shake{animation:shake .4s}
 @keyframes shake{20%{transform:translateX(-6px)}40%{transform:translateX(5px)}60%{transform:translateX(-3px)}80%{transform:translateX(2px)}}
 .field.flash .f-control{animation:flash 1s var(--ease)}
@@ -636,6 +644,7 @@ body.dragging .intake-drop .release { display:block; color:var(--cream); }
             <div class="f-control">
               <input class="f-input" id="vendor" type="text" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="vList" autocomplete="off" autocapitalize="words" spellcheck="false" enterkeyhint="next" placeholder="Start typing a party…">
               <span class="tick" aria-hidden="true"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span>
+              <span class="warnmark" aria-hidden="true"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 7.5v5.5"/><path d="M12 16.6v.1"/></svg></span>
             </div>
             <div class="recent" id="recent" aria-label="Recent vendors"></div>
             <div class="f-hint" id="vHint"></div>
@@ -927,14 +936,28 @@ function state() {
   if (!dateOk) missing.push('date');
   return { pd, n, v, dateOk, dateBad: !!(pd.err || pd.future), missing, ready: missing.length === 0 };
 }
+// Is this name a party already on the books? Matched on the vendor's own name AND its saved aliases,
+// exactly as the host resolves it when the bill is saved — so the composer's "on file" and the save's
+// "found it" can never disagree.
+function findVendor(name) {
+  const q = (name || '').trim().toLowerCase();
+  if (!q) return null;
+  return VENDORS.find(x => x.name.trim().toLowerCase() === q)
+      || VENDORS.find(x => (x.aliases || []).some(a => String(a).trim().toLowerCase() === q))
+      || null;
+}
 const order = () => mobile() ? ['vendor','amount','date','site','bill'] : ['vendor','bill','date','amount','site'];
 const dirty = () => !!(vendorEl.value.trim() || billEl.value.trim() || dateEl.value.trim() || amountEl.value.trim() || S.site || S.file);
 
 function sync() {
   const st = state();
-  const exact = VENDORS.find(x => x.name.toLowerCase() === st.v.toLowerCase());
+  const exact = findVendor(st.v);
+  // Mid-typing a name is half a name: neither mark shows until the field is left, so the caution is a
+  // verdict on what you entered, not a running commentary on your keystrokes.
+  const vSettled = !!st.v && document.activeElement !== vendorEl;
 
-  F.vendor.classList.toggle('valid', !!st.v);
+  F.vendor.classList.toggle('valid', !!exact);
+  F.vendor.classList.toggle('isnew', vSettled && !exact);
   F.bill.classList.toggle('valid', !!billEl.value.trim());
   F.date.classList.toggle('valid', st.dateOk);
   F.date.classList.toggle('bad', st.dateBad);
@@ -943,7 +966,10 @@ function sync() {
 
   // vendor hint
   if (exact) setHint(vHint, (exact.open ? `${exact.open} unpaid bill${exact.open === 1 ? '' : 's'}` : 'On file') + (exact.site ? ` · usually ${siteName(exact.site)}` : ''), 'ok');
-  else if (st.v && document.activeElement !== vendorEl) setHint(vHint, 'New vendor — added with this bill');
+  // It used to read "New vendor — added with this bill" beside a green tick, which claimed a thing that
+  // had not happened: nothing is written until Add bill, and if the save fails nothing is written at all.
+  // Say what is true now (not on file) and what pressing Add will do.
+  else if (vSettled) setHint(vHint, 'Not in your parties — Add bill will create it as a new vendor', 'warn');
   else setHint(vHint, '');
   recentEl.hidden = !!st.v;
 
@@ -993,7 +1019,7 @@ function setHint(el, text, kind) { el.textContent = text; el.className = 'f-hint
    ========================================================= */
 function renderVendors(open) {
   const q = vendorEl.value.trim(), ql = q.toLowerCase();
-  const exact = VENDORS.find(x => x.name.toLowerCase() === ql);
+  const exact = findVendor(q);
   const matches = (ql ? VENDORS.filter(x => x.name.toLowerCase().includes(ql)) : VENDORS).slice(0, mobile() ? 4 : 6);
   S.opts = matches.map(x => ({ name: x.name, meta: (x.open ? `${x.open} unpaid` : 'On file') + (x.site ? ` · ${siteName(x.site)}` : '') }));
   if (q && !exact) S.opts.push({ name: q, isNew: true });
@@ -1026,7 +1052,7 @@ function pickVendor(name) {
 function renderRecent() {
   recentEl.innerHTML = VENDORS.slice(0, 4).map(v => `<button type="button" class="rc" data-name="${esc(v.name)}">${esc(v.name)}</button>`).join('');
 }
-vendorEl.addEventListener('focus', () => { closeCal(); if (!mobile()) S.active = -1; if (S.autofocus) { S.autofocus = false; return; } renderVendors(true); });
+vendorEl.addEventListener('focus', () => { closeCal(); sync(); if (!mobile()) S.active = -1; if (S.autofocus) { S.autofocus = false; return; } renderVendors(true); });
 vendorEl.addEventListener('input', () => { S.active = vendorEl.value.trim() ? 0 : -1; renderVendors(true); sync(); });
 vendorEl.addEventListener('blur', () => setTimeout(() => { if (document.activeElement !== vendorEl) { setVendorPop(false); sync(); } }, 120));
 vendorEl.addEventListener('keydown', e => {
@@ -1274,7 +1300,7 @@ async function submit() {
   const bill = {
     id: Date.now(), vendor: st.v, billNo: billEl.value.trim(), date: st.pd.d, site: S.site,
     amount: st.n, paid: 0, po: null, created: today(),
-    isNew: !VENDORS.some(x => x.name.toLowerCase() === st.v.toLowerCase())
+    isNew: !findVendor(st.v)
   };
   let res;
   try { res = await saveBill(bill); }
