@@ -184,7 +184,7 @@ export function PayableOptions({
               ? <p className="pyo-note">Nothing is owed on this site before this payment — it sits as an <b>advance</b> (a recoverable) until it is earned.</p>
               : <p className="pyo-hint">What does this payment settle? (Figures are what was owed <b>before</b> it.)</p>}
             <Radio id="this_week" choice={choice} set={setChoice} disabled={targets.thisWeek <= 0.5}
-              title="This week's wages" note={targets.thisWeek > 0.5 ? inr(targets.thisWeek) + ' — from the muster this week' : 'nothing owed this week'} />
+              title="This week's payment" note={targets.thisWeek > 0.5 ? inr(targets.thisWeek) + " — this week's payable (certified work or wages)" : 'nothing owed this week'} />
             <Radio id="past" choice={choice} set={setChoice} disabled={targets.pastBalance <= 0.5}
               title="Earlier dues" note={targets.pastBalance > 0.5 ? inr(targets.pastBalance) + ' — carried from before this week' : 'nothing carried'} />
             {advanceRows(targets.contracts)}

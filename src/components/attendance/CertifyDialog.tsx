@@ -36,13 +36,17 @@ type LogEntry = { date: string; kind: string; reading: number; amount: number; n
 // payment on a phase is always this proportion of its value, so the % is the honest headline.
 function stageShape(st: StageRow) {
   const isLS = st.type === 'lump';
-  const budget = isLS ? (st.amount || 0) : (st.total || 0) * (st.rate || 0);
-  const ratePer = isLS ? (st.amount ? st.amount / 100 : 0) : (st.rate || 0);   // ₹ per unit (per 1% for lump)
+  // The phase's ₹ worth is its AGREED value (planned) — the same figure the contract page uses; a
+  // measured phase with no rate on file (qty × rate = 0) still has its value here, so its % is honest.
+  const budget = (st.planned || 0) > 0 ? st.planned : (isLS ? (st.amount || 0) : (st.total || 0) * (st.rate || 0));
+  const ratePer = isLS ? (budget ? budget / 100 : 0) : (st.rate || 0);   // ₹ per unit (per 1% for lump)
   // Completion reflects the GREATER of certified and paid — a phase already paid on is work done.
   const accounted = Math.max(st.certified || 0, st.paid || 0);
-  const done = isLS ? (st.amount ? accounted / st.amount * 100 : 0) : (st.rate ? accounted / st.rate : 0);
+  const done = isLS ? (budget ? accounted / budget * 100 : 0) : (st.rate ? accounted / st.rate : 0);
   const pct = budget > 0 ? Math.min(100, Math.round(accounted / budget * 100)) : 0;
-  return { isLS, budget, ratePer, done, pct, unit: isLS ? '%' : (st.unit || 'unit'), accounted, certified: st.certified || 0, paid: st.paid || 0, qty: st.total || 0 };
+  // What is already PAID, in this stage's own input unit — the floor the reading can't drop below.
+  const paidFloor = isLS ? (budget ? Math.min(100, (st.paid || 0) / budget * 100) : 0) : (st.rate ? (st.paid || 0) / st.rate : 0);
+  return { isLS, budget, ratePer, done, pct, paidFloor, unit: isLS ? '%' : (st.unit || 'unit'), accounted, certified: st.certified || 0, paid: st.paid || 0, qty: st.total || 0 };
 }
 
 export function CertifyDialog({ ctx, onClose, onDone, onToast }: {
@@ -83,9 +87,13 @@ export function CertifyDialog({ ctx, onClose, onDone, onToast }: {
   const over = shape.isLS ? total > 100 : total > shape.qty;
   const overBy = shape.isLS ? total - 100 : total - shape.qty;
 
-  // The stepper inputs — total (done to date) and "certifying now". Two-way: editing one derives the other.
-  const setFromTotal = (v: number) => setTotal(Math.max(0, v));
-  const setFromNew = (n: number) => setTotal(+(shape.done + (shape.isLS ? (shape.ratePer ? n / shape.ratePer : 0) : n)).toFixed(2));
+  // Locked floor: you can never take a stage BELOW what's already been paid on it — that work is agreed
+  // and the money is out. The reading holds at the paid mark (or higher); it can only move up.
+  const lock = shape.paidFloor;
+  const setFromTotal = (v: number) => setTotal(Math.max(lock, v));
+  const setFromNew = (n: number) => setTotal(Math.max(lock, +(shape.done + (shape.isLS ? (shape.ratePer ? n / shape.ratePer : 0) : n)).toFixed(2)));
+  // Keep the reading at/above the paid floor as the stage changes.
+  useEffect(() => { setTotal((t) => (t < lock ? lock : t)); }, [lock]);
   const newValue = shape.isLS ? Math.round(dq * shape.ratePer) : +dq.toFixed(2);   // ₹ for lump, qty for measured
   // The % of the phase this reading would reach (payment is always this proportion of the phase value).
   const reachedPct = shape.isLS ? Math.max(0, Math.round(total)) : (shape.qty ? Math.max(0, Math.round(total / shape.qty * 100)) : 0);
@@ -153,10 +161,11 @@ export function CertifyDialog({ ctx, onClose, onDone, onToast }: {
             <div>
               <p className="lbl">Done to date</p>
               <label className="field">
-                <input type="number" min={0} step="any" inputMode="decimal" value={round2(total)}
+                <input type="number" min={round2(lock)} step="any" inputMode="decimal" value={round2(total)}
                   onChange={(e) => setFromTotal(parseFloat(e.target.value) || 0)} />
                 <span>{shape.unit}</span>
               </label>
+              {lock > 0 && <p style={{ fontSize: 11.5, color: '#A0958A', margin: '6px 0 0' }}>🔒 {INR(shape.paid)} already paid — can't go below {shape.isLS ? `${Math.round(lock)}%` : `${fmtQ(lock)} ${shape.unit}`}</p>}
             </div>
             <div>
               <p className="lbl">Certifying now</p>

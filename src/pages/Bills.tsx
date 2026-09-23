@@ -11,7 +11,6 @@ import { ImageLightbox } from '../components/ImageLightbox';
 import { openDoc, resolveDocUrl } from '../lib/storage';
 import { useSnackbar } from '../components/Snackbar';
 import NewBillModal, { type BillDraft } from '../components/bills/NewBillModal';
-import { useSearchScope } from '../components/search/searchScope';
 import { useCursorLamp } from '../components/nav/useCursorLamp';
 import BillsMobile from '../components/bills/BillsMobile';
 import { useMintBill } from '../components/bills/useMintBill';
@@ -614,10 +613,6 @@ function BillsDesktop() {
       count: rows.length,
     }));
   }, [shown, group]);
-  useSearchScope('Bills', useMemo(() => shown.map(b => ({
-    id: b.id, title: b.vendor, sub: `${b.billNo || 'No number'}${b.site ? ' · ' + b.site : ''}`, right: inr(b.amount),
-    onPick: () => navigate(`/bills/${encodeURIComponent(b.id)}`),
-  })), [shown, navigate]), setQ);
 
   const unpaidTotal = useMemo(() => bills.filter(b => b.status !== 'settled').reduce((s, b) => s + (b.amount - b.paid), 0), [bills]);
   // The hero's outstanding picture: total dues, how they're spread across sites (top 4, biggest first),

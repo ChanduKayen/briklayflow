@@ -25,6 +25,13 @@ export interface CatRow { id: string; n: string; rate: number; own?: boolean; ce
 export interface StageRow {
   milestoneId: string; n: string; type: 'lump' | 'measured';
   amount?: number; unit?: string; rate?: number; total?: number;
+  /** The phase's AGREED value (wo_milestones.planned_amount) — the single source of a phase's ₹ worth,
+   *  the same figure the contract page uses. Progress % = accounted ÷ planned, for lump AND measured;
+   *  a measured phase with no rate on file (qty × rate = 0) still has its value here. */
+  planned: number;
+  /** ₹ certified but SENT FOR APPROVAL (status='pending') — shown as an in-flight segment, never as
+   *  earned/paid (it isn't payable until approved). */
+  pending: number;
   before: number; paid: number; cells: Cell[];
   // ₹ approved-certified so far (lump = latest, measured = Σ), and the slice of it certified BEFORE this
   // week — so "this week's difference" = certified − certifiedBefore (the only payable this week).
@@ -143,6 +150,17 @@ export async function loadWeek(monday: Date): Promise<WeekData> {
     }
   }
 
+  // Certifications SENT FOR APPROVAL but not yet approved — so the sheet can show "sent for approval"
+  // instead of a bare 0 (the money isn't payable until approved, but the work is visibly in flight).
+  const pendingByMs: Record<string, number> = {};
+  if (subjectMs.length) {
+    const { data: pc } = await supabase.from('work_certifications')
+      .select('milestone_id, computed_amount, status').in('milestone_id', subjectMs).eq('status', 'pending');
+    for (const w of (pc ?? []) as { milestone_id: string | null; computed_amount: number | null }[]) {
+      if (w.milestone_id) pendingByMs[w.milestone_id] = (pendingByMs[w.milestone_id] || 0) + (Number(w.computed_amount) || 0);
+    }
+  }
+
   // All attendance rows: this week (for the grid) + prior stage readings (for "before").
   const subjectMsIds = milestones.map((m: any) => m.milestone_id);
   const attThisWeek = (await supabase.from('labour_attendance').select('*').gte('work_date', weekStart).lte('work_date', weekEnd)).data ?? [];
@@ -196,11 +214,13 @@ export async function loadWeek(monday: Date): Promise<WeekData> {
         return {
           milestoneId: m.milestone_id, n: m.name, type: isLump ? 'lump' : 'measured',
           amount: isLump ? Number(m.planned_amount) || 0 : undefined,
+          planned: Number(m.planned_amount) || 0,
           unit: isLump ? undefined : (m.unit_type || 'unit'),
           rate: isLump ? undefined : Number(m.rate) || 0,
           total: isLump ? undefined : Number(m.quantity) || 0,
           before: isLump ? (lumpLatest[m.milestone_id]?.v ?? 0) : (measuredBefore[m.milestone_id] ?? 0),
           paid: paidByMs[m.milestone_id] || 0,
+          pending: pendingByMs[m.milestone_id] || 0,
           certified: certByMs[m.milestone_id] || 0,
           certifiedBefore: certBeforeByMs[m.milestone_id] || 0,
           cells: cellsFor(byStage[m.milestone_id] ?? [], dates),

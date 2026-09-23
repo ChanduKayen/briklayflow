@@ -161,8 +161,19 @@ export async function loadAttributionTargets(
       loadPhases(eng.woId, eng.stageIds),
       supabase.from('work_orders').select('title, scope_of_work').eq('wo_id', eng.woId).maybeSingle(),
     ]);
-    const w = woRow.data as { title?: string; scope_of_work?: string } | null;
-    return { kind: 'worker_contract', woId: eng.woId, woLabel: w?.title || w?.scope_of_work || 'Contract', tracked, wagesMode: eng.wagesMode, phases, thisWeek, pastBalance, owedBefore, isAdvance, contracts };
+    // A PHASE pick only means something on a fresh WORK-DONE contract where choosing a phase IS the
+    // certification. The moment work is CERTIFIED — by the muster (stage readings → `tracked`) OR by
+    // the Certify dialog (approved work_certifications → a phase reads `certified`) — that work is a
+    // payable, and a payment simply settles the money owed: it FOLLOWS the certified work through the
+    // balance, with no phase for the person to pick. A DAY-WAGE contract likewise settles this week's
+    // wages. All of those belong under the one "This week's payment" option (anything that qualifies
+    // as this week's payable), never a list of muted, already-certified phases. So the phase picker is
+    // offered ONLY for a contract with no certified work yet; everything else falls through below.
+    const hasCertifiedWork = phases.some((p) => (p.certified || 0) > 0.5);
+    if (!tracked && !eng.wagesMode && !hasCertifiedWork) {
+      const w = woRow.data as { title?: string; scope_of_work?: string } | null;
+      return { kind: 'worker_contract', woId: eng.woId, woLabel: w?.title || w?.scope_of_work || 'Contract', tracked, wagesMode: eng.wagesMode, phases, thisWeek, pastBalance, owedBefore, isAdvance, contracts };
+    }
   }
   return { kind: 'worker_day', thisWeek, pastBalance, owedBefore, isAdvance, contracts };
 }

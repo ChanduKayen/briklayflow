@@ -59,8 +59,12 @@ const CSS = `
 .npm-row.open .npm-chev{transform:rotate(90deg)}
 
 .npm-drawer{max-height:0;overflow:hidden;transition:max-height .38s var(--sheet);background:#FBF9F6}
-.npm-drawer.open{max-height:320px;overflow-y:auto}
+.npm-drawer.open{max-height:340px;overflow-y:auto}
 .npm-drawer::before{content:'';display:block;height:1px;background:var(--hair);transform:scaleY(.5)}
+.npm-search{position:sticky;top:0;z-index:1;display:flex;align-items:center;gap:9px;padding:11px 16px;background:#FBF9F6;box-shadow:0 1px 0 rgba(0,0,0,.06)}
+.npm-search svg{width:17px;height:17px;flex:none;color:var(--ink-2)}
+.npm-search input{flex:1;min-width:0;border:0;background:none;outline:none;font:inherit;font-size:16px;color:var(--ink)}
+.npm-search input::placeholder{color:var(--ink-3)}
 .npm-opt{display:flex;align-items:baseline;gap:10px;padding:14px 18px;width:100%;border:0;background:none;
   text-align:left;cursor:pointer;transition:background .15s;position:relative}
 .npm-opt+.npm-opt::before{content:'';position:absolute;left:18px;right:0;top:0;height:1px;background:var(--hair);transform:scaleY(.5)}
@@ -253,6 +257,7 @@ export interface NewPoMobileProps {
 // replaces it; one that adds nothing is dropped; only genuinely new words are appended.
 export default function NewPoMobile(p: NewPoMobileProps) {
   const [drawer, setDrawer] = useState<'v' | 'p' | null>(null);
+  const [pq, setPq] = useState('');   // type-to-filter inside an open picker (vendor / project)
   const [sheet, setSheet] = useState<'add' | 'discard' | 'typed' | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [fName, setFName] = useState(''); const [fQty, setFQty] = useState(''); const [fRate, setFRate] = useState('');
@@ -361,28 +366,41 @@ export default function NewPoMobile(p: NewPoMobileProps) {
 
   const pickRow = (
     which: 'v' | 'p', label: string, value: string | undefined, opts: MobileOption[],
-    selId: string, onPick: (id: string) => void, emptyText: string,
-  ) => (
-    <>
-      <button type="button" className={`npm-row${value ? ' set' : ''}${drawer === which ? ' open' : ''}`}
-        onClick={() => setDrawer(d => (d === which ? null : which))} aria-expanded={drawer === which}>
-        <span className="lb">{label}</span>
-        <span className="vl">{value ?? 'Select'}</span>
-        {chev}
-      </button>
-      <div className={`npm-drawer${drawer === which ? ' open' : ''}`}>
-        {opts.length === 0 && <div className="npm-empty">{emptyText}</div>}
-        {opts.map(o => (
-          <button type="button" key={o.id} className={`npm-opt${selId === o.id ? ' sel' : ''}`}
-            onClick={() => { onPick(o.id); window.setTimeout(() => setDrawer(null), 300); }}>
-            <span className="nm">{o.name}</span>
-            <span className="sb">{o.sub}</span>
-            {tick}
-          </button>
-        ))}
-      </div>
-    </>
-  );
+    selId: string, onPick: (id: string) => void, emptyText: string, searchable = false,
+  ) => {
+    const open = drawer === which;
+    const q = pq.trim().toLowerCase();
+    // Type to narrow — a combobox, not a bare dropdown. Matches the name or the sub (trade/site).
+    const shown = searchable && q ? opts.filter(o => o.name.toLowerCase().includes(q) || (o.sub || '').toLowerCase().includes(q)) : opts;
+    return (
+      <>
+        <button type="button" className={`npm-row${value ? ' set' : ''}${open ? ' open' : ''}`}
+          onClick={() => { setDrawer(d => (d === which ? null : which)); setPq(''); }} aria-expanded={open}>
+          <span className="lb">{label}</span>
+          <span className="vl">{value ?? 'Select'}</span>
+          {chev}
+        </button>
+        <div className={`npm-drawer${open ? ' open' : ''}`}>
+          {open && searchable && (
+            <div className="npm-search">
+              <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="9" cy="9" r="6" stroke="currentColor" strokeWidth="1.8" /><path d="M14 14l3.5 3.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
+              <input autoFocus value={pq} onChange={e => setPq(e.target.value)} placeholder={`Search ${label.toLowerCase()}…`}
+                autoComplete="off" autoCorrect="off" spellCheck={false} aria-label={`Search ${label.toLowerCase()}`} />
+            </div>
+          )}
+          {shown.length === 0 && <div className="npm-empty">{q ? `No ${label.toLowerCase()} matches “${pq.trim()}”.` : emptyText}</div>}
+          {shown.map(o => (
+            <button type="button" key={o.id} className={`npm-opt${selId === o.id ? ' sel' : ''}`}
+              onClick={() => { onPick(o.id); setPq(''); window.setTimeout(() => setDrawer(null), 300); }}>
+              <span className="nm">{o.name}</span>
+              <span className="sb">{o.sub}</span>
+              {tick}
+            </button>
+          ))}
+        </div>
+      </>
+    );
+  };
 
   return (
     <div className="npm-w">
@@ -411,8 +429,8 @@ export default function NewPoMobile(p: NewPoMobileProps) {
           <div className="npm-sect-h">Order details</div>
           <div className="npm-group">
             {pickRow('v', 'Vendor', vendorName ?? (p.mode === 'rfq' ? 'Not needed for quotes' : undefined),
-                     p.vendors, p.vendorId, p.onVendor, 'No vendors yet.')}
-            {pickRow('p', 'Project', projectName, p.projects, p.projectId, p.onProject, 'No projects yet.')}
+                     p.vendors, p.vendorId, p.onVendor, 'No vendors yet.', true)}
+            {pickRow('p', 'Project', projectName, p.projects, p.projectId, p.onProject, 'No projects yet.', p.projects.length > 6)}
             <div className="npm-row set" style={{ cursor: 'default' }}>
               <span className="lb">Date</span><span className="vl">{p.dateLabel}</span>
             </div>

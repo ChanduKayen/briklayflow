@@ -57,7 +57,7 @@ type Panel =
   | { view: 'weeks' };
 
 export function PayablesMobile({
-  rows, paid, approvals, monday, setMonday, readOnly, newLedger, orgId, who, onDone, loading, projects, parties,
+  rows, paid, approvals, monday, setMonday, readOnly, newLedger, orgId, who, onDone, loading, projects, parties, onAdd,
 }: {
   rows: PayRow[];
   paid: Record<string, RunPaid>;
@@ -74,6 +74,8 @@ export function PayablesMobile({
   /** the sites + parties the "add a payment request" form offers */
   projects: { project_id: string; name: string }[];
   parties: { stakeholder_id: string; name: string; type?: string | null; category?: string | null }[];
+  /** show the just-added request in the run right away (ephemeral row, like the desktop) */
+  onAdd?: (row: PayRow) => void;
 }) {
   const [stage, setStage] = useState<'all' | Stage>('all');
   const [foldOpen, setFoldOpen] = useState(false);
@@ -421,6 +423,7 @@ export function PayablesMobile({
         <AddPayableSheet
           orgId={orgId} projects={projects} parties={parties}
           close={() => setAddOpen(false)}
+          onAdd={onAdd}
           onAdded={() => { setAddOpen(false); say('Payment request added'); onDone(); }}
         />
       )}
@@ -432,11 +435,12 @@ export function PayablesMobile({
 // Not a transaction (money out), a PAYABLE: for a known party it persists as a certified-side ledger
 // adjustment (addAdjustment) — the same write the desktop run uses — so it enters v_party_balance and
 // this week's carry. The old mobile button opened the money-out composer, which recorded a payment.
-function AddPayableSheet({ orgId, projects, parties, close, onAdded }: {
+function AddPayableSheet({ orgId, projects, parties, close, onAdd, onAdded }: {
   orgId: string;
   projects: { project_id: string; name: string }[];
   parties: { stakeholder_id: string; name: string; type?: string | null; category?: string | null }[];
   close: () => void;
+  onAdd?: (row: PayRow) => void;
   onAdded: () => void;
 }) {
   const [on, setOn] = useState(false);
@@ -466,13 +470,21 @@ function AddPayableSheet({ orgId, projects, parties, close, onAdded }: {
       await addAdjustment(orgId, picked.id, {
         projectId, adjDate: new Date().toISOString().slice(0, 10), side: 'certified', amount: amt, note: note.trim() || 'Payment request',
       });
+      // Show it in the run at once — an ephemeral row, exactly like the desktop's "Add a payment".
+      // The refetch (onAdded → onDone) then replaces it with the real one from the register.
+      const projectName = projects.find((p) => p.project_id === projectId)?.name ?? '';
+      onAdd?.({
+        key: `x-${projectId}-${Date.now()}`, projectId, projectName, stakeholderId: picked.id,
+        party: picked.name.trim(), trade: note.trim() || 'added here', kind: 'wages',
+        basis: 'added here · not from the register', thisWeek: amt, balanceBf: 0, woId: null, milestoneId: null,
+      } as PayRow);
       buzz([10, 40, 18]);
       onAdded();
     } catch (e) { setErr((e as Error)?.message || 'Could not add the payment request'); setBusy(false); }
   };
 
   return (
-    <section ref={drag} className={`pym-panel${on ? ' on' : ''}`} role="dialog" aria-modal="true" aria-label="Add a payment request" style={{ ['--h' as string]: '560px' } as React.CSSProperties}>
+    <section ref={drag} className={`pym-panel add${on ? ' on' : ''}`} role="dialog" aria-modal="true" aria-label="Add a payment request" style={{ ['--h' as string]: 'auto' } as React.CSSProperties}>
       <div className="grab" aria-hidden="true"><i /></div>
       <div className="p-head">
         <button type="button" className="ico" aria-label="Close" onClick={close}>{CROSS}</button>
@@ -520,9 +532,10 @@ function AddPayableSheet({ orgId, projects, parties, close, onAdded }: {
             <span>For what</span>
             <input type="text" placeholder="e.g. advance · flat 501 tiles" value={note} onChange={(e) => setNote(e.target.value)} />
           </label>
-
-          {err && <p className="ferr">{err}</p>}
         </div>
+      </div>
+      <div className="foot">
+        {err && <p className="ferr">{err}</p>}
         <button type="button" className="big" disabled={!ready || busy} onClick={submit}>
           {busy ? 'Adding…' : ready ? `Add ₹${grouped(amt)} request` : 'Add payment request'}
         </button>

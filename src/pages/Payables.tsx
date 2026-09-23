@@ -26,7 +26,6 @@ import { supabase } from '../lib/supabase';
 import { useOrgId } from '../lib/auth/AuthProvider';
 import { useSnackbar } from '../components/Snackbar';
 import { searchPayees } from '../lib/payeeSearch';
-import { useSearchScope } from '../components/search/searchScope';
 import { useCursorLamp } from '../components/nav/useCursorLamp';
 import { createParty } from '../components/day-book/fileEntry';
 import {
@@ -206,10 +205,6 @@ export default function Payables({ session }: { session: Session }) {
     return secs;
   }, [allSections, q, siteFilter]);
 
-  useSearchScope('Payables', useMemo(() => sections.flatMap(sec => sec.rows.map(r => ({
-    id: r.key, title: r.party, sub: `${r.trade || ''}${r.projectName ? ' · ' + r.projectName : ''}`.replace(/^ · /, ''),
-    onPick: () => setExpanded(new Set([r.key])),
-  }))), [sections]), setQ);
 
   const paidOf = (r: PayRow): number | null => paid[r.key] ?? serverPaid[r.key]?.amount ?? null;
   // "This week" stays the computed figure (drives the pay amount + the why-popover) — untouched.
@@ -413,6 +408,7 @@ export default function Payables({ session }: { session: Session }) {
           readOnly={readOnly} newLedger={!!newLedger} orgId={orgId} loading={isLoading}
           who={{ id: null, name: (profile as { full_name?: string } | undefined)?.full_name ?? null }}
           projects={projects ?? []} parties={parties ?? []}
+          onAdd={(row) => setExtra(x => ({ ...x, [row.projectId]: [...(x[row.projectId] ?? []), row] }))}
           onDone={() => { refetch(); refetchPaid(); refetchApprovals(); }}
         />
       </div>

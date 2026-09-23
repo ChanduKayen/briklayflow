@@ -141,22 +141,34 @@ export default function AttendanceSheet({ session }: { session: Session }) {
   // (work approved) and the ₹ already paid (allocations). A phase paid but not yet formally certified is
   // still work done and money out, so it must not read 0. twEarned stays this-week's newly-certified ₹.
   function stageMath(st: StageRow) {
-    const budget = st.type === 'lump' ? (st.amount || 0) : (st.total || 0) * (st.rate || 0);
+    // The phase's ₹ worth is its AGREED value (planned) — the same figure the contract page uses.
+    // Falling back to qty×rate only when planned is absent; a measured phase with no rate on file was
+    // reading budget 0, so a fully-paid stage showed 0% here while the contract showed its real %.
+    const budget = (st.planned || 0) > 0 ? st.planned : (st.type === 'lump' ? (st.amount || 0) : (st.total || 0) * (st.rate || 0));
     const earned = Math.max(st.certified || 0, st.paid || 0);
     const certified = st.certified || 0;
     const before = Math.min(certified, st.certifiedBefore || 0);
     const twEarned = Math.max(0, certified - before);
     const pct = budget > 0 ? Math.min(100, Math.round(earned / budget * 100)) : 0;
     const done = st.type === 'measured' && st.rate ? earned / st.rate : (st.amount ? earned / st.amount * 100 : 0);
-    return { budget, earned, certified, paid: st.paid || 0, twEarned, pct, done, total: st.total || 0, unit: st.unit || '', isLS: st.type === 'lump' };
+    // Work sent for approval (not yet approved → not earned/paid). Shown as an in-flight segment that
+    // sits ABOVE the earned bar, so a certified-but-pending phase never reads a bare 0.
+    const pending = st.pending || 0;
+    const pendingPct = budget > 0 ? Math.min(100, Math.round((earned + pending) / budget * 100)) : 0;
+    return { budget, earned, certified, paid: st.paid || 0, twEarned, pct, done, pending, pendingPct, total: st.total || 0, unit: st.unit || '', isLS: st.type === 'lump' };
   }
   const woWeek = (crew: CrewRow) => crew.stages.reduce((a, st) => a + stageMath(st).twEarned, 0);
   const uiStage = (crew: CrewRow): number => {
     const anyc = crew as any;
-    if (anyc._uiStage == null || anyc._uiStage >= crew.stages.length) {
-      const first = crew.stages.findIndex(st => { const m = stageMath(st); return m.earned < m.budget; });
-      anyc._uiStage = first < 0 ? 0 : first;
+    if (anyc._uiStage == null) {
+      // Remember the phase the user last opened on this crew (stored by milestone id, so it survives a
+      // refresh and a re-order). Falls back to the first unfinished phase only when nothing is stored.
+      let stored = -1;
+      try { const mid = localStorage.getItem('atd:phase:' + crew.crewId); if (mid) stored = crew.stages.findIndex(s => s.milestoneId === mid); } catch { /* storage may be unavailable */ }
+      if (stored >= 0) anyc._uiStage = stored;
+      else { const first = crew.stages.findIndex(st => { const m = stageMath(st); return m.earned < m.budget; }); anyc._uiStage = first < 0 ? 0 : first; }
     }
+    if (anyc._uiStage >= crew.stages.length) anyc._uiStage = Math.max(0, crew.stages.length - 1);
     return anyc._uiStage;
   };
   const crewLabel = (crew: CrewRow) => crew.d || 'Contract';
@@ -264,10 +276,14 @@ export default function AttendanceSheet({ session }: { session: Session }) {
         }
         const m = stageMath(st);
         const qty = m.isLS ? `<b>${fmtQ(m.done)}%</b> of lump sum` : `<b>${fmtQ(m.done)}</b> / ${fmtQ(m.total)} ${m.unit}`;
-        const stSel = `<select class="sel mini stage" data-stsel="${c.id}">${crew.stages.map((x, i) => { const mm = stageMath(x); return `<option value="${i}" ${i === ki ? 'selected' : ''}>${escapeHtml(x.n)} — ${mm.pct}% done${mm.pct >= 100 ? ' ✓' : ''}</option>`; }).join('')}</select>`;
+        const stSel = `<select class="sel mini stage" data-stsel="${c.id}">${crew.stages.map((x, i) => { const mm = stageMath(x); const pend = mm.pending > 0.5 ? ` · ⏳ ${inr(mm.pending)} sent` : ''; return `<option value="${i}" ${i === ki ? 'selected' : ''}>${escapeHtml(x.n)} — ${mm.pct}% done${mm.pct >= 100 ? ' ✓' : ''}${pend}</option>`; }).join('')}</select>`;
+        // Pending (sent-for-approval) shows as a hatched segment sitting above the earned bar, plus a
+        // subtle inline note — so the user sees the certification is in flight, not lost as a 0.
+        const pendSeg = m.pending > 0.5 ? `<i class="pend" style="left:${m.pct}%;width:${Math.max(0, m.pendingPct - m.pct)}%"></i>` : '';
+        const pendNote = m.pending > 0.5 ? `<span class="pnote" title="Certified ${inr(m.pending)} — awaiting approval on Payables">⏳ ${inr(m.pending)} sent for approval</span>` : '';
         html += `<tr class="contract" data-c="${c.id}">
           <td class="who"><span class="n">${escapeHtml(crew.n)}</span><span class="tag">contract</span><br><span class="sel mini wo" title="${escapeHtml(crew.woId || '')}">${escapeHtml(crewLabel(crew))}</span></td>
-          <td colspan="7" class="cwork" data-cert="${c.id}"><div class="cw">${stSel}<span class="bar" title="${inr(m.earned)} of ${inr(m.budget)}"><i style="width:${m.pct}%"></i></span><span class="num">${qty}</span></div></td>
+          <td colspan="7" class="cwork" data-cert="${c.id}"><div class="cw">${stSel}<span class="bar${m.pending > 0.5 ? ' hasp' : ''}" title="${inr(m.earned)} of ${inr(m.budget)}${m.pending > 0.5 ? ` · ${inr(m.pending)} sent for approval` : ''}"><i style="width:${m.pct}%"></i>${pendSeg}</span><span class="num">${qty}</span>${pendNote}</div></td>
           <td class="tot days zero">—</td><td class="tot ${m.twEarned ? '' : 'zero'}"><span class="amt">${m.twEarned ? inr(m.twEarned) : '—'}</span><span class="of">${inr(m.earned)} to date</span></td>
           <td class="menu"><button data-menu-c="${c.id}" aria-label="Row menu">⋯</button></td></tr>`;
       });
@@ -589,7 +605,10 @@ export default function AttendanceSheet({ session }: { session: Session }) {
     grid.querySelectorAll('[data-stsel]').forEach(sel => (sel as HTMLSelectElement).onchange = (e) => {
       e.stopPropagation();
       const c = CROWS.current.get((sel as HTMLElement).dataset.stsel!); if (!c) return;
-      (c.crew as any)._uiStage = +(sel as HTMLSelectElement).value; render();
+      const idx = +(sel as HTMLSelectElement).value;
+      (c.crew as any)._uiStage = idx;
+      try { const st = c.crew.stages[idx]; if (st) localStorage.setItem('atd:phase:' + c.crew.crewId, st.milestoneId); } catch { /* storage may be unavailable */ }
+      render();
     });
     grid.querySelectorAll('[data-stsel]').forEach(sel => (sel as HTMLElement).onclick = (e) => e.stopPropagation());
     const tsel = grid.querySelector('#tradesel') as HTMLSelectElement | null;
@@ -1030,6 +1049,10 @@ const ATDX_CSS = `
 .atdx td.cwork .bar{flex:1;height:4px;border-radius:2px;background:var(--cream-2);position:relative;min-width:60px;overflow:hidden}
 .atdx td.cwork .bar i{position:absolute;inset:0 auto 0 0;background:var(--sage);border-radius:2px;transition:width .3s var(--ease),background .15s}
 .atdx td.cwork:hover .bar i{background:var(--terra)}
+/* "Sent for approval" — an amber, hatched in-flight segment above the earned bar; not yet earned. */
+.atdx td.cwork .bar i.pend{inset:0 auto 0 auto;background:repeating-linear-gradient(45deg,var(--gold,#B8862E) 0 4px,transparent 4px 8px);opacity:.55;border-radius:0}
+.atdx td.cwork:hover .bar i.pend{background:repeating-linear-gradient(45deg,var(--gold,#B8862E) 0 4px,transparent 4px 8px)}
+.atdx td.cwork .pnote{flex:none;font-size:11.5px;font-weight:500;color:var(--gold,#B8862E);white-space:nowrap}
 .atdx td.cwork .num{font-family:"DM Mono",monospace;color:var(--walnut);white-space:nowrap;font-size:13px}
 .atdx td.cwork .num b{color:var(--ink);font-weight:500}
 .atdx tr.contract td.tot .amt{display:block;color:var(--walnut)}
