@@ -125,6 +125,9 @@ export function PayableOptions({
       if (choice === 'other') onConfirm({ type: 'other' });
       else if (choice === 'advance') onConfirm({ type: 'tag', tag: 'advance' });
       else if (choice?.startsWith('advance:')) onConfirm({ type: 'advance_contract', woId: choice.slice(8), projectId });
+      // On a CERTIFIED contract, settling ("this week" / "earlier dues") carries the money into the
+      // certified stages so the contract page reflects it — not just a tag. Pure day-wage → a tag.
+      else if ((choice === 'this_week' || choice === 'past') && targets.contractWoId) onConfirm({ type: 'settle_certified', woId: targets.contractWoId, projectId });
       else onConfirm({ type: 'tag', tag: choice as 'this_week' | 'past' });
     } else {
       if (choice === 'other') onConfirm({ type: 'other' });

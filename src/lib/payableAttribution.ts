@@ -35,7 +35,10 @@ export interface PhaseTarget { milestoneId: string; name: string; value: number;
 
 export type AttributionTargets =
   | { kind: 'vendor'; bills: BillTarget[] }
-  | { kind: 'worker_day'; thisWeek: number; pastBalance: number; owedBefore: number; isAdvance: boolean; contracts: ContractTarget[] }
+  | { kind: 'worker_day'; thisWeek: number; pastBalance: number; owedBefore: number; isAdvance: boolean; contracts: ContractTarget[];
+      /** set when this "day" picker is actually a CERTIFIED CONTRACT (muster/dialog certified) — so
+       *  "This week's payment" carries the money INTO the certified stages, not just a tag. */
+      contractWoId?: string | null }
   | { kind: 'worker_contract'; woId: string; woLabel: string; tracked: boolean; wagesMode: boolean; phases: PhaseTarget[]; thisWeek: number; pastBalance: number; owedBefore: number; isAdvance: boolean; contracts: ContractTarget[] };
 
 const num = (v: unknown) => Number(v) || 0;
@@ -175,7 +178,9 @@ export async function loadAttributionTargets(
       return { kind: 'worker_contract', woId: eng.woId, woLabel: w?.title || w?.scope_of_work || 'Contract', tracked, wagesMode: eng.wagesMode, phases, thisWeek, pastBalance, owedBefore, isAdvance, contracts };
     }
   }
-  return { kind: 'worker_day', thisWeek, pastBalance, owedBefore, isAdvance, contracts };
+  // A certified/tracked/wages contract lands here too (it fell through the phase gate above); carry its
+  // woId so "This week's payment" can settle INTO the certified stages, not just record a tag.
+  return { kind: 'worker_day', thisWeek, pastBalance, owedBefore, isAdvance, contracts, contractWoId: eng?.woId ?? null };
 }
 
 /** The party's open contracts on this site (work orders that aren't draft/cancelled), with what's still
@@ -248,6 +253,64 @@ export async function attributeAdvanceToContract(txnId: string, orgId: string, a
   if (error || !r?.success) throw new Error(r?.error || error?.message || 'Could not place the advance on the contract');
 }
 
+/**
+ * "This week's payment" on a CERTIFIED contract → the money FOLLOWS the certified work into its
+ * stages. It distributes the payment across the phases that are certified-but-unpaid (FIFO by seq),
+ * writing a WO allocation per stage (milestone_id set) — so the contract page's per-stage Paid and
+ * the "linked to a contract" state both reflect it. It NEVER mints a certification (the muster / the
+ * Certify dialog already did that); anything beyond the certified work stays as one OPEN advance on
+ * the contract. Pure allocation via set_txn_allocations (replaces the txn's whole set = its total).
+ */
+export async function attributeToContractCertified(txnId: string, orgId: string, amount: number, woId: string, projectId: string | null): Promise<void> {
+  const { data: ms } = await supabase.from('wo_milestones')
+    .select('milestone_id, seq_no, unit_type, planned_amount, quantity, rate').eq('wo_id', woId).order('seq_no');
+  const phases = (ms ?? []) as Array<{ milestone_id: string; seq_no: number | null }>;
+  const ids = phases.map((p) => p.milestone_id);
+  // Approved certified per phase — lump = the latest cumulative ₹, measured = Σ increments.
+  const certByMs: Record<string, number> = {};
+  if (ids.length) {
+    const { data: certs } = await supabase.from('work_certifications')
+      .select('milestone_id, reading_kind, computed_amount, reading_date, created_at, status').in('milestone_id', ids).eq('status', 'approved');
+    const byMs: Record<string, { amt: number; ord: string; lump: boolean }[]> = {};
+    (certs ?? []).forEach((w: { milestone_id: string | null; reading_kind: string; computed_amount: number; reading_date: string | null; created_at: string | null }) => {
+      if (!w.milestone_id) return;
+      (byMs[w.milestone_id] ||= []).push({ amt: num(w.computed_amount), ord: `${w.reading_date || ''}#${w.created_at || ''}`, lump: w.reading_kind === 'lump' });
+    });
+    for (const [mid, list] of Object.entries(byMs)) {
+      list.sort((a, b) => a.ord.localeCompare(b.ord));
+      const latest = list[list.length - 1];
+      certByMs[mid] = latest.lump ? latest.amt : list.reduce((s, x) => s + x.amt, 0);
+    }
+  }
+  // Paid per phase already (this WO, by milestone, excl voided + this same txn).
+  const paidByMs: Record<string, number> = {};
+  if (ids.length) {
+    const { data: al } = await supabase.from('txn_allocations')
+      .select('milestone_id, allocated_amount, txn_id, transactions(status)').eq('order_type', 'WO').eq('order_ref', woId);
+    (al ?? []).forEach((a: { milestone_id: string | null; allocated_amount: number; txn_id: string; transactions?: { status?: string } | { status?: string }[] | null }) => {
+      if (!a.milestone_id || a.txn_id === txnId) return;
+      const t = Array.isArray(a.transactions) ? a.transactions[0] : a.transactions;
+      if (t?.status === 'Voided') return;
+      paidByMs[a.milestone_id] = (paidByMs[a.milestone_id] || 0) + num(a.allocated_amount);
+    });
+  }
+  let left = Math.round(amount * 100) / 100;
+  const parts: Array<{ project_id: string; order_type: string; order_ref: string; milestone_id: string; bill_id: string; allocated_amount: number }> = [];
+  for (const p of phases) {
+    if (left <= 0.5) break;
+    const unpaid = Math.max(0, (certByMs[p.milestone_id] || 0) - (paidByMs[p.milestone_id] || 0));
+    if (unpaid <= 0.5) continue;
+    const use = Math.round(Math.min(left, unpaid) * 100) / 100;
+    parts.push({ project_id: projectId ?? '', order_type: 'WO', order_ref: woId, milestone_id: p.milestone_id, bill_id: '', allocated_amount: use });
+    left = Math.round((left - use) * 100) / 100;
+  }
+  // Anything past the certified work is money paid ahead → one OPEN advance on the contract.
+  if (left > 0.5 || parts.length === 0) parts.push({ project_id: projectId ?? '', order_type: 'WO', order_ref: woId, milestone_id: '', bill_id: '', allocated_amount: left > 0.5 ? left : Math.round(amount * 100) / 100 });
+  const { data, error } = await supabase.rpc('set_txn_allocations', { p_txn_id: txnId, p_org_id: orgId, p_parts: parts });
+  const r = data as { success?: boolean; error?: string } | null;
+  if (error || !r?.success) throw new Error(r?.error || error?.message || 'Could not settle against the certified work');
+}
+
 // ── the contract page's own door: link an existing payment, then adjust it onto stages ─────────────
 
 /** The party's loose payments on this project that could be linked to this contract — the SAME reader
@@ -308,6 +371,7 @@ export type Selection =
   | { type: 'tag'; tag: PayableTag }
   | { type: 'phase'; woId: string; milestoneId: string | null; certify: boolean }
   | { type: 'advance_contract'; woId: string; projectId: string | null }
+  | { type: 'settle_certified'; woId: string; projectId: string | null }
   | { type: 'other' }
   | { type: 'skip' };
 
@@ -321,6 +385,7 @@ export async function applyAttribution(
   else if (sel.type === 'tag') await attributeTag(txnId, sel.tag);
   else if (sel.type === 'phase') await attributeToPhase(txnId, sel.woId, sel.milestoneId, true, sel.certify);
   else if (sel.type === 'advance_contract') await attributeAdvanceToContract(txnId, orgId, amount, sel.woId, sel.projectId);
+  else if (sel.type === 'settle_certified') await attributeToContractCertified(txnId, orgId, amount, sel.woId, sel.projectId);
   else if (sel.type === 'other') await attributeTag(txnId, 'other');
   // 'skip' → nothing
 }
