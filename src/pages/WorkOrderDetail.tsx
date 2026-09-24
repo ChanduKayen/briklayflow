@@ -19,6 +19,14 @@ import {
   sectionLabel, valueText, drawHeader, drawFooter, drawSignatures,
 } from '../lib/pdfHelpers';
 import { parseAmount } from '../lib/money';
+import { useIsMobile } from '../lib/useIsMobile';
+import ContractMobileDetail from '../components/work-orders/ContractMobileDetail';
+
+// Desktop keeps the full page below; mobile gets the contracts-mobile artifact port (same real data).
+export default function WorkOrderDetail({ session }: { session: Session }) {
+  const isMobile = useIsMobile();
+  return isMobile ? <ContractMobileDetail session={session} /> : <WorkOrderDetailDesktop session={session} />;
+}
 
 // A milestone counts as work-done when the site marks it complete/approved/paid; otherwise the
 // work-done estimate falls back to how much of it has been paid. Honest, from real status.
@@ -262,7 +270,7 @@ const CDX_CSS = `
 @media (prefers-reduced-motion:reduce){.cdx *{animation-duration:.01ms !important;transition-duration:.01ms !important}}
 `;
 
-export default function WorkOrderDetail({ session }: { session: Session }) {
+function WorkOrderDetailDesktop({ session }: { session: Session }) {
   const { woId } = useParams();
   const navigate = useNavigate();
   const location = useLocation();

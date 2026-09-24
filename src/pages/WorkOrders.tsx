@@ -1,8 +1,11 @@
-// Contracts list — the exact visual of the purchase-orders list. The real implementation lives in
-// the shared WOListSheet component (also usable by the per-project contracts list).
+// Contracts list. Desktop → the shared WOListSheet (mirrors the purchase-orders list). Mobile → the
+// contracts-mobile artifact port, wired to the same real work orders.
 import type { Session } from '@supabase/supabase-js';
 import WOListSheet from '../components/wo/WOListSheet';
+import ContractsMobile from '../components/work-orders/ContractsMobile';
+import { useIsMobile } from '../lib/useIsMobile';
 
 export default function WorkOrders(_props: { session: Session }) {
-  return <WOListSheet />;
+  const isMobile = useIsMobile();
+  return isMobile ? <ContractsMobile /> : <WOListSheet />;
 }

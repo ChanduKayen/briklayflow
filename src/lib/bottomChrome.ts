@@ -14,6 +14,7 @@
 export const ownsBottomBar = (pathname: string): boolean =>
   /\/new$/.test(pathname)
   || /^\/purchase-orders\/[^/]+$/.test(pathname)
+  || /^\/work-orders\/[^/]+$/.test(pathname)   // WO detail (mobile) has its own action bar — see ContractMobileDetail
   || /^\/ledger\/(?!new$|import$)[^/]+$/.test(pathname);
 
 /** Pages with their own primary create button, which the generic FAB would sit on top of. */
