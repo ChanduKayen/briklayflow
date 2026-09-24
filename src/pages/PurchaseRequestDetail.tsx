@@ -17,6 +17,8 @@ import { WhatsAppGlyph } from '../components/day-book/atoms';
 import { searchPayees } from '../lib/payeeSearch';
 import { scoreProjectName } from '../lib/projectSearch';
 import { NewPartyRow } from '../components/ResolvePopup';
+import { useIsMobile } from '../lib/useIsMobile';
+import PurchaseRequestMobileHost from '../components/procurement/PurchaseRequestMobileHost';
 
 interface PRItem { item_name: string; quantity: string; unit: string; note: string }
 interface PRRow {
@@ -99,6 +101,9 @@ function Resolve<T extends { id: string; name: string; sub?: string }>({
 
 export default function PurchaseRequestDetail({ session }: { session: Session }) {
   const { id } = useParams();
+  // On a phone the request has its own screen — the quote as it came in, what was read off it, and
+  // the two things it is still missing. This page is the desktop surface and is unchanged.
+  const isPhone = useIsMobile();
   const navigate = useNavigate();
   const orgId = useOrgId();
   const { data: profile } = useUserProfile(session.user.id);
@@ -221,6 +226,7 @@ export default function PurchaseRequestDetail({ session }: { session: Session })
     onError: (e) => setMsg((e as Error)?.message || 'Could not delete it'),
   });
 
+  if (isPhone && id) return <PurchaseRequestMobileHost id={id} session={session} />;
   if (isLoading) return <div className="prx"><style>{CSS}</style><div className="page"><div className="empty">Loading…</div></div></div>;
   if (!pr) return (
     <div className="prx"><style>{CSS}</style><div className="page">
