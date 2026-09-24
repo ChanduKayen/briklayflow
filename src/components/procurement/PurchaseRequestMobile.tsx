@@ -54,8 +54,9 @@ export interface PurchaseRequestMobileProps {
   onCreatePayee: (name: string) => void;
   /** project, supplier and the items as they now stand. Resolves when the write lands. */
   onSave: (out: { project: string; payee: string; items: PqrItem[] }) => Promise<void>;
-  onRequestQuotes: () => void;
-  onCreatePO: () => void;
+  /** promote to a quote request / a PO — resolves when it lands, REJECTS with a message we surface. */
+  onRequestQuotes: () => void | Promise<void>;
+  onCreatePO: () => void | Promise<void>;
   /** "Add a page" from the request's own menu — a second sheet of the same quote. Return a sentence
    *  and the page says it, for a host that has nowhere to put one yet. */
   onAddPage: () => string | void;
@@ -371,8 +372,17 @@ export default function PurchaseRequestMobile(p: PurchaseRequestMobileProps) {
       if (el.hasAttribute('data-draft')) { closePanel(); pRef.current.onBack(); return; }
       if (el.hasAttribute('data-photo')) { ($('#viewerImg') as HTMLImageElement).src = PHOTO; ($('#viewer') as HTMLElement).classList.add('on'); return; }
       if (el.id === 'viewerClose') { ($('#viewer') as HTMLElement).classList.remove('on'); return; }
-      if (el.hasAttribute('data-rfq')) { pRef.current.onRequestQuotes(); return; }
-      if (el.hasAttribute('data-po')) { pRef.current.onCreatePO(); return; }
+      if (el.hasAttribute('data-rfq') || el.hasAttribute('data-po')) {
+        const rfq = el.hasAttribute('data-rfq');
+        if (el.disabled) return;
+        el.disabled = true;
+        void (async () => {
+          try { await (rfq ? pRef.current.onRequestQuotes() : pRef.current.onCreatePO()); }
+          catch (err) { el.disabled = false; say((err as Error)?.message || 'Could not create it — try again'); }
+          // On success the host navigates away (this screen unmounts), so no re-enable is needed.
+        })();
+        return;
+      }
       if (el.hasAttribute('data-close')) { if (P && P.kind === 'item') { commitItem(); syncAll(); paintMain(); paintDock(); } closePanel(); return; }
       if (el.dataset.todo === 'project' || el.dataset.todo === 'payee') { openPick(el.dataset.todo); return; }
       if (el.dataset.item) { openItem(+el.dataset.item); return; }

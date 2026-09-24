@@ -206,8 +206,8 @@ export default function PurchaseRequestMobileHost({ id, session }: { id: string;
         payee: pr.stakeholders?.name || pr.vendor_raw || '',
         items: request.items,
       })}
-      onRequestQuotes={() => { void promote(true); }}
-      onCreatePO={() => { void promote(false); }}
+      onRequestQuotes={() => promote(true)}
+      onCreatePO={() => promote(false)}
       // Nothing reads a second sheet yet, so the page says so rather than pretending.
       onAddPage={() => 'Send the next sheet on WhatsApp and it lands here'}
     />

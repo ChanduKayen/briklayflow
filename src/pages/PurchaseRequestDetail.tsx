@@ -298,12 +298,16 @@ export default function PurchaseRequestDetail({ session }: { session: Session })
               {!alreadyPo && <button className="addrow" onClick={addItem}>+ Add item</button>}
             </div>
 
-            {!alreadyPo && canAct && (
+            {!alreadyPo && (
               <div className="actions">
+                {/* Anyone on the request can save their edits — a supervisor raises and edits requests. */}
                 <button className="ghost" disabled={!dirty || busy} onClick={() => save.mutate()}>{save.isPending ? 'Saving…' : 'Save'}</button>
                 <span className="sp" />
-                <button className="prim2" disabled={busy} onClick={() => create.mutate(true)}>Request quotes</button>
-                <button className="prim" disabled={busy} onClick={() => create.mutate(false)}>{create.isPending ? 'Creating…' : 'Create purchase order'}</button>
+                {/* Placing the order is the office's call — management / principal / accountant only. */}
+                {canAct && <>
+                  <button className="prim2" disabled={busy} onClick={() => create.mutate(true)}>Request quotes</button>
+                  <button className="prim" disabled={busy} onClick={() => create.mutate(false)}>{create.isPending ? 'Creating…' : 'Create purchase order'}</button>
+                </>}
               </div>
             )}
             {alreadyPo && <div className="actions"><button className="prim" onClick={() => navigate(`/purchase-orders/${pr.converted_po_id}`)}>Open purchase order {pr.converted_po_id}</button></div>}
