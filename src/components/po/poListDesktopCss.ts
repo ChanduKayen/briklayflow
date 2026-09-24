@@ -65,9 +65,15 @@ export const PO_LIST_DESKTOP_CSS = `
 .pox .need.ok b{color:var(--ink-2);font-weight:500}
 .pox .need b{font-weight:600;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:170px;display:inline-block;vertical-align:bottom}
 .pox .req .go{display:flex;gap:6px;justify-content:flex-end;min-width:0}
-.pox .req .btn{height:36px;padding:0 14px;white-space:nowrap;background:none;border-color:transparent;color:var(--ink);font-weight:600}
-.pox .req .btn.ink{background:none;color:var(--ink);border:1px solid var(--line-2)}
-.pox .req .btn.pri{background:var(--clay);border-color:var(--clay);color:#fff}
+.pox .req .btn{height:36px;padding:0 14px;white-space:nowrap;background:none;border-color:transparent;color:var(--ink);font-weight:600;transition:transform .12s var(--ease),filter .18s,background .2s,box-shadow .2s,opacity .18s}
+.pox .req .btn.ink{background:var(--paper);color:var(--ink);border:1px solid var(--line-2)}
+.pox .req .btn.pri{background:var(--clay);border-color:var(--clay);color:#fff;box-shadow:0 8px 16px -10px rgba(181,71,42,.9)}
+.pox .req .btn:hover:not(:disabled){filter:brightness(1.06)}
+.pox .req .btn.ink:hover:not(:disabled){background:var(--wash)}
+.pox .req .btn.pri:hover:not(:disabled){background:var(--clay-hi)}
+.pox .req .btn:active:not(:disabled){transform:scale(.96)}
+.pox .req .btn:disabled{opacity:.6;cursor:default;box-shadow:none}
+.pox .req .btn .spin{display:inline-block;width:13px;height:13px;margin-right:6px;border-radius:50%;border:2px solid currentColor;border-right-color:transparent;vertical-align:-2px;animation:poxSpin .7s linear infinite}
 .pox .inbox.clear{padding:0 16px}
 .pox .inbox.clear .hd{padding:13px 8px}
 .pox .inbox.clear .hd h2{color:var(--ink-3)}
@@ -206,7 +212,15 @@ export const PO_LIST_DESKTOP_CSS = `
 .pox-peek .addi:hover{border-color:var(--clay-hi);color:var(--clay-hi)}
 .pox-peek .pmsg{margin:12px 0 0;font-size:13px;color:var(--clay-hi)}
 .pox-peek .pfoot{display:flex;gap:8px;margin-top:24px;position:sticky;bottom:-26px;background:linear-gradient(180deg,rgba(21,16,12,0),var(--night) 40%);padding:14px 0 0}
-.pox-peek .pfoot .btn:disabled{opacity:.55;cursor:default}
+.pox-peek .pfoot .btn{transition:transform .12s var(--ease),filter .18s,background .2s,box-shadow .2s,opacity .18s;box-shadow:0 1px 0 rgba(0,0,0,.15)}
+.pox-peek .pfoot .btn:hover:not(:disabled){filter:brightness(1.12)}
+.pox-peek .pfoot .btn:active:not(:disabled){transform:scale(.97);filter:brightness(.98)}
+.pox-peek .pfoot .btn.pri{box-shadow:0 10px 22px -12px rgba(181,71,42,.9)}
+.pox-peek .pfoot .btn.pri:hover:not(:disabled){background:var(--clay-hi)}
+.pox-peek .pfoot .btn.ink{background:rgb(var(--cream));color:var(--night)}
+.pox-peek .pfoot .btn.ok{background:var(--sage);color:#fff;box-shadow:0 10px 22px -12px rgba(47,93,58,.9)}
+.pox-peek .pfoot .btn.ok svg{width:15px;height:15px;fill:none;stroke:#fff;stroke-width:3;stroke-linecap:round;stroke-linejoin:round;margin-right:7px}
+.pox-peek .pfoot .btn:disabled{opacity:.5;cursor:default;box-shadow:none}
 .pox-peek .pfoot .btn .spin{display:inline-block;width:14px;height:14px;margin-right:8px;border-radius:50%;border:2px solid currentColor;border-right-color:transparent;vertical-align:-2px;animation:poxSpin .7s linear infinite}
 @keyframes poxSpin{to{transform:rotate(360deg)}}
 .pox-peek .pfoot .btn{flex:1;height:48px;display:inline-flex;align-items:center;justify-content:center;gap:8px;border:0;background:rgba(var(--cream),.1);color:rgb(var(--cream));border-radius:16px;font-size:14px;font-weight:600}

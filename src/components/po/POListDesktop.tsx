@@ -249,7 +249,7 @@ function ReqRow({ r, canOrder, busy, onPhoto, onReview, onMake }: { r: PendingPR
       ))}</div>
       <div className="go">
         {ready(r) && canOrder
-          ? <><button type="button" className="btn pri" disabled={busy} onClick={onMake}>{busy ? 'Making…' : 'Make PO'}</button><button type="button" className="btn" onClick={onReview}>Review</button></>
+          ? <><button type="button" className="btn pri" disabled={busy} onClick={onMake}>{busy ? <><span className="spin" />Making…</> : 'Make PO'}</button><button type="button" className="btn ink" onClick={onReview}>Review</button></>
           : <button type="button" className="btn ink" onClick={onReview}>Review ›</button>}
       </div>
     </div>
@@ -321,6 +321,8 @@ function PeekEditor({ prId, orgId, projects, vendors, canOrder, creating, onClos
   const [dirty, setDirty] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [saying, setSaying] = useState(false);
+  const [saved, setSaved] = useState(false);                 // brief ✓ beat after a save
+  const [makingKind, setMakingKind] = useState<null | 'po' | 'rfq'>(null);
   const [said, setSaid] = useState('');
 
   useEffect(() => {
@@ -364,11 +366,11 @@ function PeekEditor({ prId, orgId, projects, vendors, canOrder, creating, onClos
       if (error) throw error;
     }
   };
-  const save = async () => { setSaying(true); setMsg(null); try { await persist(); setDirty(false); onSaved(); setMsg('Saved'); setTimeout(() => setMsg(null), 1600); } catch (e) { setMsg((e as Error).message || 'Could not save'); } finally { setSaying(false); } };
-  const create = async (asRfq: boolean) => { setMsg(null); try { if (dirty) await persist(); setDirty(false); onSaved(); onCreate(asRfq); } catch (e) { setMsg((e as Error).message || 'Could not create it'); } };
+  const save = async () => { setSaying(true); setMsg(null); try { await persist(); setDirty(false); onSaved(); setSaved(true); setTimeout(() => setSaved(false), 1600); } catch (e) { setMsg((e as Error).message || 'Could not save'); } finally { setSaying(false); } };
+  const create = async (asRfq: boolean) => { setMsg(null); setMakingKind(asRfq ? 'rfq' : 'po'); try { if (dirty) await persist(); setDirty(false); onSaved(); onCreate(asRfq); } catch (e) { setMakingKind(null); setMsg((e as Error).message || 'Could not create it'); } };
 
   const readyToOrder = !!siteId && !!vendorId;
-  const busy = saying || creating;
+  const busy = saying || !!makingKind || creating;
   const imageUrl = pr.data?.image_url as string | undefined;
 
   return (
@@ -419,11 +421,14 @@ function PeekEditor({ prId, orgId, projects, vendors, canOrder, creating, onClos
       <button type="button" className="addi" onClick={addItem}>+ Add item</button>
 
       {msg && <p className="pmsg">{msg}</p>}
+      {canOrder && !readyToOrder && <p className="pmsg" style={{ color: 'rgba(250,248,243,.5)' }}>Set the supplier and project to make an order.</p>}
       <div className="pfoot">
-        <button type="button" className={`btn${dirty ? ' ink' : ''}`} disabled={busy} onClick={save}>{saying ? <><span className="spin" />Saving…</> : dirty ? 'Save changes' : 'Save'}</button>
-        {canOrder && <>
-          <button type="button" className="btn" disabled={!readyToOrder || busy} onClick={() => create(true)}>Request quotes</button>
-          <button type="button" className="btn pri" disabled={!readyToOrder || busy} onClick={() => create(false)}>{creating ? <><span className="spin" />Creating…</> : 'Create PO'}</button>
+        <button type="button" className={`btn${saved ? ' ok' : dirty ? ' ink' : ''}`} disabled={busy} onClick={save}>
+          {saying ? <><span className="spin" />Saving…</> : saved ? <><Tick />Saved</> : dirty ? 'Save changes' : 'Save'}
+        </button>
+        {canOrder && readyToOrder && <>
+          <button type="button" className="btn" disabled={busy} onClick={() => create(true)}>{makingKind === 'rfq' ? <><span className="spin" />Requesting…</> : 'Request quotes'}</button>
+          <button type="button" className="btn pri" disabled={busy} onClick={() => create(false)}>{makingKind === 'po' ? <><span className="spin" />Creating…</> : 'Make PO'}</button>
         </>}
       </div>
     </>
