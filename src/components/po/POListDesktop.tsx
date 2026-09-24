@@ -5,15 +5,21 @@
 //   the WhatsApp INBOX = draft purchase_requests (Review → the request page, Make PO → promote RPC),
 //   the TABLE = live/fulfilled POs grouped by where each one is (send · sent · received · billed · paid),
 //   Send to vendor = the existing SendToVendorModal, a pending PO shows Approve (decide_purchase_order).
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../../lib/auth/AuthProvider';
+import { useOrgId } from '../../lib/auth/AuthProvider';
 import { useUserProfile } from '../../App';
+import { searchPayees } from '../../lib/payeeSearch';
+import { scoreProjectName } from '../../lib/projectSearch';
+import { createParty } from '../day-book/fileEntry';
 import SendToVendorModal from '../po-new-ui/SendToVendorModal';
 import { usePOListData, usePendingPRs, useOpenRfqs, type PORow, type PendingPR, type RfqRow } from './POListSheet';
 import { PO_LIST_DESKTOP_CSS } from './poListDesktopCss';
+
+type Opt = { id: string; name: string; sub?: string };
 
 const inr = (n: number) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');
 const D = (s: string | null) => (s ? new Date(s) : new Date(NaN));
@@ -50,6 +56,7 @@ const isLate = (p: PORow) => !p.recv && !!p.due && !isNaN(D(p.due).getTime()) &&
 export default function POListDesktop({ projectId }: { projectId?: string }) {
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const orgId = useOrgId();
   const { userId } = useAuth();
   const { data: profile } = useUserProfile(userId ?? '');
   const canApprove = profile?.role === 'management' || profile?.role === 'principal';
@@ -58,6 +65,15 @@ export default function POListDesktop({ projectId }: { projectId?: string }) {
   const { rows, isLoading } = usePOListData(projectId);
   const { data: pending = [] } = usePendingPRs(projectId);
   const { data: rfqs = [] } = useOpenRfqs(projectId);
+  // The org's projects + vendors — feed the peek's resolve fields.
+  const { data: projects = [] } = useQuery({
+    queryKey: ['pox_projects', orgId], enabled: !!orgId,
+    queryFn: async (): Promise<Opt[]> => ((await supabase.from('projects').select('project_id, name').eq('org_id', orgId).eq('status', 'Active').order('name')).data ?? []).map((p: any) => ({ id: p.project_id, name: p.name })),
+  });
+  const { data: vendors = [] } = useQuery({
+    queryKey: ['pox_vendors', orgId], enabled: !!orgId,
+    queryFn: async (): Promise<Opt[]> => ((await supabase.from('stakeholders').select('stakeholder_id, name, category').eq('org_id', orgId).eq('type', 'Vendor').is('merged_into', null).order('name')).data ?? []).map((v: any) => ({ id: v.stakeholder_id, name: v.name, sub: v.category || undefined })),
+  });
 
   const [tab, setTab] = useState<'active' | 'done' | 'quotes'>('active');
   const [q, setQ] = useState('');
@@ -88,20 +104,21 @@ export default function POListDesktop({ projectId }: { projectId?: string }) {
   });
 
   const makePO = useMutation({
-    mutationFn: async (prId: string) => {
+    mutationFn: async ({ prId, asRfq }: { prId: string; asRfq: boolean }) => {
       const { data, error } = await supabase.rpc('promote_purchase_request_to_po', { p_pr_id: prId, p_approver_id: userId });
       const r = data as { success?: boolean; error?: string; po_id?: string } | null;
       if (error || !r?.success || !r.po_id) throw new Error(r?.error || error?.message || 'Could not make the PO');
+      if (asRfq) await supabase.from('purchase_orders').update({ status: 'RFQ' }).eq('po_id', r.po_id);
       return r.po_id;
     },
-    onMutate: (id) => setBusyId(id),
+    onMutate: ({ prId }) => setBusyId(prId),
     onSettled: () => setBusyId(null),
-    onSuccess: (poId) => {
+    onSuccess: (poId, { asRfq }) => {
       qc.invalidateQueries({ queryKey: ['po_list_pending_prs'] });
       qc.invalidateQueries({ queryKey: ['po_list_sheet'] });
       setPeekId(null);
       navigate('/purchase-orders?status=draft', { replace: true });
-      navigate(`/purchase-orders/${poId}`, { state: { justCreated: true, createdKind: 'po' } });
+      navigate(`/purchase-orders/${poId}`, { state: { justCreated: true, createdKind: asRfq ? 'rfq' : 'po' } });
     },
     onError: (e) => say((e as Error).message),
   });
@@ -117,8 +134,6 @@ export default function POListDesktop({ projectId }: { projectId?: string }) {
   }), [rows, tab, ql]);
 
   const visibleRfqs = tab === 'quotes' ? rfqs.filter((r) => !ql || (r.site + ' ' + r.summary).toLowerCase().includes(ql)) : [];
-
-  const req = pending.find((r) => r.id === peekId) || null;
 
   return (
     <div className="pox">
@@ -144,7 +159,7 @@ export default function POListDesktop({ projectId }: { projectId?: string }) {
               : <><h2>Nothing waiting from WhatsApp</h2><span className="n">Requests your site sends on WhatsApp land here to review.</span></>}
           </div>
           {pending.map((r) => <ReqRow key={r.id} r={r} canOrder={canOrder} busy={busyId === r.id}
-            onPhoto={() => r.imageUrl && setViewer(r.imageUrl)} onReview={() => setPeekId(r.id)} onMake={() => makePO.mutate(r.id)} />)}
+            onPhoto={() => r.imageUrl && setViewer(r.imageUrl)} onReview={() => setPeekId(r.id)} onMake={() => makePO.mutate({ prId: r.id, asRfq: false })} />)}
         </section>
 
         {/* tools */}
@@ -189,12 +204,14 @@ export default function POListDesktop({ projectId }: { projectId?: string }) {
         </section>
       </div>
 
-      {/* side peek — a request, read */}
-      <div className={`pox-scrim${req ? ' on' : ''}`} onClick={() => setPeekId(null)} />
-      <aside className={`pox-peek${req ? ' on' : ''}`} aria-live="polite">
-        {req && <Peek r={req} canOrder={canOrder} busy={busyId === req.id}
-          onClose={() => setPeekId(null)} onPhoto={() => req.imageUrl && setViewer(req.imageUrl)}
-          onOpenReview={() => { setPeekId(null); navigate(`/purchase-orders/pr/${req.id}`); }} onMake={() => makePO.mutate(req.id)} />}
+      {/* side peek — a request, fully editable (the request page, in place) */}
+      <div className={`pox-scrim${peekId ? ' on' : ''}`} onClick={() => setPeekId(null)} />
+      <aside className={`pox-peek${peekId ? ' on' : ''}`} aria-live="polite">
+        {peekId && <PeekEditor key={peekId} prId={peekId} orgId={orgId ?? ''} projects={projects} vendors={vendors} canOrder={canOrder}
+          creating={busyId === peekId}
+          onClose={() => setPeekId(null)} onPhoto={(url) => setViewer(url)}
+          onSaved={() => { qc.invalidateQueries({ queryKey: ['po_list_pending_prs'] }); qc.invalidateQueries({ queryKey: ['po_list_sheet'] }); }}
+          onCreate={(asRfq) => makePO.mutate({ prId: peekId, asRfq })} />}
       </aside>
 
       <div className={`pox-viewer${viewer ? ' on' : ''}`} role="dialog" aria-modal="true" onClick={() => setViewer(null)}>{viewer && <img src={viewer} alt="The request photo" />}</div>
@@ -278,26 +295,166 @@ function RfqTr({ r, onOpen }: { r: RfqRow; onOpen: () => void }) {
 }
 
 // ── the side peek ──
-function Peek({ r, canOrder, busy, onClose, onPhoto, onOpenReview, onMake }: { r: PendingPR; canOrder: boolean; busy: boolean; onClose: () => void; onPhoto: () => void; onOpenReview: () => void; onMake: () => void }) {
+// ── the editable side peek — the request page, in place. No separate PR screen needed. ──
+interface EItem { rowId: string; name: string; qty: string; unit: string; w: string; h: string; brand: string; spec: string; note: string }
+
+function PeekEditor({ prId, orgId, projects, vendors, canOrder, creating, onClose, onPhoto, onSaved, onCreate }: {
+  prId: string; orgId: string; projects: Opt[]; vendors: Opt[]; canOrder: boolean; creating: boolean;
+  onClose: () => void; onPhoto: (url: string) => void; onSaved: () => void; onCreate: (asRfq: boolean) => void;
+}) {
+  const pr = useQuery({
+    queryKey: ['pox_pr', prId],
+    queryFn: async () => (await supabase.from('purchase_requests')
+      .select('id, org_id, image_url, title, site_id, site_raw, vendor_id, vendor_raw, sender_name, wa_message_id, created_at, projects(name), stakeholders(name), purchase_request_items(id, item_index, item_name, quantity, unit, note, width_mm, height_mm, brand, spec)')
+      .eq('id', prId).single()).data as any,
+  });
+
+  const [title, setTitle] = useState('');
+  const [siteId, setSiteId] = useState(''); const [siteText, setSiteText] = useState('');
+  const [vendorId, setVendorId] = useState(''); const [vendorText, setVendorText] = useState('');
+  const [items, setItems] = useState<EItem[]>([]);
+  const [dirty, setDirty] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [saying, setSaying] = useState(false);
+  const [said, setSaid] = useState('');
+
+  useEffect(() => {
+    const d = pr.data; if (!d) return;
+    setTitle(d.title || 'Materials request');
+    setSiteId(d.site_id || ''); setSiteText(d.projects?.name || d.site_raw || '');
+    setVendorId(d.vendor_id || ''); setVendorText(d.stakeholders?.name || d.vendor_raw || '');
+    setItems([...(d.purchase_request_items ?? [])].sort((a: any, b: any) => (a.item_index ?? 0) - (b.item_index ?? 0)).map((it: any) => ({
+      rowId: it.id, name: it.item_name || '', qty: it.quantity != null ? String(it.quantity) : '', unit: it.unit || '',
+      w: it.width_mm != null ? String(it.width_mm) : '', h: it.height_mm != null ? String(it.height_mm) : '', brand: it.brand || '', spec: it.spec || '', note: it.note || '',
+    })));
+    setDirty(false);
+    // The message it came in with — best-effort from the WhatsApp row.
+    if (d.wa_message_id) supabase.from('rough_entries').select('raw_text').eq('org_id', d.org_id).eq('wa_message_id', d.wa_message_id).limit(1)
+      .then(({ data }) => setSaid((data?.[0]?.raw_text as string) || ''));
+    else setSaid('');
+  }, [pr.data]);
+
+  const touch = () => setDirty(true);
+  const setItem = (i: number, patch: Partial<EItem>) => { setItems((p) => p.map((it, j) => (j === i ? { ...it, ...patch } : it))); touch(); };
+  const addItem = () => { setItems((p) => [...p, { rowId: '', name: '', qty: '', unit: '', w: '', h: '', brand: '', spec: '', note: '' }]); touch(); };
+  const delItem = (i: number) => { setItems((p) => p.filter((_, j) => j !== i)); touch(); };
+  const clean = items.filter((it) => it.name.trim());
+
+  const rankVendors = (q: string) => searchPayees(vendors as any[], q).slice(0, 7) as Opt[];
+  const rankProjects = (q: string) => { const n = q.trim().toLowerCase(); return (!n ? projects : projects.map((p) => ({ p, r: scoreProjectName(n, p.name) })).filter((x) => x.r >= 0.3 || x.p.name.toLowerCase().includes(n)).sort((a, b) => b.r - a.r).map((x) => x.p)).slice(0, 7); };
+
+  const persist = async () => {
+    await supabase.from('purchase_requests').update({
+      title: title.trim() || null,
+      site_id: siteId || null, site_raw: siteId ? null : (siteText.trim() || null),
+      vendor_id: vendorId || null, vendor_raw: vendorId ? null : (vendorText.trim() || null),
+    }).eq('id', prId);
+    await supabase.from('purchase_request_items').delete().eq('purchase_request_id', prId);
+    if (clean.length) {
+      const { error } = await supabase.from('purchase_request_items').insert(clean.map((it, i) => ({
+        purchase_request_id: prId, org_id: orgId, item_index: i, item_name: it.name.trim(),
+        quantity: it.qty.trim() ? Number(it.qty.replace(/[^\d.]/g, '')) || null : null, unit: it.unit.trim() || null, note: it.note.trim() || null,
+        width_mm: it.w.trim() ? Number(it.w) || null : null, height_mm: it.h.trim() ? Number(it.h) || null : null, brand: it.brand.trim() || null, spec: it.spec.trim() || null,
+      })));
+      if (error) throw error;
+    }
+  };
+  const save = async () => { setSaying(true); setMsg(null); try { await persist(); setDirty(false); onSaved(); setMsg('Saved'); setTimeout(() => setMsg(null), 1600); } catch (e) { setMsg((e as Error).message || 'Could not save'); } finally { setSaying(false); } };
+  const create = async (asRfq: boolean) => { setMsg(null); try { if (dirty) await persist(); setDirty(false); onSaved(); onCreate(asRfq); } catch (e) { setMsg((e as Error).message || 'Could not create it'); } };
+
+  const readyToOrder = !!siteId && !!vendorId;
+  const busy = saying || creating;
+  const imageUrl = pr.data?.image_url as string | undefined;
+
   return (
     <>
-      <div className="ph"><div className="t"><h2>{r.title}</h2><span><Wa style={{ width: 13, height: 13, fill: '#3DBB6C', verticalAlign: -2, marginRight: 6 }} />From <b style={{ color: 'rgb(250,248,243)' }}>{r.from}</b> · {r.when}</span></div>
-        <button type="button" className="x" aria-label="Close" onClick={onClose}><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18" /></svg></button></div>
-      <div className="came">
-        {r.pages ? <button type="button" className="paper" onClick={onPhoto}>{r.imageUrl && <img src={r.imageUrl} alt="" />}</button> : <div className="paper" style={{ background: 'none', boxShadow: 'none', border: '1.5px dashed rgba(250,248,243,.25)' }} />}
-        <div><div className="n">{r.items.length}<small>items read {r.pages ? 'from the photo' : 'from the message'}</small></div><p>{ready(r) ? 'Everything is here. One click makes the purchase order.' : 'Two things to add, then it can be ordered.'}</p></div>
+      <div className="ph">
+        <div className="t">
+          <input className="title-in" value={title} onChange={(e) => { setTitle(e.target.value); touch(); }} placeholder="Materials request" aria-label="Title" />
+          <span><Wa style={{ width: 13, height: 13, fill: '#3DBB6C', verticalAlign: -2, marginRight: 6 }} />From <b style={{ color: 'rgb(250,248,243)' }}>{pr.data?.sender_name || 'WhatsApp'}</b></span>
+        </div>
+        <button type="button" className="x" aria-label="Close" onClick={onClose}><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18" /></svg></button>
       </div>
-      {r.said && <div className="said">“{r.said}”</div>}
-      <h3>Still to add</h3>
-      {needsOf(r).map(([label, val]) => (
-        <div key={label} className={`prow${val ? ' ok' : ''}`}><span className="mk">{val ? <Tick /> : null}</span><span className="l">{label}</span><span className={`v${val ? '' : ' ask'}`}>{val || (label === 'Project' ? 'Which site is this for?' : 'Who gave this quote?')}</span></div>
+
+      {imageUrl && <div className="came">
+        <button type="button" className="paper" onClick={() => onPhoto(imageUrl)}><img src={imageUrl} alt="" /></button>
+        <div><div className="n">{clean.length}<small>items read from the photo</small></div><p>{readyToOrder ? 'Everything is here. Create the order below.' : 'Set the site and supplier, then order.'}</p></div>
+      </div>}
+      {said && <div className="said">“{said}”</div>}
+
+      <div className="two">
+        <DarkResolve label="Supplier" text={vendorText} id={vendorId} placeholder="Search a vendor" rank={rankVendors} createLabel="vendor" orgId={orgId}
+          onText={(v) => { setVendorText(v); setVendorId(''); touch(); }} onPick={(o) => { setVendorId(o.id); setVendorText(o.name); touch(); }}
+          onClear={() => { setVendorId(''); touch(); }} onCreated={(id, name) => { setVendorId(id); setVendorText(name); touch(); }}
+          hint="Not one of your vendors yet — pick one or add it" />
+        <DarkResolve label="Project" text={siteText} id={siteId} placeholder="Choose a site" rank={rankProjects}
+          onText={(v) => { setSiteText(v); setSiteId(''); touch(); }} onPick={(o) => { setSiteId(o.id); setSiteText(o.name); touch(); }}
+          onClear={() => { setSiteId(''); touch(); }} hint="No site matched — pick the right one" />
+      </div>
+
+      <div className="ihd"><h3 style={{ margin: 0 }}>Items <span style={{ color: 'rgba(250,248,243,.4)' }}>{clean.length}</span></h3></div>
+      {items.map((it, i) => (
+        <div className="iedit" key={i}>
+          <div className="iline">
+            <span className="no">{i + 1}</span>
+            <input value={it.name} onChange={(e) => setItem(i, { name: e.target.value })} placeholder="Material / description" />
+            <input className="mono" value={it.qty} onChange={(e) => setItem(i, { qty: e.target.value })} inputMode="decimal" placeholder="Qty" />
+            <input value={it.unit} onChange={(e) => setItem(i, { unit: e.target.value })} placeholder="Unit" />
+            <button type="button" className="rm" title="Remove" onClick={() => delItem(i)}>✕</button>
+          </div>
+          <div className="ispec">
+            <input className="mono" value={it.w} onChange={(e) => setItem(i, { w: e.target.value })} inputMode="decimal" placeholder="W mm" />
+            <input className="mono" value={it.h} onChange={(e) => setItem(i, { h: e.target.value })} inputMode="decimal" placeholder="H mm" />
+            <input value={it.brand} onChange={(e) => setItem(i, { brand: e.target.value })} placeholder="Brand" />
+            <input value={it.spec} onChange={(e) => setItem(i, { spec: e.target.value })} placeholder="Spec / code / system" />
+            <input value={it.note} onChange={(e) => setItem(i, { note: e.target.value })} placeholder="Note" />
+          </div>
+        </div>
       ))}
-      <h3>On the {r.pages ? 'quote' : 'message'}</h3>
-      {r.items.map((it, i) => <div className="irow" key={i}><span className="no">{i + 1}</span><span className="m"><b>{it.name || 'Item'}</b></span><em>{it.qty}</em></div>)}
+      <button type="button" className="addi" onClick={addItem}>+ Add item</button>
+
+      {msg && <p className="pmsg">{msg}</p>}
       <div className="pfoot">
-        <button type="button" className="btn" onClick={onOpenReview}>Open review</button>
-        {ready(r) && canOrder && <button type="button" className="btn pri" disabled={busy} onClick={onMake}>{busy ? 'Making…' : 'Make PO'}</button>}
+        <button type="button" className="btn" disabled={!dirty || busy} onClick={save}>{saying ? <><span className="spin" />Saving…</> : 'Save'}</button>
+        {canOrder && <>
+          <button type="button" className="btn" disabled={!readyToOrder || busy} onClick={() => create(true)}>Request quotes</button>
+          <button type="button" className="btn pri" disabled={!readyToOrder || busy} onClick={() => create(false)}>{creating ? <><span className="spin" />Creating…</> : 'Create PO'}</button>
+        </>}
       </div>
     </>
+  );
+}
+
+// A dark resolve field for the peek — input + ranked dropdown, ✓ when a real record is chosen, and (for
+// vendors) an inline "add" that creates the party. Mirrors the review card's resolve, on the dark card.
+function DarkResolve({ label, text, id, placeholder, rank, hint, createLabel, orgId, onText, onPick, onClear, onCreated }: {
+  label: string; text: string; id: string; placeholder: string; rank: (q: string) => Opt[]; hint?: string;
+  createLabel?: string; orgId?: string; onText: (v: string) => void; onPick: (o: Opt) => void; onClear: () => void; onCreated?: (id: string, name: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const boxRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { const h = (e: MouseEvent) => { if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false); }; document.addEventListener('mousedown', h); return () => document.removeEventListener('mousedown', h); }, []);
+  const hits = open && !id ? rank(text) : [];
+  const canAdd = !!createLabel && !id && !!text.trim() && !hits.some((h) => h.name.toLowerCase() === text.trim().toLowerCase());
+  const addNew = async () => {
+    if (!orgId || adding) return; setAdding(true);
+    try { const p = await createParty(text.trim(), 'Vendor', orgId); onCreated?.(p.id, text.trim()); setOpen(false); } catch { /* ignore */ } finally { setAdding(false); }
+  };
+  return (
+    <label className={`fld rz${id ? ' ok' : ''}`} ref={boxRef as any}>
+      <span>{label}</span>
+      <input className="in" value={text} placeholder={placeholder} onChange={(e) => { onText(e.target.value); setOpen(true); }} onFocus={() => setOpen(true)} />
+      {id
+        ? <button type="button" className="x" style={{ position: 'absolute', right: 6, bottom: 6, width: 30, height: 30, borderRadius: 8 }} title="Change" onClick={onClear}><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round"><path d="M6 6l12 12M18 6 6 18" /></svg></button>
+        : null}
+      {open && !id && (hits.length > 0 || canAdd) && (
+        <div className="rz-drop">
+          {hits.map((h) => <button key={h.id} type="button" className="rz-opt" onMouseDown={(e) => { e.preventDefault(); onPick(h); setOpen(false); }}>{h.name}{h.sub ? <small>{h.sub}</small> : null}</button>)}
+          {canAdd && <button type="button" className="rz-opt rz-add" onMouseDown={(e) => { e.preventDefault(); void addNew(); }}>{adding ? 'Adding…' : `+ Add “${text.trim()}” as a new ${createLabel}`}</button>}
+        </div>
+      )}
+      {!id && text.trim() && hint && <em className="rz-hint">{hint}</em>}
+    </label>
   );
 }
