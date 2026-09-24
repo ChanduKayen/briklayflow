@@ -20,7 +20,7 @@ export const PQR_CSS = `
    NO transform on this root, deliberately: either would open a stacking context and trap the
    children, and the reference relies on them competing globally - the quote viewer (60) and the
    toast (70) rise OVER the nav bar, while the card (18) and the dock (19) tuck under it. */
-.pqr{position:fixed;top:0;bottom:0;left:0;right:0;width:100%;max-width:430px;margin:0 auto;
+.pqr{position:fixed;top:0;bottom:0;left:0;right:0;width:100%;max-width:100%;margin:0 auto;
   overflow:hidden;background:var(--ground);color:var(--ink);font-family:var(--sans);font-size:16px;line-height:1.4;
   -webkit-font-smoothing:antialiased;-webkit-tap-highlight-color:transparent}
 /* While an item card is up the whole screen steps back: inset 16px, rounded, on paper. In the

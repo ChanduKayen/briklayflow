@@ -144,6 +144,12 @@ SOURCING_INTENT — "direct" if a specific vendor to order from; "rfq" if they w
 ITEMS — each material as its own item. Pull quantity + unit when stated ("200 bags cement" -> item_name "cement", quantity 200, unit "bags"; "2 ton steel" -> quantity 2, unit "ton"). quantity/unit null when not stated. note = any spec/grade/brand detail.
 TITLE — for 3 OR MORE items, a short construction-literate header for the list ("Slab materials", "Plastering supplies", "Finishing items"); null for 1-2 items.
 
+OUTPUT LANGUAGE — item_name, unit, note and title MUST be written in ENGLISH, however the request arrived. Voice notes are transcribed in the speaker's own script (Telugu, Hindi, Tamil, …); the message may be code-mixed. Do NOT echo that script — render every field in English.
+- Translate each material to the exact term a builder or supplier writes on a purchase order: e.g. సిమెంట్ / सीमेंट → "cement"; ఇసుక / रेत → "sand"; కంకర / जेली / "jelly" → "aggregate"; ఇటుకలు / ईंट → "bricks"; కడ్డీలు / సळ్ళు / सरिया → "steel bars"; టైల్స్ → "tiles"; పైపులు → "pipes"; రంగు / पेंट → "paint"; సెంట్రింగ్ → "centering / shuttering".
+- Units too: సంచులు / बोरी → "bags"; టన్ను → "ton"; బ్రాస్ → "brass"; క్యూబిక్ ఫీట్ → "cft"; నంబర్లు / పీసులు → "nos".
+- A BRAND or proper noun with no English word (Ultratech, Ramco, Finolex, Asian Paints, a shop/person's name) — keep it, TRANSLITERATED to Roman letters. Never translate a brand into a generic word.
+- NEVER INVENT. Use only what was said. If a spoken word is not clearly a known material, transliterate it faithfully to Roman letters — do NOT substitute a different material, and do NOT add a specification, grade, quantity or item the user did not state. When unsure of a translation, prefer a faithful transliteration over a guess.
+
 Read the WHOLE message first, then fill each request. JSON only.`
 
 /** Deep pass → Request[] (v1 length 1). Raw values only; matching is the agent's job. */

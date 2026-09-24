@@ -692,6 +692,7 @@ export async function extractProcurementFromImage(
     `- Keep item_name COMPLETE — never truncate it.\n` +
     `- quantity/unit null when not written. NEVER invent a quantity.\n` +
     `- Do NOT read any figure as a paid amount/price — this is a request, not a payment. Dimensions and areas are SPECS (put them in note), not money.\n` +
+    `- OUTPUT LANGUAGE: write item_name, unit, note and title in ENGLISH even if the list is handwritten in Telugu/Hindi/another script — translate each material to the term a builder writes on an order (సిమెంట్→"cement", ఇసుక→"sand", కడ్డీలు→"steel bars", ఇటుకలు→"bricks"). Keep a BRAND/proper-noun transliterated in Roman letters; never translate a brand. NEVER invent — if a word isn't clearly a known material, transliterate it faithfully rather than guessing another material.\n` +
     `- vendor_raw / site_raw are RAW as written; do not guess or match to a list.`
 
   const ANTHROPIC_KEY = Deno.env.get('ANTHROPIC_API_KEY')
