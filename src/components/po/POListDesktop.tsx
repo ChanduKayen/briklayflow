@@ -248,10 +248,11 @@ function ReqRow({ r, canOrder, busy, onPhoto, onReview, onMake }: { r: PendingPR
   const shown = names.slice(0, 2).join(', ');
   const more = names.length - 2;
   const itemsLine = shown ? shown + (more > 0 ? ` +${more}` : '') : (r.title || 'Materials request');
+  const stop = (fn: () => void) => (e: React.MouseEvent) => { e.stopPropagation(); fn(); };
   return (
-    <div className="req">
+    <div className="req" role="button" tabIndex={0} onClick={onReview} onKeyDown={(e) => { if (e.key === 'Enter') onReview(); }}>
       {r.pages
-        ? <button type="button" className="paper" aria-label="See the photo" onClick={onPhoto}>{r.imageUrl && <img src={r.imageUrl} alt="" />}<span className="pg">{r.pages} page</span></button>
+        ? <button type="button" className="paper" aria-label="See the photo" onClick={stop(onPhoto)}>{r.imageUrl && <img src={r.imageUrl} alt="" />}<span className="pg">{r.pages} page</span></button>
         : <div className="paper" style={{ background: 'none', boxShadow: 'none', border: '1.5px dashed var(--line-2)', cursor: 'default' }} />}
       <div className="what"><b>{itemsLine}</b><span>{r.items.length} {r.items.length === 1 ? 'item' : 'items'} read {r.pages ? 'from the photo' : 'from the message'}</span>{r.said && <i title={r.said}>“{r.said}”</i>}</div>
       <div className="who"><span className="av">{initials(r.from)}</span><div>{r.from}<span>{r.when}</span></div></div>
@@ -261,8 +262,8 @@ function ReqRow({ r, canOrder, busy, onPhoto, onReview, onMake }: { r: PendingPR
       ))}</div>
       <div className="go">
         {ready(r) && canOrder
-          ? <><button type="button" className="btn pri" disabled={busy} onClick={onMake}>{busy ? <><span className="spin" />Making…</> : 'Make PO'}</button><button type="button" className="btn ink" onClick={onReview}>Review</button></>
-          : <button type="button" className="btn ink" onClick={onReview}>Review ›</button>}
+          ? <><button type="button" className="btn pri" disabled={busy} onClick={stop(onMake)}>{busy ? <><span className="spin" />Making…</> : 'Make PO'}</button><button type="button" className="btn ink" onClick={stop(onReview)}>Review</button></>
+          : <button type="button" className="btn ink" onClick={stop(onReview)}>Review ›</button>}
       </div>
     </div>
   );

@@ -37,7 +37,7 @@ export const PO_LIST_DESKTOP_CSS = `
 .pox .inbox .hd h2{margin:0;font-family:var(--sans);font-weight:600;font-size:12.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3)}
 .pox .inbox .hd h2 b{font-family:var(--mono);font-weight:500;color:var(--ink-2);margin-left:6px;letter-spacing:0}
 .pox .inbox .hd .n{margin-left:auto;font-size:12.5px;color:var(--ink-3)}
-.pox .req{display:grid;grid-template-columns:72px 1.4fr 1.1fr .9fr 1.3fr 190px;gap:20px;align-items:center;padding:14px 8px;border-top:1px dashed var(--line-2);border-radius:14px;color:var(--ink-2);transition:background .2s,transform .5s var(--ease),opacity .4s}
+.pox .req{display:grid;grid-template-columns:72px 1.4fr 1.1fr .9fr 1.3fr 190px;gap:20px;align-items:center;padding:14px 8px;border-top:1px dashed var(--line-2);border-radius:14px;color:var(--ink-2);cursor:pointer;transition:background .2s,transform .5s var(--ease),opacity .4s}
 .pox .req:first-of-type{border-top:0}
 .pox .req:hover{background:rgba(255,255,255,.55)}
 .pox .req.filing{opacity:0;transform:translateY(60px) scale(.98)}
