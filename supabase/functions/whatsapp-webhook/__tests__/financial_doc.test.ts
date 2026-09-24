@@ -45,25 +45,36 @@ suite('financial-doc decision — an invoice, was it paid?', () => {
   })
 })
 
-suite('financial-doc — caption fusion (paid amount is in the caption, not the image)', () => {
-  test('an invoice + caption "paid 10000" → payment folded in → BILL_AND_PAYMENT ₹10000', () => {
-    const fused = fuseCaptionPayment(read({ payment_occurred: null, paid_amount: null }), { amount: 10000, direction: 'out', mode: 'cash' })
+suite('financial-doc — caption fusion (the paid amount is the BILL, not a stray caption number)', () => {
+  test('caption EXPLICITLY states the paid amount ("paid 10000") → that amount stands (partial payment)', () => {
+    const fused = fuseCaptionPayment(read({ payment_occurred: null, paid_amount: null }), { amount: 10000, direction: 'out', mode: 'cash' }, 'paid 10000')
     expect(fused.payment_occurred).toBe(true)
     expect(fused.paid_amount).toBe(10000)
     const a = decideFinancialAction(fused)
-    expect(a.kind).toBe('BILL_AND_PAYMENT')
     expect(a.kind === 'BILL_AND_PAYMENT' ? a.paidAmount : -1).toBe(10000)
   })
+  test('THE FIX: a paid signal with a STRAY caption number → the BILL TOTAL, not the stray number', () => {
+    // "12mm rod" parses to amount 12, direction out — a signal, but NOT an explicit paid amount.
+    const fused = fuseCaptionPayment(read({ payment_occurred: null, paid_amount: null }), { amount: 12, direction: 'out', mode: null }, 'asm site 12mm rod, paid')
+    expect(fused.payment_occurred).toBe(true)
+    expect(fused.paid_amount).toBe(50000)   // the bill total, never the caption's 12
+  })
+  test('a bare "paid" (verb, no amount) with a bill → the BILL TOTAL', () => {
+    const fused = fuseCaptionPayment(read({ payment_occurred: null, paid_amount: null }), { amount: null, direction: null, mode: 'cash' }, 'paid')
+    expect(fused.paid_amount).toBe(50000)
+  })
   test('vision already read the payment → caption does NOT override it', () => {
-    const fused = fuseCaptionPayment(read({ payment_occurred: true, paid_amount: 20000 }), { amount: 10000, direction: 'out', mode: null })
+    const fused = fuseCaptionPayment(read({ payment_occurred: true, paid_amount: 20000 }), { amount: 10000, direction: 'out', mode: null }, 'paid 10000')
     expect(fused.paid_amount).toBe(20000)
   })
-  test('a received / "to pay" caption is NOT a payment (direction in, or no amount) → unchanged', () => {
-    expect(fuseCaptionPayment(read({ payment_occurred: null }), { amount: 10000, direction: 'in', mode: null }).payment_occurred).toBeNull()
-    expect(fuseCaptionPayment(read({ payment_occurred: null }), { amount: null, direction: 'out', mode: null }).payment_occurred).toBeNull()
+  test('a received / "to pay" caption is NOT a payment (direction in) → unchanged', () => {
+    expect(fuseCaptionPayment(read({ payment_occurred: null }), { amount: 10000, direction: 'in', mode: null }, 'to pay 10000').payment_occurred).toBeNull()
+  })
+  test('no paid signal at all (no verb, no outgoing amount) → unchanged, it will ASK', () => {
+    expect(fuseCaptionPayment(read({ payment_occurred: null }), { amount: null, direction: null, mode: null }, 'asm site').payment_occurred).toBeNull()
   })
   test('no invoice → caption fusion never invents a bill', () => {
-    const fused = fuseCaptionPayment(read({ document_kind: 'payment_proof', payment_occurred: null }), { amount: 10000, direction: 'out', mode: null })
+    const fused = fuseCaptionPayment(read({ document_kind: 'payment_proof', payment_occurred: null }), { amount: 10000, direction: 'out', mode: null }, 'paid 10000')
     expect(decideFinancialAction(fused).kind).toBe('PAYMENT_ONLY')
   })
 })

@@ -681,7 +681,7 @@ export async function runTransactionMessage(ctx: TxnCtx, text: string, opts: { p
     const invoiceish = read.document_kind === 'invoice' || read.document_kind === 'both'
     if (caption && invoiceish && !(read.payment_occurred === true && (read.paid_amount ?? 0) > 0)) {
       const cap = await extractTransaction(caption, projectNames)
-      read = fuseCaptionPayment(read, { amount: cap.amount, direction: cap.direction, mode: cap.mode })
+      read = fuseCaptionPayment(read, { amount: cap.amount, direction: cap.direction, mode: cap.mode }, caption)
     }
     const action = decideFinancialAction(read)
     console.log('[trace] fin-doc', JSON.stringify({ kind: read.document_kind, paid: read.payment_occurred, paidAmt: read.paid_amount, action: action.kind, vendor: read.vendor, total: read.bill_total }))

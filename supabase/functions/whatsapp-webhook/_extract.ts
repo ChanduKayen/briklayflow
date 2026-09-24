@@ -458,11 +458,13 @@ payment_occurred — did money ACTUALLY move? Decide from meaning, not words:
 - null  = you genuinely cannot tell whether it was paid.
 Do NOT assume an invoice was paid just because it has a total. An amount owed is not an amount paid.
 
-THE CAPTION IS A SOURCE OF PAYMENT TRUTH, NOT JUST THE IMAGE. Very often the invoice is in the image and
-the payment is stated only in the caption ("paid 10000", "10k paid", "పెయిడ్ 10000"). In that case the
-document is still an INVOICE (document_kind stays "invoice" or "both"), payment_occurred is true, and
-paid_amount is the amount the CAPTION states was paid — read it from the caption even though the image
-shows no payment. Do not downgrade such an image to "payment_proof": it is a paid invoice.
+THE CAPTION CAN CONFIRM A PAYMENT — BUT ONLY AN EXPLICIT ONE SETS THE AMOUNT. If the caption clearly states
+a paid amount ("paid 10000", "10k paid", "పెయిడ్ 10000"), set payment_occurred true and paid_amount to THAT
+amount. If the caption only signals that a payment happened WITHOUT a clear amount ("paid", "cleared",
+"done", "పెయిడ్"), set payment_occurred true and leave paid_amount NULL — the bill total is used downstream.
+NEVER read a stray number in the caption — a quantity, size, item count, phone number, vehicle number or
+date ("12mm rod", "20 bags", "site 3", "gate 2") — as the paid amount. The document is still an INVOICE
+either way (document_kind "invoice"/"both"); do not downgrade it to "payment_proof".
 
 BILL FIELDS (fill from the invoice; null when absent):
 - vendor: the vendor/company name exactly as printed. bill_no: the invoice/bill number. bill_date: ISO yyyy-mm-dd if you can parse the printed date. bill_total: the grand total payable, a number.
