@@ -49,6 +49,35 @@ function whenOf(iso: string): string {
 }
 const str = (v: unknown) => (v == null || v === '' ? '' : String(v));
 
+/* A fast, calm skeleton so the phone screen never flashes blank while the request loads — the shape of
+ * what's coming: the quote thumbnail, what was read, and a few item rows. */
+function PqrSkeleton() {
+  const bar = { display: 'block', borderRadius: 8, background: 'linear-gradient(100deg,#EAE1D2 30%,#F4EEE3 50%,#EAE1D2 70%)', backgroundSize: '200% 100%', animation: 'pqrSk 1.15s ease-in-out infinite' } as React.CSSProperties;
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: '#F6F1E9', padding: 'calc(16px + env(safe-area-inset-top)) 18px 18px', overflow: 'hidden' }}>
+      <style>{'@keyframes pqrSk{from{background-position:200% 0}to{background-position:-200% 0}}'}</style>
+      <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
+        <span style={{ ...bar, width: 70, height: 92, borderRadius: 7, flex: 'none' }} />
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 10, paddingTop: 4 }}>
+          <span style={{ ...bar, width: '55%', height: 13 }} />
+          <span style={{ ...bar, width: '80%', height: 11 }} />
+          <span style={{ ...bar, width: '70%', height: 11 }} />
+        </div>
+      </div>
+      <span style={{ ...bar, width: 120, height: 12, margin: '30px 0 14px' }} />
+      {[0, 1, 2, 3].map((i) => (
+        <div key={i} style={{ display: 'flex', gap: 12, alignItems: 'center', padding: '14px 0', borderTop: '1px solid #EFE7DC' }}>
+          <span style={{ ...bar, width: 28, height: 28, borderRadius: 14, flex: 'none' }} />
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 7 }}>
+            <span style={{ ...bar, width: '60%', height: 12 }} />
+            <span style={{ ...bar, width: '35%', height: 9 }} />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function PurchaseRequestMobileHost({ id, session }: { id: string; session: Session }) {
   const navigate = useNavigate();
   const orgId = useOrgId();
@@ -146,7 +175,7 @@ export default function PurchaseRequestMobileHost({ id, session }: { id: string;
     };
   }, [pr, waQ.data]);
 
-  if (prQ.isLoading || !request || !pr) return null;
+  if (prQ.isLoading || !request || !pr) return <PqrSkeleton />;
 
   const projects = projQ.data ?? [];
   const payees = [...extraPayees, ...(payeeQ.data ?? [])];
@@ -186,7 +215,9 @@ export default function PurchaseRequestMobileHost({ id, session }: { id: string;
     const r = data as { success?: boolean; error?: string; po_id?: string } | null;
     if (error || !r?.success || !r.po_id) throw new Error(r?.error || error?.message || 'Could not create it');
     if (asRfq) await supabase.from('purchase_orders').update({ status: 'RFQ' }).eq('po_id', r.po_id);
-    navigate(`/purchase-orders/${r.po_id}`);
+    // Land on the order with a success beat; leave the list behind it so Back returns to the list.
+    navigate('/purchase-orders?status=draft', { replace: true });
+    navigate(`/purchase-orders/${r.po_id}`, { state: { justCreated: true, createdKind: asRfq ? 'rfq' : 'po' } });
   };
 
   return (

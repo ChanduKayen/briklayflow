@@ -471,12 +471,23 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
   const { poId }   = useParams<{ poId: string }>();
   const navigate   = useNavigate();
   const location   = useLocation();
-  const navState   = (location.state as { from?: string; projectId?: string; projectName?: string }) || {};
+  const navState   = (location.state as { from?: string; projectId?: string; projectName?: string; justCreated?: boolean; createdKind?: 'po' | 'rfq' }) || {};
   const qc         = useQueryClient();
   const { show: showSnackbar } = useSnackbar();
   const { data: profile } = useUserProfile(session.user.id);
   const orgId = useOrgId();
   const [deciding, setDeciding] = useState<'APPROVE' | 'SEND_BACK' | 'REJECT' | null>(null);
+
+  // Arrived here straight from creating this order (from a purchase request): celebrate + say so, once.
+  const celebratedRef = useRef(false);
+  useEffect(() => {
+    if (!navState.justCreated || celebratedRef.current) return;
+    celebratedRef.current = true;
+    fireCelebration();
+    showSnackbar(navState.createdKind === 'rfq' ? '✓ Quote request created' : '✓ Purchase order created', { type: 'default' });
+    // Clear the flag so a refresh / back-forward doesn't re-celebrate.
+    navigate(location.pathname, { replace: true, state: { from: navState.from, projectId: navState.projectId } });
+  }, []);   // eslint-disable-line react-hooks/exhaustive-deps
 
   const currentUserName: string = (profile as any)?.display_name || (profile as any)?.name || session.user.email || 'Unknown';
 

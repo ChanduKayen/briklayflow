@@ -212,7 +212,12 @@ export default function PurchaseRequestDetail({ session }: { session: Session })
       if (asRfq) await supabase.from('purchase_orders').update({ status: 'RFQ' }).eq('po_id', r.po_id);
       return r.po_id;
     },
-    onSuccess: (poId) => navigate(`/purchase-orders/${poId}`),
+    onSuccess: (poId, asRfq) => {
+      // Land on the new order with a success beat, and leave the LIST behind it so Back returns there
+      // (not to this now-converted request). replace drops the request; the push adds the order.
+      navigate('/purchase-orders?status=draft', { replace: true });
+      navigate(`/purchase-orders/${poId}`, { state: { justCreated: true, createdKind: asRfq ? 'rfq' : 'po' } });
+    },
     onError: (e) => setMsg((e as Error)?.message || 'Could not create it'),
   });
 
@@ -227,7 +232,19 @@ export default function PurchaseRequestDetail({ session }: { session: Session })
   });
 
   if (isPhone && id) return <PurchaseRequestMobileHost id={id} session={session} />;
-  if (isLoading) return <div className="prx"><style>{CSS}</style><div className="page"><div className="empty">Loading…</div></div></div>;
+  if (isLoading) return (
+    <div className="prx"><style>{CSS}</style><div className="page">
+      <div className="crumb"><span className="sk sk-t" style={{ width: 150 }} /></div>
+      <div className="head"><span className="sk sk-h1" /><div className="meta"><span className="sk sk-t" style={{ width: 90 }} /><span className="sk sk-t" style={{ width: 130 }} /></div></div>
+      <div className="grid">
+        <div className="col">
+          <div className="card facts"><span className="sk sk-fld" /><span className="sk sk-fld" /></div>
+          <div className="card"><span className="sk sk-t" style={{ width: 70, marginBottom: 12 }} />{[0, 1, 2, 3].map((i) => <span key={i} className="sk sk-row" />)}</div>
+        </div>
+        <div className="col side"><span className="sk sk-t" style={{ width: 70, marginBottom: 10 }} /><span className="sk sk-photo" /></div>
+      </div>
+    </div></div>
+  );
   if (!pr) return (
     <div className="prx"><style>{CSS}</style><div className="page">
       <div className="crumb"><a onClick={() => navigate('/purchase-orders?status=draft')}>Purchase orders</a> › <b>Request</b></div>
@@ -411,6 +428,14 @@ const CSS = `
 .prx .side .photo img{display:block;width:100%;height:auto}
 .prx .empty{padding:36px 16px;text-align:center;color:var(--ink-3)}
 .prx .empty.sm{padding:18px;font-size:13px}
+.prx .sk{display:block;border-radius:8px;background:linear-gradient(100deg,var(--line-2) 30%,#F3ECE0 50%,var(--line-2) 70%);background-size:200% 100%;animation:prxShim 1.15s ease-in-out infinite}
+@keyframes prxShim{from{background-position:200% 0}to{background-position:-200% 0}}
+.prx .sk-t{height:12px}
+.prx .sk-h1{height:30px;width:60%;margin:2px 0 0;border-radius:9px}
+.prx .sk-fld{height:42px;margin-bottom:12px;border-radius:9px}
+.prx .sk-fld:last-child{margin-bottom:0}
+.prx .sk-row{height:38px;margin-bottom:8px;border-radius:8px}
+.prx .sk-photo{height:220px;border-radius:12px}
 @media (max-width:820px){
   .prx .page{padding:16px 16px 90px}
   .prx .grid{grid-template-columns:1fr}
