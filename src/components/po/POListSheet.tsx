@@ -7,17 +7,12 @@ import type React from 'react';
 import { useCallback, useEffect, useMemo, useState, useTransition } from 'react';
 import { poPayState } from '../../lib/poLifecycle';
 import { useSearch, useSearchScope } from '../search/searchScope';
-import SearchBar from '../search/SearchBar';
 import PartyFilterChip from '../search/PartyFilterChip';
-import { createPortal } from 'react-dom';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../../lib/supabase';
 import DragSheet from '../DragSheet';
-import { useUserProfile } from '../../App';
-import { useAuth } from '../../lib/auth/AuthProvider';
-import { useSnackbar } from '../Snackbar';
-import SendToVendorModal from '../po-new-ui/SendToVendorModal';
+import POListDesktop from './POListDesktop';
 import { WhatsAppGlyph } from '../day-book/atoms';
 import { useIsMobile } from '../../lib/useIsMobile';
 import { usePullToRefresh, useLiveCount } from '../../lib/usePullToRefresh';
@@ -297,8 +292,8 @@ const POLX_CSS = `
 .polx .m-chip::after,.polx .m-mast .ico::after{content:"";position:absolute;top:50%;left:50%;width:max(100%,44px);height:44px;transform:translate(-50%,-50%)}
 `;
 
-interface POItem { n: string; q: string; r: boolean }
-interface PORow {
+export interface POItem { n: string; q: string; r: boolean }
+export interface PORow {
   id: string; vendor: string; stakeholderId: string; vendorContact: string | null;
   site: string; by: string; ordered: string; createdAt: string; approvalStatus: string;
   items: POItem[]; value: number; billed: number; paid: number;
@@ -311,7 +306,7 @@ const D = (s: string | null) => (s ? new Date(s) : new Date(NaN));
 const dstr = (d: Date) => (isNaN(d.getTime()) ? '' : d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }));
 const days = (a: Date, b: Date) => Math.round((b.getTime() - a.getTime()) / 86400000);
 
-function usePOListData(projectId?: string) {
+export function usePOListData(projectId?: string) {
   const posQ = useQuery({
     queryKey: ['po_list_sheet', projectId ?? 'all'],
     queryFn: async () => {
@@ -469,31 +464,59 @@ function usePOListData(projectId?: string) {
   return { rows, isLoading: posQ.isLoading };
 }
 
-interface PendingPR { id: string; title: string | null; imageUrl: string | null; site: string; from: string; items: number; createdAt: string }
-/** Draft purchase requests (materials lists captured from WhatsApp, not yet promoted to a PO) — the
- *  review buffer shown as a strip atop the list, twin of the Day Book's "from WhatsApp" captures. */
-function usePendingPRs(projectId?: string) {
+export interface PendingPR {
+  id: string; title: string; imageUrl: string | null; pages: number;
+  site: string; supplier: string; from: string; when: string; said: string;
+  items: { name: string; qty: string }[];
+}
+/** "today, 9:41 am" · "yesterday, 5:12 pm" · "12 Sept, 8:03 am" — the reference's own phrasing. */
+function whenOf(iso: string): string {
+  const d = new Date(iso), now = new Date();
+  const day = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const gap = Math.round((day(now) - day(d)) / 864e5);
+  const time = d.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' }).toLowerCase();
+  const head = gap === 0 ? 'today' : gap === 1 ? 'yesterday' : d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+  return head + ', ' + time;
+}
+/** Draft purchase requests (materials lists captured from WhatsApp, not yet promoted to a PO) — the review
+ *  buffer shown as the "From WhatsApp" inbox atop the list. Rich enough for the desktop inbox cards:
+ *  items, the supplier + site we resolved, who sent it and when, and the message it came with. */
+export function usePendingPRs(projectId?: string) {
   return useQuery({
     queryKey: ['po_list_pending_prs', projectId ?? 'all'],
     queryFn: async (): Promise<PendingPR[]> => {
       let q = supabase.from('purchase_requests')
-        .select('id, title, image_url, site_id, sender_name, sender_number, created_at, projects(name), purchase_request_items(item_index)')
+        .select('id, title, image_url, site_id, site_raw, vendor_id, vendor_raw, sender_name, sender_number, wa_message_id, org_id, created_at, projects(name), stakeholders(name), purchase_request_items(item_index, item_name, quantity, unit)')
         .eq('status', 'draft').is('converted_po_id', null)
         .not('sender_number', 'is', null)   // WhatsApp-sourced drafts (the ones that need a review nudge)
         .order('created_at', { ascending: false });
       if (projectId) q = q.eq('site_id', projectId);
       const { data } = await q;
-      return (data ?? []).map((r: any) => ({
-        id: r.id, title: r.title, imageUrl: r.image_url,
-        site: r.projects?.name || '', from: r.sender_name || '',
-        items: (r.purchase_request_items ?? []).length, createdAt: r.created_at,
+      const rows = (data ?? []) as any[];
+      // The message the request came with lives on the WhatsApp row it was read from — fetch them in one go.
+      const wamids = rows.map((r) => r.wa_message_id).filter(Boolean);
+      const saidBy: Record<string, string> = {};
+      if (wamids.length) {
+        const { data: re } = await supabase.from('rough_entries').select('wa_message_id, raw_text').in('wa_message_id', wamids);
+        (re ?? []).forEach((x: any) => { if (x.wa_message_id && x.raw_text && !saidBy[x.wa_message_id]) saidBy[x.wa_message_id] = x.raw_text; });
+      }
+      return rows.map((r) => ({
+        id: r.id, title: r.title || 'Materials request', imageUrl: r.image_url, pages: r.image_url ? 1 : 0,
+        site: r.projects?.name || '',                       // a REAL site (site_id matched) counts as set
+        supplier: r.stakeholders?.name || '',               // a REAL vendor (vendor_id matched) counts as set
+        from: r.sender_name || 'WhatsApp',
+        when: whenOf(r.created_at),
+        said: (r.wa_message_id && saidBy[r.wa_message_id]) || '',
+        items: [...(r.purchase_request_items ?? [])]
+          .sort((a: any, b: any) => (a.item_index ?? 0) - (b.item_index ?? 0))
+          .map((it: any) => ({ name: it.item_name || '', qty: [it.quantity ?? '', it.unit || 'Nos'].filter((x) => x !== '').join(' ').trim() })),
       }));
     },
   });
 }
 
-interface RfqRow { rfq_id: string; created_at: string; site: string; summary: string; itemCount: number; sent: number; replied: number; best: number | null }
-function useOpenRfqs(projectId?: string) {
+export interface RfqRow { rfq_id: string; created_at: string; site: string; summary: string; itemCount: number; sent: number; replied: number; best: number | null }
+export function useOpenRfqs(projectId?: string) {
   return useQuery({
     queryKey: ['open_rfqs', projectId ?? 'all'],
     queryFn: async (): Promise<RfqRow[]> => {
@@ -530,27 +553,25 @@ function useOpenRfqs(projectId?: string) {
 
 export default function POListSheet({ projectId }: { projectId?: string }) {
   const navigate = useNavigate();
-  const { rows, isLoading } = usePOListData(projectId);
+  const { rows } = usePOListData(projectId);
   const { data: openRfqs = [] } = useOpenRfqs(projectId);
   const { data: pendingPRs = [] } = usePendingPRs(projectId);
   const [filter, setFilter] = useState<'all' | 'active' | 'fulfilled' | 'mine' | 'late' | 'open' | 'vendor' | 'done' | 'quotes' | 'approvals' | 'tosend' | 'onway' | 'live' | 'archive' | 'nobill' | 'topay' | 'atsite'>('active');
-  const [sortK, setSortK] = useState<'vendor' | 'site' | 'ordered' | 'delivery' | 'value' | 'balance'>('ordered');
-  const [sortDir, setSortDir] = useState(-1);
+  const [sortK] = useState<'vendor' | 'site' | 'ordered' | 'delivery' | 'value' | 'balance'>('ordered');
+  const [sortDir] = useState(-1);
   const [q, setQ] = useState('');
   const { openSearch } = useSearch();
   // ?party=<id> — arriving from the search's "Orders" row for one vendor. A filter, not a search:
   // it survives typing in the bar, and the chip says whose list this is.
   const [searchParams] = useSearchParams();
   const partyId = searchParams.get('party');
-  const [tip, setTip] = useState<{ id: string; pending: boolean; x: number; y: number } | null>(null);
   // The PO whose "Send PO to vendor" link was tapped — opens the send dialog over the list.
-  const [sendRow, setSendRow] = useState<PORow | null>(null);
   const isMobile = useIsMobile();
   // /purchase-orders/new is a lazily-loaded chunk, so between the tap and the form there is a
   // real wait. Inside a transition React keeps this list on screen and reports the wait through
   // isPending, so the button that was pressed is the thing that shows it is working — instead of
   // the tap seeming to do nothing and then the whole page being replaced by a skeleton.
-  const [opening, startOpening] = useTransition();
+  const [, startOpening] = useTransition();
   // Creating is reached from the nav bar's "+ PO" action (mobile) or the header button (desktop);
   // both land in the same chooser, so "Request quotes" keeps a way in.
   const openNewPO = (mode?: 'rfq') => startOpening(() => navigate(
@@ -567,68 +588,15 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
     return () => clearTimeout(t);
   }, [searchParams, setSp]);
 
-  // Approve a pending PO inline (management / principal). The RPC enforces SoD (a non-principal
-  // creator can't approve their own), so we surface its message rather than pre-hiding the button.
-  const { userId } = useAuth();
-  const { data: profile } = useUserProfile(userId ?? '');
-  const canApprove = profile?.role === 'management' || profile?.role === 'principal';
   const qc = useQueryClient();
   // Pull the list down on a phone to read the orders again.
   const { wrapRef: pullRef, view: pullView } = usePullToRefresh({
     enabled: isMobile, noun: 'order', count: useLiveCount(rows.length),
     onRefresh: () => qc.refetchQueries({ type: 'active' }),
   });
-  const { show } = useSnackbar();
-  const [approving, setApproving] = useState<string | null>(null);
-  const approve = async (poId: string) => {
-    setApproving(poId);
-    const { data, error } = await supabase.rpc('decide_purchase_order', { p_po_id: poId, p_action: 'APPROVE' });
-    setApproving(null);
-    const r = data as { success?: boolean; error?: string } | null;
-    if (error || !r?.success) {
-      show(r?.error === 'The creator of a PO cannot approve it' ? "You can't approve a PO you created — ask another approver." : (r?.error || error?.message || 'Could not approve'), { type: 'error' });
-      return;
-    }
-    show('Purchase order approved');
-    qc.invalidateQueries({ queryKey: ['po_list_sheet'] });
-  };
-
   const TODAY = useMemo(() => new Date(), []);
   const balance = (p: PORow) => (p.billed || p.value) - p.paid;
-  // Balance shown as a vendor-ledger position: owed to the vendor = Credit (they're a creditor);
-  // paid ahead of the bill = Debit (an advance). Signed = billed/value − paid.
-  const balCell = (p: PORow) => {
-    if (p.rfq || p.cancelled) return <span className="dim">—</span>;
-    const b = balance(p);
-    if (b > 0.5) return <span className="bal owe">{fmt(b)}<small>Cr</small></span>;
-    if (b < -0.5) return <span className="bal adv">{fmt(-b)}<small>Dr</small></span>;
-    // Settled: money actually moved AND nothing is left owed → the third green tick on a done row.
-    if (p.billed > 0.5 && p.paid > 0.5) return <span className="bal paid">✓ paid</span>;
-    return <span className="bal nil">—</span>;
-  };
-  // The Bill column: a link straight to the attached bill (its number + amount), or a quiet "not
-  // attached" when there is none. A first-class bill opens its own page; a legacy vendor bill (billed
-  // with no entity yet) opens the PO, where it lives.
-  const billCell = (p: PORow) => {
-    if (p.cancelled) return <span className="dim">—</span>;
-    const bs = p.bills;
-    if (bs.length === 1) {
-      const b = bs[0];
-      return <a className="billlink ok" title="Open the bill" onClick={(e) => { e.stopPropagation(); navigate(`/bills/${encodeURIComponent('bl~' + b.id)}`); }}>
-        ✓ {b.no ? `Bill ${b.no}` : 'Bill'}<small>{fmt(p.billed)}</small></a>;
-    }
-    if (bs.length > 1) {
-      return <a className="billlink ok" title="Open the PO to see its bills" onClick={(e) => { e.stopPropagation(); openPO(p.id); }}>
-        ✓ {bs.length} bills<small>{fmt(p.billed)}</small></a>;
-    }
-    if (p.billed > 0) {
-      return <a className="billlink ok" title="Open the PO to see its bill" onClick={(e) => { e.stopPropagation(); openPO(p.id); }}>
-        ✓ Bill<small>{fmt(p.billed)}</small></a>;
-    }
-    return <span className="nobill">Bill not attached</span>;
-  };
   const got = (p: PORow) => p.items.filter(i => i.r).length;
-  const pend = (p: PORow) => p.items.filter(i => !i.r);
   const full = (p: PORow) => !p.cancelled && !p.rfq && p.items.length > 0 && got(p) === p.items.length;
   const late = (p: PORow) => !p.cancelled && !full(p) && !!p.due && D(p.due) < TODAY;
   // full() is about GOODS only — every item at site. A purchase order is finished when the goods
@@ -690,32 +658,10 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
     ? openRfqs.filter(r => !q || ('quote request enquiry ' + r.site + ' ' + r.summary + ' ' + r.rfq_id).toLowerCase().includes(q))
     : [], [openRfqs, filter, q]);
   type MergedRow = { kind: 'po'; po: PORow } | { kind: 'rfq'; rfq: RfqRow };
-  const merged: MergedRow[] = useMemo(() => {
-    // Quotes = value-0 RFQ-style POs (in `list` via FILTERS.quotes) merged with open RFQ entities.
-    const rows: MergedRow[] = list.map(p => ({ kind: 'po' as const, po: p }));
-    if (rfqShown.length === 0) return rows;
-    // Slot each quote into the list by when it was created (real created_at, not
-    // the PO's issue date) so quotes appear in chronological place among the POs
-    // instead of all bunched at the top. POs keep their existing sort order.
-    const desc = !(sortK === 'ordered' && sortDir > 0);
-    const keyOf = (m: MergedRow) => D(m.kind === 'po' ? m.po.createdAt : m.rfq.created_at).getTime();
-    for (const r of rfqShown) {
-      const q: MergedRow = { kind: 'rfq', rfq: r };
-      const t = D(r.created_at).getTime();
-      let i = rows.findIndex(row => (desc ? keyOf(row) < t : keyOf(row) > t));
-      if (i < 0) i = rows.length;
-      rows.splice(i, 0, q);
-    }
-    return rows;
-  }, [list, rfqShown, filter, sortK, sortDir]);
-
   const live = useMemo(() => rows.filter(p => !p.cancelled && !p.rfq), [rows]);
-  const fLate = rows.filter(late).length;
-  const fMine = rows.filter(mine).length;
   const fOpen = live.filter(p => !full(p)).reduce((a, p) => a + p.value, 0);
   const fBal = live.reduce((a, p) => a + Math.max(0, balance(p)), 0);
   const cToSend = rows.filter(FILTERS.tosend).length;
-  const footTotal = list.reduce((a, p) => a + (p.cancelled ? 0 : p.value), 0);
 
   const openPO = useCallback((id: string) => navigate(`/purchase-orders/${id}`, { state: projectId ? { from: 'project', projectId } : { from: 'list' } }), [navigate, projectId]);
 
@@ -724,21 +670,6 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
     id: p.id, title: p.vendor, sub: `${p.id}${p.site ? ' · ' + p.site : ''}`,
     onPick: () => openPO(p.id),
   })), [list, openPO]), (v) => setQ(v.trim().toLowerCase()));
-  const onSort = (k: typeof sortK) => {
-    if (sortK === k) setSortDir(d => d * -1);
-    else { setSortK(k); setSortDir(k === 'ordered' || k === 'value' || k === 'balance' ? -1 : 1); }
-  };
-  const arr = (k: string) => sortK === k ? (sortDir < 0 ? '▼' : '▲') : '▲';
-
-  // No vendor date → nothing (the old "no date from vendor" only crammed the column). Callers append
-  // this after a "·" ONLY when it exists, so a dateless row just reads "to vendor · 8 Sept".
-  const dueLabel = (p: PORow): React.ReactNode => {
-    if (!p.due) return null;
-    const d = days(TODAY, D(p.due));
-    if (d < 0) return <b className="late">{-d} day{-d > 1 ? 's' : ''} late</b>;
-    if (d === 0) return <b className="due">due today</b>;
-    return <>due {dstr(D(p.due))}</>;
-  };
   // Plain-text delivery-date label (mobile cards, no markup).
   const dueLabelText = (p: PORow): string => {
     if (!p.due) return 'no date from vendor';
@@ -747,50 +678,6 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
     if (d === 0) return 'due today';
     return `vendor gave ${dstr(D(p.due))}`;
   };
-  const recvCell = (p: PORow): React.ReactNode => {
-    if (p.cancelled) return <span className="dim">—</span>;
-    const n = p.items.length, g = got(p), pl = pend(p);
-    const fully = n > 0 && g === n;
-    const tipProps = g > 0 && !fully
-      ? { onMouseEnter: (e: React.MouseEvent) => showTip(e, p.id, true), onMouseLeave: () => setTip(null) }
-      : {};
-
-    // The status line for this PO's delivery. The due label is appended only when a vendor date exists.
-    const due = dueLabel(p);
-    let status: React.ReactNode;
-    if (fully) status = <><span className="ok">✓ Received</span><small>{dstr(D(p.recv))}</small></>;
-    else if (g > 0) status = (
-      <>
-        <span className="partial"><i style={{ ['--w' as any]: `${g / n * 100}%` }} />{g} of {n} received</span>
-        <small>{pl.length === 1 ? pl[0].n + ' pending' : pl.length + ' pending'}{due && <> · {due}</>}</small>
-      </>
-    );
-    // Sent to the vendor (ordered, on its way) — wins over the "awaiting price" RFQ label.
-    else if (p.sent) status = <><span className="sent"><svg viewBox="0 0 24 24"><path d="M21 3L3 10.5l6 2.5 2.5 6L21 3z" /><path d="M9 13l3-3" /></svg>PO sent</span><small>to vendor · {dstr(D(p.sent))}{due && <> · {due}</>}</small></>;
-    else if (p.rfq) status = <span className="dim">Not ordered yet</span>;
-    else status = <><span className={late(p) ? 'late' : 'none'}>Not received</span><small>{n} item{n !== 1 ? 's' : ''}{due && <> · {due}</>}</small></>;
-
-    // Not yet sent and not delivered → a subtle, clearly-clickable way to send the PO to the vendor.
-    const canSend = !p.sent && !fully && !!p.stakeholderId;
-    return (
-      <div className="dlv" {...tipProps}>
-        {status}
-        {canSend && (
-          <button type="button" className="send-link" onClick={(e) => { e.stopPropagation(); setSendRow(p); }}>
-            <svg viewBox="0 0 24 24"><path d="M21 3L3 10.5l6 2.5 2.5 6L21 3z" /><path d="M9 13l3-3" /></svg>Send PO to vendor
-          </button>
-        )}
-      </div>
-    );
-  };
-
-  function showTip(e: React.MouseEvent, id: string, pending: boolean) {
-    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    setTip({ id, pending, x: Math.max(8, r.left - 14), y: r.bottom + 10 });
-  }
-
-  const tipRow = tip ? rows.find(r => r.id === tip.id) : null;
-
   // ---- Mobile card list (po-mobile.html) ----------------------------------
   if (isMobile) {
     // What is holding this order up, read from the money backwards: a bill you have not been
@@ -886,7 +773,7 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
             {pendingPRs.map((pr) => (
               <button key={pr.id} type="button" className="wd-row" onClick={() => navigate(`/purchase-orders/pr/${pr.id}`)}>
                 {pr.imageUrl ? <img className="wd-thumb" src={pr.imageUrl} alt="" /> : <span className="wd-thumb ph" aria-hidden="true">🧾</span>}
-                <span className="wd-t"><b>{pr.title || 'Materials request'}</b><small>{[pr.items ? `${pr.items} item${pr.items !== 1 ? 's' : ''}` : '', pr.site].filter(Boolean).join(' · ') || 'draft'}</small></span>
+                <span className="wd-t"><b>{pr.title || 'Materials request'}</b><small>{[pr.items.length ? `${pr.items.length} item${pr.items.length !== 1 ? 's' : ''}` : '', pr.site].filter(Boolean).join(' · ') || 'draft'}</small></span>
                 <span className="wd-go">›</span>
               </button>
             ))}
@@ -952,141 +839,5 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
     );
   }
 
-  return (
-    <div className="polx">
-      <style>{POLX_CSS}</style>
-      <div className="page">
-        <div className="top">
-          <h1>Purchase orders</h1>
-          <span className="count">{rows.length}</span>
-          <button className="btn ghost" style={{ marginLeft: 'auto' }} onClick={() => openNewPO('rfq')} disabled={opening}>
-            <svg viewBox="0 0 24 24"><path d="M3 8l9 6 9-6M3 6h18v12H3z" /></svg>
-            Request quotes
-          </button>
-          <button className={`btn${opening ? ' busy' : ''}`} onClick={() => openNewPO()} disabled={opening} aria-busy={opening}>
-            {opening ? <span className="m-spin" aria-hidden="true" /> : <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>}
-            New PO
-          </button>
-        </div>
-
-        <div className="figs">
-          <div className="terra" onClick={() => setFilter('late')}><small>Late</small><span className="mono">{fLate}</span><div className="sub">past the date the vendor gave</div></div>
-          <div className="gold" onClick={() => setFilter('mine')}><small>To receive</small><span className="mono">{fMine}</span><div className="sub">due or partly at site</div></div>
-          <div onClick={() => setFilter('open')}><small>In transit</small><span className="mono">{fmt(fOpen)}</span><div className="sub">ordered, not fully received</div></div>
-          <div className="sage" onClick={() => setFilter('all')}><small>Balance to vendors</small><span className="mono">{fmt(fBal)}</span><div className="sub">across live POs</div></div>
-        </div>
-
-        <div className="tools">
-          <SearchBar label="orders" />
-          <PartyFilterChip what="Orders" />
-          <div className="chips">
-            <button className={`chip${filter === 'active' ? ' on' : ''}`} onClick={() => setFilter('active')}>Active <span className="n">{rows.filter(FILTERS.active).length}</span></button>
-            <button className={`chip${filter === 'fulfilled' ? ' on' : ''}`} onClick={() => setFilter('fulfilled')}>Fulfilled <span className="n">{rows.filter(settled).length}</span></button>
-            <button className={`chip quote${filter === 'quotes' ? ' on' : ''}`} onClick={() => setFilter('quotes')}>Quotes <span className="n">{openRfqs.length + rows.filter(p => p.rfq).length}</span></button>
-          </div>
-        </div>
-
-        {pendingPRs.length > 0 && (
-          <div className="wadrafts">
-            <div className="wd-h"><WhatsAppGlyph size={13} color="#1FA855" /> From WhatsApp — draft requests to review <em>{pendingPRs.length}</em></div>
-            {pendingPRs.map((pr) => (
-              <button key={pr.id} type="button" className="wd-row" onClick={() => navigate(`/purchase-orders/pr/${pr.id}`)}>
-                {pr.imageUrl ? <img className="wd-thumb" src={pr.imageUrl} alt="" /> : <span className="wd-thumb ph" aria-hidden="true">🧾</span>}
-                <span className="wd-t"><b>{pr.title || 'Materials request'}</b><small>{[pr.items ? `${pr.items} item${pr.items !== 1 ? 's' : ''}` : '', pr.site, pr.from].filter(Boolean).join(' · ') || 'draft'}</small></span>
-                <span className="wd-go">Review ›</span>
-              </button>
-            ))}
-          </div>
-        )}
-
-        <div className="sheet">
-          <table>
-            <colgroup><col style={{ width: '17%' }} /><col style={{ width: '19%' }} /><col style={{ width: '12%' }} /><col style={{ width: '12%' }} /><col style={{ width: '16%' }} /><col style={{ width: '12%' }} /><col style={{ width: '12%' }} /></colgroup>
-            <thead><tr>
-              <th className={sortK === 'vendor' ? 'sorted' : ''} onClick={() => onSort('vendor')}>Vendor · PO<span className="arr">{arr('vendor')}</span></th>
-              <th style={{ cursor: 'default' }}>Items</th>
-              <th className={sortK === 'site' ? 'sorted' : ''} onClick={() => onSort('site')}>Site<span className="arr">{arr('site')}</span></th>
-              <th className={sortK === 'ordered' ? 'sorted' : ''} onClick={() => onSort('ordered')}>Ordered<span className="arr">{arr('ordered')}</span></th>
-              <th className={sortK === 'delivery' ? 'sorted' : ''} onClick={() => onSort('delivery')}>Delivery<span className="arr">{arr('delivery')}</span></th>
-              <th style={{ cursor: 'default' }}>Bill</th>
-              <th className={`num${sortK === 'balance' ? ' sorted' : ''}`} onClick={() => onSort('balance')} title="Owed to vendor = Credit · Advance = Debit">Balance<span className="arr">{arr('balance')}</span></th>
-            </tr></thead>
-            <tbody>
-              {isLoading ? (
-                <tr><td colSpan={7} className="empty">Loading…</td></tr>
-              ) : merged.length === 0 ? (
-                <tr><td colSpan={7} className="empty">Nothing here. {filter === 'quotes' ? 'No open quote requests.' : filter === 'mine' ? 'Nothing waiting on you — go build something.' : 'Try another filter.'}</td></tr>
-              ) : merged.map((row) => {
-                if (row.kind === 'rfq') {
-                  const r = row.rfq;
-                  const ref = 'ENQ-' + r.rfq_id.slice(0, 6).toUpperCase();
-                  const siteShort = r.site.replace(' Residence', '').replace("'s", '');
-                  return (
-                    <tr key={'rfq-' + r.rfq_id} className="rfq" tabIndex={0} onClick={() => navigate(`/rfq/${r.rfq_id}`)} onKeyDown={(e) => { if (e.key === 'Enter') navigate(`/rfq/${r.rfq_id}`); }}>
-                      <td className="po"><b>{r.sent} vendor{r.sent !== 1 ? 's' : ''} asked</b><span className="mono">{ref} · enquiry</span></td>
-                      <td><div className="items"><span className="t">{r.summary || `${r.itemCount} items`}</span></div></td>
-                      <td className="site" title={r.site}>{siteShort}</td>
-                      <td className="when">{dstr(D(r.created_at))}</td>
-                      <td><div className="dlv">
-                        {r.replied > 0
-                          ? <><span className="due">{r.replied} of {r.sent} quoted</span><small>{r.best != null ? `best ${fmt(r.best)} · ` : ''}tap to compare</small></>
-                          : <><span className="due">Awaiting quotes</span><small>{r.sent} vendor{r.sent !== 1 ? 's' : ''} asked · {dstr(D(r.created_at))}</small></>}
-                      </div></td>
-                      <td className="num"><span className="dim">—</span></td>
-                      <td className="num"><span className="dim">—</span></td>
-                    </tr>
-                  );
-                }
-                const p = row.po;
-                const shown = p.items.slice(0, 2).map(i => i.n).join(', ');
-                const rest = p.items.length - 2;
-                const siteShort = p.site.replace(' Residence', '').replace("'s", '');
-                const pend = p.approvalStatus === 'PENDING' && !p.cancelled;
-                return (
-                  <tr key={p.id} data-search-row={p.id} tabIndex={0} className={`${p.cancelled ? 'cancelled' : ''}${pend ? ' pending' : ''}`} onClick={() => openPO(p.id)} onKeyDown={(e) => { if (e.key === 'Enter') openPO(p.id); }}>
-                    <td className="po"><b>{p.vendor}</b><span className="mono">{p.id}</span>{pend && <span className="pend">Pending approval</span>}</td>
-                    <td><div className="items"><span className="t">{shown || <span className="dim">No items</span>}</span>{rest > 0 && <span className="more" onMouseEnter={(e) => showTip(e, p.id, false)} onMouseLeave={() => setTip(null)}>+{rest} item{rest > 1 ? 's' : ''}</span>}</div></td>
-                    <td className="site" title={p.site}>{siteShort}</td>
-                    <td className="when">{dstr(D(p.ordered))}<small>{p.by}</small></td>
-                    <td>{pend
-                      ? <div className="dlv"><span className="due">Awaiting approval</span>{canApprove
-                          ? <button type="button" className="approve-btn" disabled={approving === p.id} onClick={(e) => { e.stopPropagation(); approve(p.id); }}>{approving === p.id ? 'Approving…' : 'Approve'}</button>
-                          : <small>needs an approver</small>}</div>
-                      : recvCell(p)}</td>
-                    <td className="bill">{billCell(p)}</td>
-                    <td className="num">{balCell(p)}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-          <div className="foot">
-            <span>{list.length} purchase order{list.length !== 1 ? 's' : ''}{filter !== 'all' || q ? ' shown' : ''}</span>
-            <span>Showing total <span className="mono">{fmt(footTotal)}</span></span>
-          </div>
-        </div>
-      </div>
-
-      {tip && tipRow && createPortal(
-        <div className="polx"><div className="tip show" role="tooltip" style={{ left: tip.x, top: tip.y, opacity: 1, transform: 'none' }}>
-          <h4>{tip.pending ? `${got(tipRow)} of ${tipRow.items.length} received` : `${tipRow.items.length} items`}</h4>
-          <ul>{tipRow.items.map((i, k) => (<li key={k} className={i.r ? 'r' : 'p'}><span className="g" /><span className="nm">{i.n}</span><span className="q">{i.q}</span></li>))}</ul>
-        </div></div>,
-        document.body,
-      )}
-
-      {sendRow && (
-        <SendToVendorModal
-          open={!!sendRow}
-          poId={sendRow.id}
-          vendorId={sendRow.stakeholderId}
-          vendorName={sendRow.vendor}
-          vendorContact={sendRow.vendorContact}
-          projectName={sendRow.site}
-          totalLabel={sendRow.rfq || sendRow.value <= 0 ? undefined : fmt(sendRow.value)}
-          onClose={() => setSendRow(null)}
-        />
-      )}
-    </div>
-  );
+  return <POListDesktop projectId={projectId} />;
 }
