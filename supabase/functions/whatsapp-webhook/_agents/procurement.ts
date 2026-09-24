@@ -14,6 +14,7 @@ import { matchPayee, matchProject } from '../_match.ts'
 import { gateProcurement, extractProcurements, titleWithCount, type ProcRequest } from '../_proc_extract.ts'
 import { extractProcurementFromImage } from '../_extract.ts'
 import { signedMediaUrl, storeMedia } from '../_normalize.ts'
+import { recentInboundText } from './transaction.ts'   // reunite a photo with the site/vendor typed just before it
 import {
   mProcMultiGuard, buildSourcingPrompt, buildVendorList, mProcComplete,
   buildSelectVendorFlow, buildPickVendorsFlow, type FlowVendor,
@@ -171,8 +172,14 @@ export async function runProcurementMessage(
   //    create the draft directly. No sourcing question; the caption is only extra context. ──
   if (ctx.image) {
     const projNames = (await loadProjects(ctx)).map((p) => p.name)
+    // A supervisor often types the SITE + VENDOR as a separate message right before the photo
+    // ("Chakradhar site, pattabhi traders"). The photo carries no caption of its own, so reunite that
+    // preceding text as the photo's context — the SAME thing the transaction path does with a proof
+    // image — otherwise the request lands "vendor/site not set" despite both being given.
+    const prior = ctx.image.caption ? null : await recentInboundText(supabase, from, wamid)
+    const context = [ctx.image.caption, prior].map((s) => (s ?? '').trim()).filter(Boolean).join(' · ') || null
     const read = await extractProcurementFromImage(
-      ctx.image.base64, ctx.image.mime, ctx.image.caption || text || null, projNames,
+      ctx.image.base64, ctx.image.mime, context, projNames,
     )
     const items = read.items.length
       ? read.items
