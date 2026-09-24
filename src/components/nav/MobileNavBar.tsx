@@ -104,7 +104,7 @@ const FOOT: Dest[] = [
 const ACTION: Record<string, { word: string; to: string }> = {
   book: { word: 'Transaction', to: '/ledger/new' },
   bills: { word: 'Bill', to: '/bills?new=1' },
-  pos: { word: 'PO', to: '/purchase-orders?new=1' },
+  // POs: no create FAB — the purchase-request list is a review surface; orders are raised from a request.
   contracts: { word: 'Contract', to: '/work-orders/new' },
   parties: { word: 'Party', to: '/stakeholders?new=1' },
   clients: { word: 'Client', to: '/stakeholders?tab=client&new=1' },
