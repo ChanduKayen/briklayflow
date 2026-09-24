@@ -112,7 +112,7 @@ export { callClaude, callOpenAI }
 
 // ── Image classification ──────────────────────────────────────────────────────
 
-const VALID_IMAGE_TYPES = ['PAYMENT_PROOF', 'PAYMENT_LIST', 'SITE_UPDATE', 'UNKNOWN'] as const
+const VALID_IMAGE_TYPES = ['PAYMENT_PROOF', 'PAYMENT_LIST', 'PURCHASE_REQUEST', 'SITE_UPDATE', 'UNKNOWN'] as const
 const VALID_CONFIDENCE   = ['HIGH', 'LOW'] as const
 
 type ImageType       = typeof VALID_IMAGE_TYPES[number]
@@ -140,6 +140,12 @@ export async function classifyImage(
     if (/bill|receipt|payment|paid|invoice|upi|neft|transfer|voucher|challan/i.test(lower)) {
       return { type: 'PAYMENT_PROOF', confidence: 'LOW', description: caption }
     }
+    // Buy-intent (FUTURE order, not a past purchase) — a photographed to-buy list / quotation ask.
+    // Placed before the payment-list regex so "order these materials (list)" reads as a request, not a
+    // wage sheet. Past-tense buys ("bought", "konnam", "paid") are caught by the payment regex above.
+    if (/\b(order|buy|purchase|procure|arrange|quotation|quote|need|require|want|kavali|kaavali|kavaali|chahiye|mangao|mangwao)\b/i.test(lower)) {
+      return { type: 'PURCHASE_REQUEST', confidence: 'LOW', description: caption }
+    }
     if (/list|labour|worker|wages|register|sheet|multiple|payments|payroll/i.test(lower)) {
       return { type: 'PAYMENT_LIST', confidence: 'LOW', description: caption }
     }
@@ -154,9 +160,10 @@ export async function classifyImage(
   const prompt =
     `Classify this construction site image. Return ONLY valid JSON.\n` +
     (caption ? `User caption: "${caption}"\n` : '') +
-    `\n{"type":"PAYMENT_PROOF or PAYMENT_LIST or SITE_UPDATE or UNKNOWN","confidence":"HIGH or LOW","description":"one line of what you see"}\n\n` +
+    `\n{"type":"PAYMENT_PROOF or PAYMENT_LIST or PURCHASE_REQUEST or SITE_UPDATE or UNKNOWN","confidence":"HIGH or LOW","description":"one line of what you see"}\n\n` +
     `PAYMENT_PROOF: single payment receipt, UPI screenshot, bank transfer confirmation, cash receipt, single vendor bill or invoice.\n` +
     `PAYMENT_LIST: handwritten or printed list with multiple payments, labour wage register, multiple workers with amounts in rows.\n` +
+    `PURCHASE_REQUEST: a list of MATERIALS TO BUY / ORDER — a handwritten or typed shopping/materials list, an indent, a quotation request. Items with quantities/units but NO paid amounts, no UPI/UTR, no "paid" stamp. It is a request to procure, not evidence money moved. If it shows a paid amount or is a vendor's bill, it is PAYMENT_PROOF, not this.\n` +
     `SITE_UPDATE: construction site progress photo, building work in progress, material on site, workers, completed work area, any site photo.\n` +
     `UNKNOWN: personal photo, screenshot of something unrelated, selfie, unclear image.`
 

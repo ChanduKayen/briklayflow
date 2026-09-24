@@ -24,7 +24,7 @@ import { runBill, answerBillPayment } from './bill.ts'
 import { parseSpokenAmount } from '../_amount.ts'
 import { matchPayee, matchProject, distinctiveTokens, type Match } from '../_match.ts'
 import { send, renderToWhatsApp, type OutMessage } from '../_format.ts'
-import { signedMediaUrl, storeMedia } from '../_normalize.ts'
+import { signedMediaUrl, storeMedia, type ImageKind } from '../_normalize.ts'
 import { closeConversation, abandonConversation, type ConvoRow } from '../_conversation.ts'
 import { toLatinName } from '../_translit.ts'
 import { WriteCommitFailed } from '../_spine.ts'
@@ -86,7 +86,7 @@ export type TxnCtx = {
   flowResponse?: Record<string, unknown> | null   // decoded nfm_reply.response_json (WhatsApp Flow completion)
   // present for payment images -> vision extraction; storagePath is the ALREADY-stored object
   // (rough-entry-media) we link onto the entry as PROOF.
-  image?: { base64: string; mime: string; caption: string; description?: string | null; storagePath?: string | null }
+  image?: { base64: string; mime: string; caption: string; description?: string | null; kind?: ImageKind; storagePath?: string | null }
   audio?: { storagePath: string; mime: string }   // present for a VOICE note -> siteops records it as findable evidence (T7)
 }
 

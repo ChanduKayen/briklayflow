@@ -665,6 +665,63 @@ export async function extractPaymentFromImage(
 }
 
 /**
+ * Read a photographed MATERIALS-TO-BUY list (a purchase request) → its items + optional vendor/site.
+ * Mirrors extractPaymentFromImage. Raw values only — vendor/site are MATCHED later (like payee raw),
+ * never guessed here. Never invents a quantity; never reads a paid amount as a price (it's a request).
+ */
+export async function extractProcurementFromImage(
+  base64: string,
+  contentType: string,
+  userContext: string | null,
+  knownProjects: string[],
+): Promise<{ vendor_raw: string | null; site_raw: string | null; title: string | null; items: Array<{ item_name: string; quantity: number | null; unit: string | null; note: string | null }> }> {
+  const prompt =
+    `This is a construction-site PURCHASE REQUEST — a list of MATERIALS TO BUY / ORDER (an indent, materials/shopping list, or quotation ask). It is NOT a paid bill or a payment.\n` +
+    (userContext ? `User note: "${userContext}" — use as additional context.\n` : '') +
+    `Known projects: ${JSON.stringify(knownProjects)}\n\n` +
+    `Return ONLY valid JSON, no other text:\n` +
+    `{\n` +
+    `  "vendor_raw": "supplier/shop to order from, exactly as written, or null",\n` +
+    `  "site_raw": "the project/site — the EXACT known project name if it clearly matches one, else the raw words, else null",\n` +
+    `  "title": "short construction-literate header for 3+ items (e.g. Slab materials), else null",\n` +
+    `  "items": [ { "item_name": "cement", "quantity": 200, "unit": "bags", "note": "every spec/dimension/grade/brand for this line, or null" } ]\n` +
+    `}\n\n` +
+    `Rules:\n` +
+    `- Every material / line on the list is its OWN item. Pull quantity + unit when written ("200 bags cement" -> item_name "cement", quantity 200, unit "bags").\n` +
+    `- CAPTURE EVERY DETAIL — do not summarise. If the list is a TABLE with spec columns (size, glass/material type, code, system, width, height, area, colour, thickness, brand, grade, model, etc.), keep the primary Description as item_name, read the Qty column into quantity, and FOLD ALL OTHER COLUMNS for that row into note as a compact " · "-separated string in the row's own words — e.g. "8mm clear glass (1,2,3,4) · code NA · system BS 40 (SD1) · 5867×2515 mm · 158.83 sqft". Skip only empty cells. NEVER leave note null when the row has any spec.\n` +
+    `- Keep item_name COMPLETE — never truncate it.\n` +
+    `- quantity/unit null when not written. NEVER invent a quantity.\n` +
+    `- Do NOT read any figure as a paid amount/price — this is a request, not a payment. Dimensions and areas are SPECS (put them in note), not money.\n` +
+    `- vendor_raw / site_raw are RAW as written; do not guess or match to a list.`
+
+  const ANTHROPIC_KEY = Deno.env.get('ANTHROPIC_API_KEY')
+  const OPENAI_KEY    = Deno.env.get('OPENAI_API_KEY')
+  try {
+    let parsed: any = null
+    if (ANTHROPIC_KEY)   parsed = await extractImageAnthropic(base64, contentType, prompt, ANTHROPIC_KEY, 'claude-haiku-4-5-20251001', 2500)
+    else if (OPENAI_KEY) parsed = await extractImageOpenAI(base64, contentType, prompt, OPENAI_KEY, 'gpt-4o-mini', 2500)
+    return normProcImage(parsed)
+  } catch (e) {
+    console.error('[extract] extractProcurementFromImage error:', e)
+    return { vendor_raw: null, site_raw: null, title: null, items: [] }
+  }
+}
+
+function normProcImage(parsed: any): { vendor_raw: string | null; site_raw: string | null; title: string | null; items: Array<{ item_name: string; quantity: number | null; unit: string | null; note: string | null }> } {
+  const s = (v: any): string | null => (typeof v === 'string' && v.trim() ? v.trim() : null)
+  const num = (v: any): number | null => {
+    if (typeof v === 'number' && isFinite(v)) return v
+    if (typeof v === 'string') { const x = parseFloat(v.replace(/[^\d.]/g, '')); return isFinite(x) ? x : null }
+    return null
+  }
+  const rawItems = Array.isArray(parsed?.items) ? parsed.items : []
+  const items = rawItems
+    .map((it: any) => ({ item_name: s(it?.item_name), quantity: num(it?.quantity), unit: s(it?.unit), note: s(it?.note) }))
+    .filter((it: { item_name: string | null }) => !!it.item_name) as Array<{ item_name: string; quantity: number | null; unit: string | null; note: string | null }>
+  return { vendor_raw: s(parsed?.vendor_raw), site_raw: s(parsed?.site_raw), title: s(parsed?.title), items }
+}
+
+/**
  * Extract all payment rows from a handwritten or printed payment list image.
  */
 export async function extractPaymentListFromImage(

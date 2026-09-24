@@ -3,8 +3,11 @@
 
 import { sendWA, downloadAndStoreImage } from './_wa.ts'
 import { saveSession, clearSession, type WaSession } from './_session.ts'
-import { extractEntities, extractPaymentFromImage, extractPaymentListFromImage } from './_extract.ts'
+import { extractEntities, extractPaymentFromImage, extractPaymentListFromImage, extractProcurementFromImage } from './_extract.ts'
 import { classifyImage, classifyIntent } from './_classify.ts'
+import { scorePayeeRich, matchPayee as matchPayeeRich, matchProject } from './_match.ts'
+import { jevEnabled, jevMatchPayee } from './_jev.ts'
+import { APP_ORIGIN } from './_links.ts'
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
@@ -140,26 +143,58 @@ async function matchPayee(
 
   const { data: stakeholders } = await supabase
     .from('stakeholders')
-    .select('stakeholder_id, name, aliases')
+    .select('stakeholder_id, name, aliases, category, type')
     .limit(50)
 
   if (!stakeholders?.length) return null
 
+  // ── Conventional pick (behaviour unchanged — first match wins, in priority order) ──
+  let result: { id: string; name: string } | null = null
   // Priority 1: exact or strong contains match (name only — aliases NOT used)
   for (const s of stakeholders) {
     const full  = s.name.toLowerCase()
     const first = full.split(' ')[0]
-    if (full === lower) return { id: s.stakeholder_id, name: s.name }
-    if (full.includes(lower) || lower.includes(first)) return { id: s.stakeholder_id, name: s.name }
+    if (full === lower) { result = { id: s.stakeholder_id, name: s.name }; break }
+    if (full.includes(lower) || lower.includes(first)) { result = { id: s.stakeholder_id, name: s.name }; break }
   }
-
   // Priority 2: Levenshtein ≤ 2 on first name
-  for (const s of stakeholders) {
-    const first = s.name.toLowerCase().split(' ')[0]
-    if (levenshtein(lower, first) <= 2) return { id: s.stakeholder_id, name: s.name }
+  if (!result) {
+    for (const s of stakeholders) {
+      const first = s.name.toLowerCase().split(' ')[0]
+      if (levenshtein(lower, first) <= 2) { result = { id: s.stakeholder_id, name: s.name }; break }
+    }
   }
 
-  return null
+  // ── SHADOW: run Jev alongside and log how it compares. Fire-and-forget, guarded (default off), so
+  //    it never blocks or changes the live result. Flip JEV_ENABLED=1 (+ JEV_API_KEY) to observe. ──
+  shadowJevPayee(rawName, stakeholders, result)
+
+  return result
+}
+
+/** Jev shadow evaluation: shortlist the top few by the rich scorer, ask Jev to decide, and LOG the
+ *  agreement with the conventional pick. Never awaited, never throws onto the live path, writes
+ *  nothing — a pure observability probe to measure lift before Jev is ever made the decider. */
+function shadowJevPayee(
+  rawName: string,
+  stakeholders: { stakeholder_id: string; name: string; aliases?: string[] | null; category?: string | null; type?: string | null }[],
+  conventional: { id: string; name: string } | null,
+): void {
+  if (!jevEnabled()) return
+  try {
+    const cands = stakeholders
+      .map((s) => ({ s, score: scorePayeeRich(rawName, { name: s.name, category: s.category ?? null, type: s.type ?? null, aliases: s.aliases ?? null }) }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 5)
+      .map((r) => ({ id: r.s.stakeholder_id, name: r.s.name, trade: r.s.category ?? null, aliases: r.s.aliases ?? null }))
+    void jevMatchPayee(rawName, {}, cands)
+      .then((jev) => {
+        const jevName = jev ? (cands.find((c) => c.id === jev.id)?.name ?? null) : null
+        const agree = (conventional?.id ?? null) === (jev?.id ?? null)
+        console.log(`[jev-shadow] in=${JSON.stringify(rawName)} conv=${conventional?.name ?? 'none'} jev=${jevName ?? 'none'}${jev ? `(${jev.confidence.toFixed(2)})` : ''} agree=${agree}`)
+      })
+      .catch(() => { /* shadow: swallow */ })
+  } catch { /* shadow: never throw on the live path */ }
 }
 
 function triggerExtraction(supabase: any, entryId: string): void {
@@ -627,7 +662,8 @@ export async function handleImageMessage(
       `📎 Image received.\n\n` +
       `Send a note to add context or it will be saved to logbook as-is.`,
   }
-  await sendWA(from, replies[imageClass.type] || replies.UNKNOWN)
+  // A purchase-request photo sends NO intermediate ack — only its one success card (no spam).
+  if (imageClass.type !== 'PURCHASE_REQUEST') await sendWA(from, replies[imageClass.type] || replies.UNKNOWN)
 
   // STEP 6: Start background processing immediately for all types.
   // User can still annotate within the 45s window — if they do, the entry
@@ -636,11 +672,70 @@ export async function handleImageMessage(
     if (imageClass.type === 'PAYMENT_LIST') {
       processPaymentList(supabase, entry.id, base64, contentType, caption, from, senderName)
         .catch((e) => console.error('[handlers] processPaymentList error:', e))
+    } else if (imageClass.type === 'PURCHASE_REQUEST') {
+      processPurchaseRequestImage(supabase, _registered?.org_id ?? null, message.id, entry.id, base64, contentType, caption, from, senderName, publicUrl)
+        .catch((e) => console.error('[handlers] processPurchaseRequestImage error:', e))
     } else {
       processImageImmediately(supabase, entry.id, base64, contentType, caption, from, senderName, imageClass.type)
         .catch((e) => console.error('[handlers] processImageImmediately error:', e))
     }
   }
+}
+
+/**
+ * A photographed materials-to-buy list → a DRAFT purchase request (the reviewable "draft PO"),
+ * with the photo attached and a WhatsApp reply carrying the link. Never drops for missing details:
+ * an unclear vendor/site simply saves raw on the draft. The staged PR is the record, so the transient
+ * image rough-entry (created for the 45s context window) is removed and the session closed.
+ */
+async function processPurchaseRequestImage(
+  supabase: any,
+  orgId: string | null,
+  wamid: string,
+  entryId: string,
+  base64: string,
+  contentType: string,
+  caption: string | null,
+  from: string,
+  senderName: string,
+  imageUrl: string,
+): Promise<void> {
+  if (!orgId) { console.warn('[handlers] PR image: no org for sender', from); return }
+
+  const { data: projData } = await supabase.from('projects').select('project_id, name').eq('org_id', orgId).eq('status', 'Active')
+  const projects = (projData ?? []) as { project_id: string; name: string }[]
+
+  const read = await extractProcurementFromImage(base64, contentType, caption, projects.map((p) => p.name))
+  if (!read.items.length) {
+    // Not a readable materials list — leave the photo in the log; don't force an empty request.
+    await sendWA(from, "🧾 I couldn't read a materials list in that photo.\nIf it's an order, add a note like \"order cement, steel\".")
+    return
+  }
+
+  // Best-effort resolution — a draft saves with whatever we have; unclear vendor/site stays raw.
+  const site = matchProject(read.site_raw, projects.map((p) => ({ project_id: p.project_id, name: p.name })))
+  const { data: stk } = await supabase.from('stakeholders').select('stakeholder_id, name, aliases, category, type').eq('org_id', orgId).is('merged_into', null).limit(500)
+  const vendor = read.vendor_raw ? matchPayeeRich(read.vendor_raw, (stk ?? [])) : null
+
+  const res = await supabase.rpc('stage_purchase_request', {
+    p_org_id: orgId, p_sender: from, p_sender_name: senderName, p_wamid: wamid, p_request_index: 0,
+    p_status: 'draft',
+    p_site_id: site.band === 'auto' ? site.id : '', p_site_raw: read.site_raw ?? '',
+    p_vendor_id: vendor?.band === 'auto' ? vendor.id : '', p_vendor_raw: read.vendor_raw ?? '',
+    p_sourcing_mode: '', p_title: read.title ?? '',
+    p_items: read.items, p_image_url: imageUrl,
+  })
+  const prId = (res.data as { id?: string } | null)?.id ?? null
+
+  // The PR is the record now — drop the transient image rough-entry + close the context window.
+  try { await supabase.from('rough_entries').delete().eq('id', entryId) } catch { /* best-effort */ }
+  try { await clearSession(supabase, from) } catch { /* best-effort */ }
+
+  // Positive confirmation + a link to the draft — NEVER "missing details".
+  const n = read.items.length
+  const title = read.title || read.items.slice(0, 2).map((i) => i.item_name).join(', ') || 'materials'
+  const link = prId ? `${APP_ORIGIN}/purchase-orders/pr/${prId}` : `${APP_ORIGIN}/purchase-orders?status=draft`
+  await sendWA(from, `✅ Materials requested — ${title}${n > 2 ? ` (+${n - 2} more)` : ''}.\nDraft purchase order ready to review:\n${link}`)
 }
 
 // ── Background helpers ────────────────────────────────────────────────────────

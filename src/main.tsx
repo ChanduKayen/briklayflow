@@ -8,6 +8,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import App from './App.tsx';
 import BootLoader from './components/brand/BootLoader';
 import SignInCelebration from './components/SignInCelebration';
+import { OpenInBrowserBanner } from './components/OpenInBrowserBanner';
 import './index.css';
 
 // A new deploy changes every lazy chunk's content hash, and Vercel serves only the LATEST build's
@@ -48,6 +49,8 @@ createRoot(document.getElementById('root')!).render(
       }}
     >
       <BrowserRouter>
+        {/* WhatsApp in-app browser → nudge to Chrome/Safari so the session persists and deep links land. */}
+        <OpenInBrowserBanner />
         <AuthProvider>
           <App />
         </AuthProvider>

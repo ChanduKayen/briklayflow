@@ -9,6 +9,7 @@ import {
   getRouterView, openConversation, closeConversation, abandonConversation, logRouterDecision, type ConvoRow,
 } from './_conversation.ts'
 import { agentFor } from './_registry.ts'
+import type { ImageKind } from './_normalize.ts'
 import { runTransaction, retryBatchEntries, type TxnCtx } from './_agents/transaction.ts'   // direct: the replay path
 import { startVendorFlow } from './_agents/procurement.ts'   // direct: vendor-Flow test trigger
 import { runConcierge } from './_agents/concierge.ts'   // direct: first-touch orientation
@@ -45,7 +46,7 @@ export type DispatchCtx = {
   flowResponse?: Record<string, unknown> | null   // decoded WhatsApp Flow completion (nfm_reply.response_json)
   // payment-image -> agent vision extraction; storagePath (rough-entry-media) → siteops attachment.
   // `description` is OUR read of the pixels, carried beside the caption (never glued to it) — see _siteops_media.ts.
-  image?: { base64: string; mime: string; caption: string; description?: string | null; storagePath?: string | null }
+  image?: { base64: string; mime: string; caption: string; description?: string | null; kind?: ImageKind; storagePath?: string | null }
   audio?: { storagePath: string; mime: string }   // VOICE note's already-stored audio (rough-entry-media) → siteops records it findable (T7 clause 1)
   firstTouch?: boolean   // Sprint 6: member's first-ever contact -> orient / welcome
   dormant?: boolean      // Sprint 6: returning after a long gap -> welcome-back prefix
@@ -361,6 +362,16 @@ export async function dispatch(ctx: DispatchCtx, text: string): Promise<void> {
     decision = 'NEW_INTENT'; intentAgent = 'SITEOPS'
   }
 
+  // A PHOTO OF A MATERIALS LIST IS A PURCHASE REQUEST — always. describeImage classified the pixels
+  // (kind), so we route on WHAT THE IMAGE IS, not on the thin one-line text the router guesses from: an
+  // indent flattened to "X required, qty N" reads exactly like a planned site snag, and the text router
+  // sent it to SiteOps (logged as Problems) one run and Procurement the next. This pins it. Only a genuine
+  // interactive answer (a button/list/Flow reply to an open question) is exempt — that IS an answer, never
+  // a fresh order. A pending question is not dropped: NEW_INTENT lets the credibility flow stash + re-surface it.
+  if (ctx.image?.kind === 'PURCHASE_REQUEST' && !isInteractiveReply && !structuralAnswer) {
+    decision = 'NEW_INTENT'; intentAgent = 'PROCUREMENT'
+  }
+
   // ── STEP 2: a TEXT arriving while a siteops_photo ENRICHMENT WINDOW is open. Steer it, reusing existing
   //    machinery rather than a new interaction:
   //      RELATED   → answer (enrich the same objects); then answerSiteops closes the window.
@@ -593,7 +604,9 @@ export async function dispatch(ctx: DispatchCtx, text: string): Promise<void> {
     } else {
       // Procurement (materials request) gets the same instant ack as TRANSACTION, sent directly so it lands
       // before the slower sourcing reply. Concierge shares this branch but is conversational — no ack.
-      if (agent.intent === 'PROCUREMENT') await sendNow(supabase, from, M.mProcRouteAck(lang))
+      // Procurement no longer sends a routing "got it" — it was spammy; the ONE success card
+      // (the draft-created confirmation, transaction-style) is the only reply the request needs.
+      if (agent.intent === 'PROCUREMENT') { /* no instant ack — the success card is enough */ }
       // SITEOPS gets one too — and needed it most. It is the SLOWEST agent by a wide margin (a measured
       // voice turn: ~30s from the supervisor finishing his sentence to his phone buzzing), and it was the
       // only agent that said nothing at all until it was completely done. The two fast agents acknowledged

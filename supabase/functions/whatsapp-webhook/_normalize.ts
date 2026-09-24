@@ -14,6 +14,10 @@ const OPENAI_KEY       = Deno.env.get('OPENAI_API_KEY')
 
 const MEDIA_BUCKET = 'rough-entry-media'
 
+// What KIND of thing the pixels are — read once by describeImage and used to route deterministically
+// (a materials/indent list must reach PROCUREMENT, never be flattened to text and guessed as a site snag).
+export type ImageKind = 'PURCHASE_REQUEST' | 'PAYMENT_PROOF' | 'SITE_UPDATE' | 'OTHER'
+
 export type NormalizedMessage = {
   org_id: string
   sender: string                 // wa id, country-code format
@@ -30,7 +34,7 @@ export type NormalizedMessage = {
   // to it: the agent needs to know whose claim is whose (the sender's words vs ours), and the ` -- ` mush in
   // `text` cannot say. It is a real signal — a floor chalked on a wall, a board in the frame — and the
   // agent used to discard it entirely whenever a caption existed. See _siteops_media.ts.
-  image?: { base64: string; mime: string; caption: string; description?: string | null }
+  image?: { base64: string; mime: string; caption: string; description?: string | null; kind?: ImageKind }
   timestamp: string
 }
 
@@ -43,7 +47,7 @@ export type NormalizedMessage = {
  * seam: audio was once dropped here (only images were threaded), which is exactly what the pin now forbids.
  */
 export function deriveDispatchMedia(norm: NormalizedMessage): {
-  image?: { base64: string; mime: string; caption: string; description?: string | null; storagePath: string | null }
+  image?: { base64: string; mime: string; caption: string; description?: string | null; kind?: ImageKind; storagePath: string | null }
   audio?: { storagePath: string; mime: string }
 } {
   const image = norm.image ? { ...norm.image, storagePath: norm.attachments?.[0]?.storage_path ?? null } : undefined
@@ -93,14 +97,14 @@ export async function normalize(
       const b64 = toBase64(bytes)
       // Cheap one-line description -> the ROUTER's signal (payment vs site photo). The
       // real, professional extraction happens agent-side from the image (see image below).
-      const description = await describeImage(b64, mime, caption)
+      const { line: description, kind } = await describeImage(b64, mime, caption)
       const text = [caption, description].filter(Boolean).join(' -- ').trim()
       return {
         ...base,
         text: text || 'Image received',
         source_type: 'image',
         attachments: [{ media_id: mediaId, mime, storage_path }],
-        image: { base64: b64, mime, caption, description },
+        image: { base64: b64, mime, caption, description, kind },
       }
     } catch (e) {
       console.error('[normalize] image handling failed:', e)
@@ -206,13 +210,31 @@ function toBase64(bytes: Uint8Array): string {
 
 // ── Image vision: concise text extraction (NOT a transaction decision) ──────────
 
-async function describeImage(base64: string, mime: string, caption: string): Promise<string> {
+function parseDescribe(raw: string): { line: string; kind: ImageKind } {
+  const s = (raw ?? '').trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim()
+  try {
+    const j = JSON.parse(s)
+    const k = String(j?.kind ?? '').toUpperCase()
+    const kind: ImageKind = (k === 'PURCHASE_REQUEST' || k === 'PAYMENT_PROOF' || k === 'SITE_UPDATE') ? k as ImageKind : 'OTHER'
+    const line = typeof j?.line === 'string' ? j.line.trim() : ''
+    return { line, kind }
+  } catch {
+    // Not JSON (older model, truncation) — keep the whole thing as the routing line, no forced kind.
+    return { line: s, kind: 'OTHER' }
+  }
+}
+
+async function describeImage(base64: string, mime: string, caption: string): Promise<{ line: string; kind: ImageKind }> {
   const prompt =
-    'You are a construction-site assistant. In ONE concise line, capture what a ' +
-    'site user put in this image: if a bill/receipt/UPI screenshot, the amount and ' +
-    'payee/vendor; if a materials or labour list, the key items; otherwise a brief ' +
-    'description. Do NOT decide or post a transaction. Plain text only, no JSON.' +
-    (caption ? ` User caption: "${caption}".` : '')
+    'You are a construction-site assistant reading ONE image a site user sent on WhatsApp.\n' +
+    'Return ONLY compact JSON, no other text: {"kind":"...","line":"..."}.\n' +
+    'kind is exactly one of:\n' +
+    '  PURCHASE_REQUEST — a list of MATERIALS TO BUY / ORDER: an indent, a materials/shopping list, a quotation ask, a spec/measurement sheet of items to procure. Items (with or without quantities) and NO paid amount, no UPI/UTR, no "paid" stamp. A request to procure.\n' +
+    '  PAYMENT_PROOF — a bill / invoice / receipt / UPI-bank screenshot showing an amount and payee/vendor, or a "paid" stamp — evidence about money.\n' +
+    '  SITE_UPDATE — a photo of actual site work or conditions (progress, a defect/snag, people working). NOT a document that lists items to buy.\n' +
+    '  OTHER — anything else.\n' +
+    'line: ONE concise plain-text line — for PAYMENT_PROOF the amount + payee/vendor; for PURCHASE_REQUEST the key items; else a brief description. Do NOT decide or post a transaction.\n' +
+    (caption ? `User caption: "${caption}".` : '')
 
   const ctrl = new AbortController()
   const t = setTimeout(() => ctrl.abort(), 15000)
@@ -226,7 +248,7 @@ async function describeImage(base64: string, mime: string, caption: string): Pro
         signal: ctrl.signal, method: 'POST',
         headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
         body: JSON.stringify({
-          model: 'claude-haiku-4-5-20251001', max_tokens: 200,
+          model: 'claude-haiku-4-5-20251001', max_tokens: 400,
           messages: [{ role: 'user', content: [
             { type: 'image', source: { type: 'base64', media_type: mime, data: base64 } },
             { type: 'text', text: prompt },
@@ -241,7 +263,7 @@ async function describeImage(base64: string, mime: string, caption: string): Pro
         signal: ctrl.signal, method: 'POST',
         headers: { Authorization: `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: 'gpt-4o-mini', max_tokens: 200,
+          model: 'gpt-4o-mini', max_tokens: 400,
           messages: [{ role: 'user', content: [
             { type: 'image_url', image_url: { url: `data:${mime};base64,${base64}`, detail: 'high' } },
             { type: 'text', text: prompt },
@@ -251,13 +273,13 @@ async function describeImage(base64: string, mime: string, caption: string): Pro
       if (res.ok) out = ((await res.json()).choices?.[0]?.message?.content ?? '').trim()
       else console.error('[normalize] describeImage openai', res.status, (await res.text()).slice(0, 200))
     }
-    return out
+    return parseDescribe(out)
   } catch (e) {
     console.error('[normalize] describeImage error:', e)
   } finally {
     clearTimeout(t)
   }
-  return ''
+  return { line: '', kind: 'OTHER' }
 }
 
 // The DEPLOYMENT's locale prior (ISO-639-1) -- a tiebreaker used only when we have no

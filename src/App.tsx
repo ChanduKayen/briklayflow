@@ -63,6 +63,7 @@ const Bills = lazy(() => import('./pages/Bills'));
 const BillDetailPage = lazy(() => import('./pages/Bills').then((m) => ({ default: m.BillDetailPage })));
 const NewPurchaseOrder = lazy(() => import('./pages/NewPurchaseOrder'));
 const PurchaseOrderDetail = lazy(() => import('./pages/PurchaseOrderDetail'));
+const PurchaseRequestDetail = lazy(() => import('./pages/PurchaseRequestDetail'));
 const RfqCompare = lazy(() => import('./pages/RfqCompare'));
 const Ledger = lazy(loadLedger);
 const NewTransaction = lazy(() => import('./pages/NewTransaction'));
@@ -628,6 +629,7 @@ function App() {
           {/* Purchase requests now live inside the PO draft queue. */}
           <Route path="/purchase-requests" element={<Navigate to="/purchase-orders?status=draft" replace />} />
           <Route path="/purchase-orders/new" element={<NewPurchaseOrder session={session} />} />
+          <Route path="/purchase-orders/pr/:id" element={<PurchaseRequestDetail session={session} />} />
           <Route path="/purchase-orders/:poId" element={<PurchaseOrderDetail session={session} />} />
           <Route path="/attendance" element={<Attendance session={session} />} />
           <Route path="/payables" element={<Payables session={session} />} />

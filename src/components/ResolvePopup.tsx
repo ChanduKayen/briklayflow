@@ -276,19 +276,21 @@ function sortByPayeeSimilarity(list: any[], rawName: string): any[] {
  * A CLIENT has no trade, so a client is never asked for one. There is no Create button anywhere,
  * because by the time the last answer lands there is nothing left to decide.
  */
-function NewPartyRow({
-  defaultName, onCreated, onCancel,
+export function NewPartyRow({
+  defaultName, onCreated, onCancel, lockType,
 }: {
   defaultName: string;
   onCreated: (id: string, name: string) => void;
   onCancel: () => void;
+  /** When set, skip the "Worker/Vendor/Client" step — this context only makes one kind (e.g. a PR needs a Vendor). */
+  lockType?: 'Worker' | 'Vendor' | 'Client';
 }) {
   const qc = useQueryClient();
   const { show: showSnackbar } = useSnackbar();
   const orgId = useOrgId();
   const [name, setName] = useState(capitalizeWords(defaultName));
-  const [step, setStep] = useState<'type' | 'trade' | 'done'>('type');
-  const [type, setType] = useState<'Worker' | 'Vendor' | 'Client'>('Worker');
+  const [step, setStep] = useState<'type' | 'trade' | 'done'>(lockType && lockType !== 'Client' ? 'trade' : 'type');
+  const [type, setType] = useState<'Worker' | 'Vendor' | 'Client'>(lockType ?? 'Worker');
   const [q, setQ] = useState('');
   const [creating, setCreating] = useState(false);
   const [made, setMade] = useState<{ name: string; trade: string } | null>(null);
@@ -416,14 +418,16 @@ function NewPartyRow({
       {step === 'trade' && (
         <>
           <div className="flex items-center gap-2 mb-2">
-            <button
-              type="button"
-              onClick={() => { setStep('type'); setQ(''); }}
-              className="shrink-0 inline-flex items-center text-[11px]"
-              style={{ color: VOICE.system }}
-            >
-              <span className="material-symbols-outlined text-[14px]">chevron_left</span>{type}
-            </button>
+            {!lockType && (
+              <button
+                type="button"
+                onClick={() => { setStep('type'); setQ(''); }}
+                className="shrink-0 inline-flex items-center text-[11px]"
+                style={{ color: VOICE.system }}
+              >
+                <span className="material-symbols-outlined text-[14px]">chevron_left</span>{type}
+              </button>
+            )}
             <p className="text-[12px] font-semibold" style={{ color: VOICE.accentDeep }}>
               What kind of {type.toLowerCase()}?
             </p>

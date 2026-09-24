@@ -12,6 +12,8 @@ import type { ConvoRow } from '../_conversation.ts'
 import { openConversation, closeConversation, abandonConversation } from '../_conversation.ts'
 import { matchPayee, matchProject } from '../_match.ts'
 import { gateProcurement, extractProcurements, titleWithCount, type ProcRequest } from '../_proc_extract.ts'
+import { extractProcurementFromImage } from '../_extract.ts'
+import { signedMediaUrl, storeMedia } from '../_normalize.ts'
 import {
   mProcMultiGuard, buildSourcingPrompt, buildVendorList, mProcComplete,
   buildSelectVendorFlow, buildPickVendorsFlow, type FlowVendor,
@@ -114,10 +116,13 @@ async function finalizeDirectVendor(ctx: ProcCtx, prId: string): Promise<void> {
 }
 
 /** Stage a request as a draft PR + its items — idempotent on (wamid, request_index),
- *  3-retry (mirrors commitEntry). Returns the PR id, or null on a hard failure. */
+ *  3-retry (mirrors commitEntry). Returns the PR id, or null on a hard failure.
+ *  imageUrl (when the request came from a PHOTO) rides ON the request so the reviewer
+ *  sees the paper it was read from — the "show the source" a payment proof gets. */
 async function stageRequest(
   ctx: ProcCtx, req: ProcRequest, requestIndex: number,
   vendorId: string | null, siteId: string | null, sourcing: string | null,
+  imageUrl: string | null = null,
 ): Promise<string | null> {
   const items = req.items.map((it) => ({ item_name: it.item_name, quantity: it.quantity, unit: it.unit, note: it.note }))
   for (let attempt = 1; attempt <= 3; attempt++) {
@@ -127,12 +132,30 @@ async function stageRequest(
       p_site_id: siteId, p_site_raw: req.site_raw,
       p_vendor_id: vendorId, p_vendor_raw: req.vendor_raw,
       p_sourcing_mode: sourcing, p_title: req.title,
-      p_items: items,
+      p_items: items, p_image_url: imageUrl,
     })
     const res = data as { id?: string; committed?: boolean } | null
     if (!error && res?.committed) return res.id ?? null
   }
   return null
+}
+
+/** The durable URL of the WhatsApp photo this request was read from — mirrors the
+ *  transaction proof-image path: prefer the object _normalize already stored, else
+ *  re-upload the bytes we still hold, then sign a long-TTL link the PR card renders.
+ *  Best-effort — a missing image never blocks the request. */
+const PROC_IMAGE_TTL = 315_360_000   // ~10y, matches attachProofImage
+async function procImageUrl(ctx: ProcCtx): Promise<string | null> {
+  if (!ctx.image) return null
+  try {
+    let path = ctx.image.storagePath ?? null
+    if (!path && ctx.image.base64) {
+      const bytes = Uint8Array.from(atob(ctx.image.base64), (c) => c.charCodeAt(0))
+      path = await storeMedia(ctx.supabase, bytes, ctx.image.mime || 'image/jpeg', ctx.from)
+    }
+    if (!path) return null
+    return await signedMediaUrl(ctx.supabase, path, PROC_IMAGE_TTL)
+  } catch (e) { console.error('[proc] image url failed:', (e as Error).message); return null }
 }
 
 // ── entry (NEW_INTENT) ───────────────────────────────────────────────────────
@@ -142,6 +165,26 @@ export async function runProcurementMessage(
 ): Promise<void> {
   const { supabase, from, orgId, wamid, lang } = ctx
   const meta = { org_id: orgId, wamid }
+
+  // ── PHOTO of a materials list — ONE photo is ONE request. Read the items OFF THE IMAGE
+  //    (every row its own line, not a text summary), attach the photo to the request, and
+  //    create the draft directly. No sourcing question; the caption is only extra context. ──
+  if (ctx.image) {
+    const projNames = (await loadProjects(ctx)).map((p) => p.name)
+    const read = await extractProcurementFromImage(
+      ctx.image.base64, ctx.image.mime, ctx.image.caption || text || null, projNames,
+    )
+    const items = read.items.length
+      ? read.items
+      : [{ item_name: (read.title || ctx.image.caption || text || 'Materials').trim(), quantity: null, unit: null, note: null }]
+    const req: ProcRequest = {
+      vendor_raw: read.vendor_raw, sourcing_intent: null,
+      site_raw: read.site_raw, items, title: read.title,
+    }
+    const imageUrl = await procImageUrl(ctx)
+    await handleSingle(ctx, req, imageUrl)
+    return
+  }
 
   // FAST gate — distinct (vendor,site) segments + per-request vendor/sourcing signal.
   const gate = await gateProcurement(text)
@@ -161,41 +204,21 @@ export async function runProcurementMessage(
     return
   }
 
-  // ── single segment ────────────────────────────────────────────────────────
-  if (vendorConfident) {
-    // (the instant routing ack is already sent in dispatch — no second "Got it" here)
-    const reqs = await extractProcurements(text, (await loadProjects(ctx)).map((p) => p.name))
-    await handleSingle(ctx, reqs[0] ?? null)
-    return
-  }
-
-  // vendor absent/unclear -> sourcing prompt IMMEDIATELY, deep extract after (parallel
-  // in effect: the prompt is already enqueued before the slow parse runs).
-  const approver = await loadApprover(ctx)
-  await send(supabase, from, buildSourcingPrompt(lang, { requests: [{ label: '' }], hasApprover: approver.has, approverName: approver.name }), meta)
-
-  const projects = await loadProjects(ctx)
-  const reqs = await extractProcurements(text, projects.map((p) => p.name))
-  const req = reqs[0]
-  if (!req) return                                                   // nothing parsed; the prompt went
-
-  // capture-first: persist the draft (sourcing pending) even if the prompt is ignored.
-  const siteM = matchProject(req.site_raw, projects)
-  const siteId = siteM.band === 'auto' ? siteM.id : null
-  const prId = await stageRequest(ctx, req, 0, null, siteId, null)
-  if (prId) {
-    await openConversation(supabase, {
-      orgId, sender: from, owningAgent: 'PROCUREMENT',
-      pendingQuestion: 'AWAIT_SOURCING', stagedEntryId: prId, lastMessageId: wamid,
-    })
-  }
+  // ── single segment — NO sourcing question: create the draft request directly, like a Day Book
+  //    capture. The vendor is accepted if given (never re-asked); an unclear vendor or site is a gap
+  //    the reviewer fills on the request card in the PO page — the request is never withheld for it. ──
+  void vendorConfident
+  const reqs = await extractProcurements(text, (await loadProjects(ctx)).map((p) => p.name))
+  await handleSingle(ctx, reqs[0] ?? null)
 }
 
-/** Single-request: silently match vendor + site, stage, confirm (capture-first). */
-async function handleSingle(ctx: ProcCtx, req: ProcRequest | null): Promise<void> {
+/** Single-request: match vendor + site (accept what's given), stage a DRAFT, confirm with the
+ *  transaction-style card + a link. No sourcing prompt, no "ready for approval" — it stays a draft
+ *  the office reviews and turns into a PO or a quote request from the card. */
+async function handleSingle(ctx: ProcCtx, req: ProcRequest | null, imageUrl: string | null = null): Promise<void> {
   const { supabase, from, orgId, wamid, lang } = ctx
   const meta = { org_id: orgId, wamid }
-  if (!req) return                                                   // ack already went; nothing to stage
+  if (!req) return                                                   // nothing parseable; leave it
 
   const vendors = await loadVendors(ctx)
   const projects = await loadProjects(ctx)
@@ -207,16 +230,17 @@ async function handleSingle(ctx: ProcCtx, req: ProcRequest | null): Promise<void
   const siteId = siteM.band === 'auto' ? siteM.id : null
   const siteDisplay = siteId ? siteM.name : req.site_raw
 
-  const prId = await stageRequest(ctx, req, 0, vendorId, siteId, 'direct')
+  const prId = await stageRequest(ctx, req, 0, vendorId, siteId, null, imageUrl)
   if (!prId) return
-  await markReadyForApproval(ctx, prId)   // vendor decided -> ready for approval
 
   await send(supabase, from, mProcComplete(lang, {
-    headline: titleWithCount(req),
+    title: req.title ?? titleWithCount(req),
     site: siteDisplay,
     vendor: vendorDisplay,
     vendorMatched: vendorAuto,
     siteMissing: !siteId && !req.site_raw,
+    itemsLine: req.items.map((i) => i.item_name).slice(0, 6).join(', '),
+    prId,
   }), meta)
 }
 

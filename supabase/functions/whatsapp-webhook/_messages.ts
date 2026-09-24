@@ -933,20 +933,24 @@ export function buildVendorList(lang: Lang, vendors: { id: string; name: string 
   }
 }
 
-/** Capture confirmation — the request is raised + a calm flag for any gap. */
+/** Draft-created confirmation — modelled on the transaction card (mComplete): one bold FACT line, the
+ *  items in his own words, calm gaps to fix in the request, the destination, and a CTA to open it.
+ *  Always affirmative ("Materials requested") — a missing vendor/site is a gap to fill on the card,
+ *  never a failure, and a request is NEVER dropped for it. */
 export function mProcComplete(
   lang: Lang,
-  p: { headline: string; site: string | null; vendor: string | null; vendorMatched: boolean; siteMissing: boolean },
+  p: { title: string; site: string | null; vendor: string | null; vendorMatched: boolean; siteMissing: boolean; itemsLine?: string | null; prId: string | null },
 ): OutMessage {
-  const ctx: string[] = [p.headline]
-  if (p.site) ctx.push(p.site)
-  if (p.vendor) ctx.push(`${pick(lang, { en: 'to' })} ${p.vendor}`)
-  const head = '✓ ' + pick(lang, { en: 'Raised your request' }) + '\n' + ctx.filter(Boolean).join(' · ')
+  const fact = `✓ *${pick(lang, { en: 'Materials requested' })} — ${p.title}*${p.site ? ` — ${p.site}` : ''}`
+  const itemBlock = p.itemsLine ? `_${p.itemsLine}_` : ''
   const flags: string[] = []
-  if (p.vendor && !p.vendorMatched) flags.push(pick(lang, { en: `${p.vendor} isn't in your vendors yet` }))
-  if (p.siteMissing) flags.push(pick(lang, { en: 'Site not set — add it in the app' }))
-  const body = [head, flags.join('\n')].filter(Boolean).join('\n\n')
-  return { kind: 'text', body }
+  if (p.vendor && !p.vendorMatched) flags.push(pick(lang, { en: `*${p.vendor}* isn't in your vendors yet — set it on the request.` }))
+  else if (!p.vendor) flags.push(pick(lang, { en: 'Vendor not set yet — choose it on the request.' }))
+  if (p.siteMissing) flags.push(pick(lang, { en: 'Site not set — choose it on the request.' }))
+  const dest = pick(lang, { en: 'Saved to *Purchase orders* · Briklay' })
+  const body = [fact, itemBlock, flags.join('\n'), dest].filter(Boolean).join('\n\n')
+  const url = p.prId ? `${APP_ORIGIN}/purchase-orders/pr/${p.prId}` : `${APP_ORIGIN}/purchase-orders?status=draft`
+  return { kind: 'cta', body, cta: { text: pick(lang, { en: 'Open the request' }), url } }
 }
 
 // ── Agent-agnostic pending-question credibility (2026-07-11) ──────────────────

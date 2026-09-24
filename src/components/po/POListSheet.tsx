@@ -18,11 +18,25 @@ import { useUserProfile } from '../../App';
 import { useAuth } from '../../lib/auth/AuthProvider';
 import { useSnackbar } from '../Snackbar';
 import SendToVendorModal from '../po-new-ui/SendToVendorModal';
+import { WhatsAppGlyph } from '../day-book/atoms';
 import { useIsMobile } from '../../lib/useIsMobile';
 import { usePullToRefresh, useLiveCount } from '../../lib/usePullToRefresh';
 import { billedByPO } from '../../lib/billsApi';
 
 const POLX_CSS = `
+/* "From WhatsApp" draft-request strip — the review nudge atop the list (twin of the Day Book capture). */
+.polx .wadrafts{background:var(--paper);border:1px solid #CDE9D3;border-radius:10px;overflow:hidden;margin-bottom:16px;box-shadow:var(--shadow)}
+.polx .wadrafts .wd-h{display:flex;align-items:center;gap:8px;padding:9px 14px;font:600 11.5px/1 "DM Sans";letter-spacing:.06em;text-transform:uppercase;color:#3B7A4B;background:#EAF6ED}
+.polx .wadrafts .wd-h em{font-style:normal;margin-left:auto;color:#5B8A66;font-weight:600}
+.polx .wadrafts .wd-row{display:flex;align-items:center;gap:12px;width:100%;text-align:left;padding:10px 14px;border:0;border-top:1px solid var(--line-2);background:none;font:inherit;color:inherit;cursor:pointer;transition:background .14s}
+.polx .wadrafts .wd-row:first-of-type{border-top:0}
+.polx .wadrafts .wd-row:hover{background:var(--paper-2)}
+.polx .wadrafts .wd-thumb{flex:none;width:38px;height:38px;border-radius:8px;object-fit:cover;background:var(--paper-2);border:1px solid var(--line);display:grid;place-items:center;font-size:18px}
+.polx .wadrafts .wd-t{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.polx .wadrafts .wd-t b{font-weight:600;font-size:14.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.polx .wadrafts .wd-t small{font-size:12.5px;color:var(--ink-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.polx .wadrafts .wd-go{flex:none;color:var(--terra);font-weight:600;font-size:13px}
+.polx .wadrafts.m{margin:0 0 14px}
 .polx{
   --cream:#F6F2EA; --paper:#FFFDF9; --paper-2:#FBF8F2;
   --ink:#2F2622; --ink-2:#6E635B; --ink-3:#A39A91;
@@ -455,6 +469,29 @@ function usePOListData(projectId?: string) {
   return { rows, isLoading: posQ.isLoading };
 }
 
+interface PendingPR { id: string; title: string | null; imageUrl: string | null; site: string; from: string; items: number; createdAt: string }
+/** Draft purchase requests (materials lists captured from WhatsApp, not yet promoted to a PO) — the
+ *  review buffer shown as a strip atop the list, twin of the Day Book's "from WhatsApp" captures. */
+function usePendingPRs(projectId?: string) {
+  return useQuery({
+    queryKey: ['po_list_pending_prs', projectId ?? 'all'],
+    queryFn: async (): Promise<PendingPR[]> => {
+      let q = supabase.from('purchase_requests')
+        .select('id, title, image_url, site_id, sender_name, sender_number, created_at, projects(name), purchase_request_items(item_index)')
+        .eq('status', 'draft').is('converted_po_id', null)
+        .not('sender_number', 'is', null)   // WhatsApp-sourced drafts (the ones that need a review nudge)
+        .order('created_at', { ascending: false });
+      if (projectId) q = q.eq('site_id', projectId);
+      const { data } = await q;
+      return (data ?? []).map((r: any) => ({
+        id: r.id, title: r.title, imageUrl: r.image_url,
+        site: r.projects?.name || '', from: r.sender_name || '',
+        items: (r.purchase_request_items ?? []).length, createdAt: r.created_at,
+      }));
+    },
+  });
+}
+
 interface RfqRow { rfq_id: string; created_at: string; site: string; summary: string; itemCount: number; sent: number; replied: number; best: number | null }
 function useOpenRfqs(projectId?: string) {
   return useQuery({
@@ -495,6 +532,7 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
   const navigate = useNavigate();
   const { rows, isLoading } = usePOListData(projectId);
   const { data: openRfqs = [] } = useOpenRfqs(projectId);
+  const { data: pendingPRs = [] } = usePendingPRs(projectId);
   const [filter, setFilter] = useState<'all' | 'active' | 'fulfilled' | 'mine' | 'late' | 'open' | 'vendor' | 'done' | 'quotes' | 'approvals' | 'tosend' | 'onway' | 'live' | 'archive' | 'nobill' | 'topay' | 'atsite'>('active');
   const [sortK, setSortK] = useState<'vendor' | 'site' | 'ordered' | 'delivery' | 'value' | 'balance'>('ordered');
   const [sortDir, setSortDir] = useState(-1);
@@ -842,6 +880,19 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
           ))}
         </div>
 
+        {pendingPRs.length > 0 && (
+          <div className="wadrafts m">
+            <div className="wd-h"><WhatsAppGlyph size={12} color="#1FA855" /> From WhatsApp <em>{pendingPRs.length}</em></div>
+            {pendingPRs.map((pr) => (
+              <button key={pr.id} type="button" className="wd-row" onClick={() => navigate(`/purchase-orders/pr/${pr.id}`)}>
+                {pr.imageUrl ? <img className="wd-thumb" src={pr.imageUrl} alt="" /> : <span className="wd-thumb ph" aria-hidden="true">🧾</span>}
+                <span className="wd-t"><b>{pr.title || 'Materials request'}</b><small>{[pr.items ? `${pr.items} item${pr.items !== 1 ? 's' : ''}` : '', pr.site].filter(Boolean).join(' · ') || 'draft'}</small></span>
+                <span className="wd-go">›</span>
+              </button>
+            ))}
+          </div>
+        )}
+
         <div className="m-list mo-stagger">
           {mList.length === 0 ? (
             <div className="m-empty">{q ? 'No orders match your search.' : filter === 'approvals' ? 'Nothing waiting on you.' : 'Nothing here yet.'}</div>
@@ -934,6 +985,19 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
             <button className={`chip quote${filter === 'quotes' ? ' on' : ''}`} onClick={() => setFilter('quotes')}>Quotes <span className="n">{openRfqs.length + rows.filter(p => p.rfq).length}</span></button>
           </div>
         </div>
+
+        {pendingPRs.length > 0 && (
+          <div className="wadrafts">
+            <div className="wd-h"><WhatsAppGlyph size={13} color="#1FA855" /> From WhatsApp — draft requests to review <em>{pendingPRs.length}</em></div>
+            {pendingPRs.map((pr) => (
+              <button key={pr.id} type="button" className="wd-row" onClick={() => navigate(`/purchase-orders/pr/${pr.id}`)}>
+                {pr.imageUrl ? <img className="wd-thumb" src={pr.imageUrl} alt="" /> : <span className="wd-thumb ph" aria-hidden="true">🧾</span>}
+                <span className="wd-t"><b>{pr.title || 'Materials request'}</b><small>{[pr.items ? `${pr.items} item${pr.items !== 1 ? 's' : ''}` : '', pr.site, pr.from].filter(Boolean).join(' · ') || 'draft'}</small></span>
+                <span className="wd-go">Review ›</span>
+              </button>
+            ))}
+          </div>
+        )}
 
         <div className="sheet">
           <table>
