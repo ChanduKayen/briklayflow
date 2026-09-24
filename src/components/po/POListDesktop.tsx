@@ -395,10 +395,12 @@ function PeekEditor({ prId, orgId, projects, vendors, canOrder, creating, onClos
         <button type="button" className="x" aria-label="Close" onClick={onClose}><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18" /></svg></button>
       </div>
 
-      {imageUrl && <div className="came">
-        <button type="button" className="paper" onClick={() => onPhoto(imageUrl)}><img src={imageUrl} alt="" /></button>
-        <div><div className="n">{clean.length}<small>items read from the photo</small></div><p>{readyToOrder ? 'Everything is here. Create the order below.' : 'Set the site and supplier, then order.'}</p></div>
-      </div>}
+      <div className="came">
+        {imageUrl
+          ? <button type="button" className="paper" onClick={() => onPhoto(imageUrl)}><img src={imageUrl} alt="" /></button>
+          : <div className="paper" style={{ background: 'none', boxShadow: 'none', border: '1.5px dashed rgba(250,248,243,.25)' }} />}
+        <div><div className="n">{clean.length}<small>items read {imageUrl ? 'from the photo' : 'from the message'}</small></div><p>{readyToOrder ? 'Everything is here. Create the order below.' : 'Set the supplier and project, then order.'}</p></div>
+      </div>
       {said && <div className="said">“{said}”</div>}
 
       <div className="two">
@@ -435,11 +437,11 @@ function PeekEditor({ prId, orgId, projects, vendors, canOrder, creating, onClos
       {msg && <p className="pmsg">{msg}</p>}
       {canOrder && !readyToOrder && <p className="pmsg" style={{ color: 'rgba(250,248,243,.5)' }}>Set the supplier and project to make an order.</p>}
       <div className="pfoot">
-        <button type="button" className={`btn${saved ? ' ok' : dirty ? ' ink' : ''}`} disabled={busy} onClick={save}>
+        <button type="button" className={`btn save${saved ? ' ok' : dirty ? ' dirty' : ''}`} disabled={busy} onClick={save}>
           {saying ? <><span className="spin" />Saving…</> : saved ? <><Tick />Saved</> : dirty ? 'Save changes' : 'Save'}
         </button>
         {canOrder && <>
-          <button type="button" className="btn" disabled={busy || !readyToOrder} title={readyToOrder ? undefined : 'Set the supplier and project first'} onClick={() => create(true)}>{makingKind === 'rfq' ? <><span className="spin" />Requesting…</> : 'Request quotes'}</button>
+          <button type="button" className="btn quote" disabled={busy || !readyToOrder} title={readyToOrder ? undefined : 'Set the supplier and project first'} onClick={() => create(true)}>{makingKind === 'rfq' ? <><span className="spin" />Requesting…</> : 'Request quotes'}</button>
           <button type="button" className="btn pri" disabled={busy || !readyToOrder} title={readyToOrder ? undefined : 'Set the supplier and project first'} onClick={() => create(false)}>{makingKind === 'po' ? <><span className="spin" />Creating…</> : 'Make PO'}</button>
         </>}
       </div>

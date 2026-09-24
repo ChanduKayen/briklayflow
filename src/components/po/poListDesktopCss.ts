@@ -212,20 +212,26 @@ export const PO_LIST_DESKTOP_CSS = `
 .pox-peek .addi{width:100%;height:44px;margin-top:10px;border:1px dashed rgba(var(--cream),.22);border-radius:12px;background:none;color:rgba(var(--cream),.8);font:inherit;font-weight:600;cursor:pointer}
 .pox-peek .addi:hover{border-color:var(--clay-hi);color:var(--clay-hi)}
 .pox-peek .pmsg{margin:12px 0 0;font-size:13px;color:var(--clay-hi)}
-.pox-peek .pfoot{display:flex;gap:8px;margin-top:24px;position:sticky;bottom:-26px;background:linear-gradient(180deg,rgba(21,16,12,0),var(--night) 40%);padding:14px 0 0}
-.pox-peek .pfoot .btn{transition:transform .12s var(--ease),filter .18s,background .2s,box-shadow .2s,opacity .18s;box-shadow:0 1px 0 rgba(0,0,0,.15)}
-.pox-peek .pfoot .btn:hover:not(:disabled){filter:brightness(1.12)}
-.pox-peek .pfoot .btn:active:not(:disabled){transform:scale(.97);filter:brightness(.98)}
-.pox-peek .pfoot .btn.pri{box-shadow:0 10px 22px -12px rgba(181,71,42,.9)}
-.pox-peek .pfoot .btn.pri:hover:not(:disabled){background:var(--clay-hi)}
-.pox-peek .pfoot .btn.ink{background:rgb(var(--cream));color:var(--night)}
-.pox-peek .pfoot .btn.ok{background:var(--sage);color:#fff;box-shadow:0 10px 22px -12px rgba(47,93,58,.9)}
-.pox-peek .pfoot .btn.ok svg{width:15px;height:15px;fill:none;stroke:#fff;stroke-width:3;stroke-linecap:round;stroke-linejoin:round;margin-right:7px}
-.pox-peek .pfoot .btn:disabled{opacity:.5;cursor:default;box-shadow:none}
+/* Footer actions — a researched three-tier set on the dark card:
+   Save = quiet neutral (ghost → solid ink when there are changes → sage ✓ on save),
+   Request quotes = a warm accent OUTLINE (a sourcing action, set apart from both),
+   Make PO = the one primary: clay with a warm glow that brightens and lifts on hover. */
+.pox-peek .pfoot{display:flex;gap:10px;margin-top:24px;position:sticky;bottom:-26px;background:linear-gradient(180deg,rgba(21,16,12,0),var(--night) 42%);padding:16px 0 2px}
+.pox-peek .pfoot .btn{height:50px;display:inline-flex;align-items:center;justify-content:center;gap:8px;border:0;border-radius:14px;font-size:14.5px;font-weight:600;cursor:pointer;transition:transform .14s var(--ease),background .2s,box-shadow .2s,color .2s,opacity .18s}
+.pox-peek .pfoot .btn:active:not(:disabled){transform:translateY(1px) scale(.985)}
+.pox-peek .pfoot .btn:disabled{opacity:.42;cursor:default;box-shadow:none!important;filter:saturate(.55)}
 .pox-peek .pfoot .btn .spin{display:inline-block;width:14px;height:14px;margin-right:8px;border-radius:50%;border:2px solid currentColor;border-right-color:transparent;vertical-align:-2px;animation:poxSpin .7s linear infinite}
 @keyframes poxSpin{to{transform:rotate(360deg)}}
-.pox-peek .pfoot .btn{flex:1;height:48px;display:inline-flex;align-items:center;justify-content:center;gap:8px;border:0;background:rgba(var(--cream),.1);color:rgb(var(--cream));border-radius:16px;font-size:14px;font-weight:600}
-.pox-peek .pfoot .btn.pri{background:var(--clay);color:#fff}
+.pox-peek .pfoot .save{flex:0 0 auto;padding:0 22px;background:rgba(var(--cream),.09);color:rgb(var(--cream));box-shadow:inset 0 0 0 1px rgba(var(--cream),.14)}
+.pox-peek .pfoot .save:hover:not(:disabled){background:rgba(var(--cream),.16)}
+.pox-peek .pfoot .save.dirty{background:rgb(var(--cream));color:var(--night);box-shadow:0 9px 20px -10px rgba(0,0,0,.65)}
+.pox-peek .pfoot .save.dirty:hover:not(:disabled){filter:brightness(1.04)}
+.pox-peek .pfoot .save.ok{background:var(--sage);color:#fff;box-shadow:0 11px 24px -12px rgba(47,93,58,.9)}
+.pox-peek .pfoot .save.ok svg{width:15px;height:15px;fill:none;stroke:#fff;stroke-width:3;stroke-linecap:round;stroke-linejoin:round;margin-right:6px}
+.pox-peek .pfoot .quote{flex:1;background:rgba(212,99,62,.1);color:var(--clay-hi);box-shadow:inset 0 0 0 1px rgba(212,99,62,.5)}
+.pox-peek .pfoot .quote:hover:not(:disabled){background:rgba(212,99,62,.2)}
+.pox-peek .pfoot .pri{flex:1.35;background:var(--clay);color:#fff;box-shadow:0 12px 26px -12px rgba(212,99,62,.7)}
+.pox-peek .pfoot .pri:hover:not(:disabled){background:var(--clay-hi);box-shadow:0 15px 32px -12px rgba(212,99,62,.85);transform:translateY(-1px)}
 .pox-toast{position:fixed;left:50%;top:22px;z-index:70;transform:translate(-50%,-16px);opacity:0;pointer-events:none;padding:11px 16px;border-radius:14px;background:#15100C;color:#FAF8F3;font-size:14px;box-shadow:0 18px 40px -16px rgba(21,16,12,.6);transition:transform .4s cubic-bezier(.22,.8,.24,1),opacity .3s}
 .pox-toast.on{transform:translate(-50%,0);opacity:1}
 .pox-viewer{position:fixed;inset:0;z-index:80;background:rgba(12,9,7,.94);display:grid;place-items:center;opacity:0;visibility:hidden;transition:opacity .3s,visibility 0s .3s}
