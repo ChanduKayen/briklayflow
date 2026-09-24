@@ -24,6 +24,8 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { navTakeover } from '../nav/txDraft';
 import { PQR_CSS } from './pqrCss';
+import { rankPayeeName } from '../../lib/payeeSearch';
+import { scoreProjectName } from '../../lib/projectSearch';
 
 /* ---------- what the page is given ---------- */
 export interface PqrItem {
@@ -117,6 +119,12 @@ export default function PurchaseRequestMobile(p: PurchaseRequestMobileProps) {
     const totalArea = () => +S.items.reduce((a, i) => a + areaOf(i), 0).toFixed(2);
     const gaps = () => S.items.filter((i) => !hasSpec(i));
     const todo = () => (S.project ? 0 : 1) + (S.payee ? 0 : 1);
+    // "Resolved" = the name is a REAL record on file (picked from the list, or just added as a party) —
+    // NOT a raw name the reader guessed off the quote. Only a resolved one earns the green tick; an
+    // unresolved one must be saved or picked before we proceed.
+    const norm = (s: string) => (s || '').trim().toLowerCase();
+    const payeeOk = () => !!S.payee.trim() && PAYEES.some((x) => norm(x[0]) === norm(S.payee));
+    const projOk = () => !!S.project.trim() && PROJECTS.some((x) => norm(x[0]) === norm(S.project));
     let shown = 0, lit = 0, flashKey = '', settling = false;
 
     /* ---------- 1. did it come through? ---------- */
@@ -133,7 +141,17 @@ export default function PurchaseRequestMobile(p: PurchaseRequestMobileProps) {
     }
 
     /* ---------- 2. what do I still owe?  3. what was read? ---------- */
-    const todoRow = (key: string, label: string, value: string, ask: string, o?: { soft?: boolean }) => '<button type="button" class="todo' + (value ? ' done' : '') + ((o || {}).soft ? ' soft' : '') + (flashKey === key ? ' flash' : '') + '" data-todo="' + key + '"><span class="mark" aria-hidden="true">' + TICK + '</span><span class="t"><span>' + label + '</span><b class="' + (value ? '' : 'ask') + '">' + esc(value || ask) + '</b></span>' + CHEV + '</button>';
+    // `ok` = the value is a real, on-file record (green tick). A value that is set but NOT on file is
+    // "unsaved" — shown plainly (no green), with a nudge to save or pick it.
+    const todoRow = (key: string, label: string, value: string, ask: string, o?: { soft?: boolean; ok?: boolean }) => {
+      const ok = !!(o && o.ok), unsaved = !!value && !ok;
+      const cls = value ? (ok ? ' done' : ' unsaved') : '';
+      return '<button type="button" class="todo' + cls + ((o || {}).soft ? ' soft' : '') + (flashKey === key ? ' flash' : '') + '" data-todo="' + key + '">'
+        + '<span class="mark" aria-hidden="true">' + TICK + '</span>'
+        + '<span class="t"><span>' + label + '</span><b class="' + (value ? (unsaved ? 'uns' : '') : 'ask') + '">' + esc(value || ask) + '</b>'
+        + (unsaved ? '<small class="uns-note">Not saved — tap to save it or pick from the list</small>' : '')
+        + '</span>' + CHEV + '</button>';
+    };
     function itemRow(it: Row, i: number) {
       const spec = specOf(it);
       return '<button type="button" class="it' + (lit === it.id ? ' lit' : '') + (P && P.kind === 'item' && P.it === it ? ' editing' : '') + '" data-item="' + it.id + '" style="' + (P && P.kind ? 'animation:none' : 'animation-delay:' + Math.min(i, 9) * 110 + 'ms') + '"><span class="no">' + (i + 1) + '</span><span class="b"><b>' + (esc(it.name) || 'Unnamed item') + '</b><span>' + (spec ? esc(spec) : 'Name and count only') + '</span></span><span class="q">' + esc(it.qty) + '<small>' + esc(it.unit) + '</small></span>' + CHEV + '</button>';
@@ -144,8 +162,8 @@ export default function PurchaseRequestMobile(p: PurchaseRequestMobileProps) {
       ($('#main') as HTMLElement).innerHTML =
         (S.saved ? '' : '<div class="sec' + (settling ? ' late' : '') + '" style="' + (settling ? 'animation-delay:' + (Math.min(n, 9) * 110 + 300) + 'ms' : '') + '"><h2>Still to add</h2><span><b>' + (2 - todo()) + '</b> of 2</span></div>' +
           '<div class="card' + (todo() ? '' : ' ok') + (settling ? ' late' : '') + '" style="' + (settling ? 'animation-delay:' + (Math.min(n, 9) * 110 + 300) + 'ms' : '') + '">' +
-          todoRow('project', 'Project', S.project, 'Which site is this for?') +
-          todoRow('payee', 'Supplier', S.payee, 'Who gave this quote?') +
+          todoRow('project', 'Project', S.project, 'Which site is this for?', { ok: projOk() }) +
+          todoRow('payee', 'Supplier', S.payee, 'Who gave this quote?', { ok: payeeOk() }) +
           (todo() ? '' : '<div class="alldone">' + TICK + 'Everything is here. Ready to save.</div>') + '</div>') +
         '<div class="sec"><h2>On the quote</h2><span><b>' + n + '</b> items' + (totalArea() ? ' · <b>' + totalArea() + '</b> sqft' : '') + '</span></div>' +
         (S.said ? '<p class="said2"><i>“' + esc(S.said) + '”</i> <span>· ' + esc(S.from.split(' ')[0]) + ', with the photo</span></p>' : '') +
@@ -230,12 +248,29 @@ export default function PurchaseRequestMobile(p: PurchaseRequestMobileProps) {
     if (vv) { vv.addEventListener('resize', onVv); vv.addEventListener('scroll', setKb); }
 
     /* project / payee: one list, the current one marked, a new party if the name is not there */
-    function openPick(kind: string) {
-      P = { kind, q: '' }; openPanel(''); paintPick();
+    function openPick(kind: string, prefill?: string) {
+      // prefill (the raw name off the quote) seeds the search so "Add '<name>' as a new party" is offered
+      // straight away — the nudge's "save it" path.
+      P = { kind, q: prefill ? prefill.trim() : '' }; openPanel(''); paintPick();
       setTimeout(() => { const f = $('#pq') as HTMLInputElement | null; if (f && kind === 'payee') f.focus({ preventScroll: true }); }, 320);
     }
     function paintPick() {
-      const isP = P!.kind === 'project', list = (isP ? PROJECTS : PAYEES).filter((x) => !P!.q || x[0].toLowerCase().includes((P!.q as string).toLowerCase())), cur = isP ? S.project : S.payee;
+      const isP = P!.kind === 'project';
+      const q = ((P!.q as string) || '').trim();
+      const base = isP ? PROJECTS : PAYEES;
+      // Rank by best match (the shared matchers), so the most-matched supplier/project is at the top —
+      // and a fuzzy hit ("sreenu" → "Srinu") surfaces, which a raw substring filter would hide.
+      let list = base;
+      if (q) {
+        const ql = q.toLowerCase();
+        const rank = (n: string) => (isP ? scoreProjectName(ql, n) : rankPayeeName(ql, n));
+        list = base
+          .map((x) => ({ x, r: rank(x[0]), inc: x[0].toLowerCase().includes(ql) }))
+          .filter((o) => o.inc || o.r >= 0.3)
+          .sort((a, b) => (b.r - a.r) || (a.x[0].length - b.x[0].length))
+          .map((o) => o.x);
+      }
+      const cur = isP ? S.project : S.payee;
       ($('#pBody') as HTMLElement).innerHTML = '<div class="p-head"><div class="t"><h2>' + (isP ? 'Which project?' : 'Which supplier?') + '</h2><span>' + (isP ? 'The site this material is for' : 'The one who sent this quote') + '</span></div>' + X + '</div>' +
         (isP ? '' : '<label class="find"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg><input id="pq" type="text" autocomplete="off" autocapitalize="words" enterkeyhint="search" placeholder="Search or add a supplier" value="' + esc(P!.q) + '"></label>') +
         list.map((x) => '<button type="button" class="opt" data-pick="' + esc(x[0]) + '" aria-pressed="' + (x[0] === cur) + '"><span class="av">' + esc(initials(x[0])) + '</span><span class="m"><b>' + esc(x[0]) + '</b><span>' + esc(x[1]) + '</span></span><span class="r"></span></button>').join('') +
@@ -396,7 +431,12 @@ export default function PurchaseRequestMobile(p: PurchaseRequestMobileProps) {
       if (el.dataset.todo === 'project' || el.dataset.todo === 'payee') { openPick(el.dataset.todo); return; }
       if (el.dataset.item) { openItem(+el.dataset.item); return; }
       if (el.hasAttribute('data-additem')) { const it = IT('', 1); S.items.push(it); paintMain(); paintHero(); openItem(it.id); P!.edit = 'name'; paintItem(); return; }
-      if (el.hasAttribute('data-review')) { openReview(); return; }
+      if (el.hasAttribute('data-review')) {
+        // Don't proceed on a raw name the reader guessed — nudge to save it as a party or pick one.
+        if (!payeeOk()) { buzz([20, 40, 20]); openPick('payee', S.payee); say('Save this supplier as a party, or pick one from the list'); return; }
+        if (!projOk()) { buzz([20, 40, 20]); openPick('project'); say('Pick the site from the list'); return; }
+        openReview(); return;
+      }
       if (el.hasAttribute('data-save')) { void save(); return; }
       if (!P) return;
       if (P.kind !== 'item') {

@@ -104,6 +104,10 @@ export const PQR_CSS = `
 .pqr .todo.done .mark svg{animation:pqr_tick .4s .1s ease-out forwards}
 @keyframes pqr_tick{to{stroke-dashoffset:0}}
 .pqr .todo.soft .mark{box-shadow:inset 0 0 0 1.5px var(--line-2)}
+/* set but NOT on file — an amber hollow ring (no green tick), with a nudge line to save or pick it */
+.pqr .todo.unsaved .mark{background:none;box-shadow:inset 0 0 0 1.5px #C99A3F}
+.pqr .todo b.uns{color:var(--ink)}
+.pqr .uns-note{display:block;margin-top:2px;font-size:12px;font-weight:500;color:#9A6B12}
 .pqr .todo .t{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
 .pqr .todo .t span{font-size:13px;color:var(--ink-3)}
 .pqr .todo .t b{font-size:16px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
