@@ -175,7 +175,8 @@ export const PO_LIST_DESKTOP_CSS = `
 .pox-peek .irow b{display:block;font-size:15px;font-weight:600}
 .pox-peek .irow em{font-style:normal;font-family:var(--mono);font-size:14px}
 /* editable peek — fields on the dark card */
-.pox-peek .title-in{width:100%;background:none;border:0;border-bottom:1px dashed rgba(var(--cream),.22);color:rgb(var(--cream));font-family:var(--serif);font-weight:600;font-size:24px;line-height:1.15;outline:none;padding:2px 0}
+.pox-peek .title-in{width:100%;background:none;border:0;border-bottom:1px dashed transparent;color:rgb(var(--cream));font-family:var(--serif);font-weight:600;font-size:24px;line-height:1.15;letter-spacing:-.01em;outline:none;padding:2px 0}
+.pox-peek .title-in:hover{border-bottom-color:rgba(var(--cream),.18)}
 .pox-peek .title-in:focus{border-bottom-color:var(--clay-hi)}
 .pox-peek .two{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:6px}
 .pox-peek .fld label{display:block;font-size:12px;font-weight:600;color:rgba(var(--cream),.5);margin:0 0 6px}

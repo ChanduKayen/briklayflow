@@ -31,6 +31,16 @@ const SITE_PAL = ['#B5472A', '#7E9A77', '#C08A2B', '#5E7D9A', '#8A6D3B', '#6B8E7
 const siteColor = (s: string) => { let h = 0; for (let i = 0; i < (s || '').length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return SITE_PAL[h % SITE_PAL.length]; };
 
 const Tick = () => <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5" /></svg>;
+// "today, 9:41 am" · "yesterday, 5:12 pm" · "12 Sept, 8:03 am" — the reference's own phrasing.
+function whenLabel(iso?: string): string {
+  if (!iso) return '';
+  const d = new Date(iso), now = new Date();
+  const day = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const gap = Math.round((day(now) - day(d)) / 864e5);
+  const time = d.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' }).toLowerCase();
+  const head = gap === 0 ? 'today' : gap === 1 ? 'yesterday' : d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+  return head + ', ' + time;
+}
 const Wa = ({ style }: { style?: React.CSSProperties }) => <svg viewBox="0 0 24 24" aria-hidden="true" style={style}><path d="M12 3a9 9 0 0 0-7.7 13.6L3 21l4.6-1.2A9 9 0 1 0 12 3Z" /></svg>;
 
 type Stage = 'pending' | 'send' | 'sent' | 'recv' | 'bill' | 'paid';
@@ -60,7 +70,9 @@ export default function POListDesktop({ projectId }: { projectId?: string }) {
   const { userId } = useAuth();
   const { data: profile } = useUserProfile(userId ?? '');
   const canApprove = profile?.role === 'management' || profile?.role === 'principal';
-  const canOrder = profile?.role === 'management' || profile?.role === 'principal' || profile?.role === 'accountant';
+  // Anyone but a supervisor can raise an order (principal / management / accountant, and any other/legacy
+  // role) — a supervisor only reviews. Using "not supervisor" so a null/legacy role never locks the office out.
+  const canOrder = profile?.role !== 'supervisor';
 
   const { rows, isLoading } = usePOListData(projectId);
   const { data: pending = [] } = usePendingPRs(projectId);
@@ -378,7 +390,7 @@ function PeekEditor({ prId, orgId, projects, vendors, canOrder, creating, onClos
       <div className="ph">
         <div className="t">
           <input className="title-in" value={title} onChange={(e) => { setTitle(e.target.value); touch(); }} placeholder="Materials request" aria-label="Title" />
-          <span><Wa style={{ width: 13, height: 13, fill: '#3DBB6C', verticalAlign: -2, marginRight: 6 }} />From <b style={{ color: 'rgb(250,248,243)' }}>{pr.data?.sender_name || 'WhatsApp'}</b></span>
+          <span><Wa style={{ width: 13, height: 13, fill: '#3DBB6C', verticalAlign: -2, marginRight: 6 }} />From <b style={{ color: 'rgb(250,248,243)' }}>{pr.data?.sender_name || 'WhatsApp'}</b>{whenLabel(pr.data?.created_at) ? ` · ${whenLabel(pr.data?.created_at)}` : ''}</span>
         </div>
         <button type="button" className="x" aria-label="Close" onClick={onClose}><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18" /></svg></button>
       </div>
@@ -426,9 +438,9 @@ function PeekEditor({ prId, orgId, projects, vendors, canOrder, creating, onClos
         <button type="button" className={`btn${saved ? ' ok' : dirty ? ' ink' : ''}`} disabled={busy} onClick={save}>
           {saying ? <><span className="spin" />Saving…</> : saved ? <><Tick />Saved</> : dirty ? 'Save changes' : 'Save'}
         </button>
-        {canOrder && readyToOrder && <>
-          <button type="button" className="btn" disabled={busy} onClick={() => create(true)}>{makingKind === 'rfq' ? <><span className="spin" />Requesting…</> : 'Request quotes'}</button>
-          <button type="button" className="btn pri" disabled={busy} onClick={() => create(false)}>{makingKind === 'po' ? <><span className="spin" />Creating…</> : 'Make PO'}</button>
+        {canOrder && <>
+          <button type="button" className="btn" disabled={busy || !readyToOrder} title={readyToOrder ? undefined : 'Set the supplier and project first'} onClick={() => create(true)}>{makingKind === 'rfq' ? <><span className="spin" />Requesting…</> : 'Request quotes'}</button>
+          <button type="button" className="btn pri" disabled={busy || !readyToOrder} title={readyToOrder ? undefined : 'Set the supplier and project first'} onClick={() => create(false)}>{makingKind === 'po' ? <><span className="spin" />Creating…</> : 'Make PO'}</button>
         </>}
       </div>
     </>
