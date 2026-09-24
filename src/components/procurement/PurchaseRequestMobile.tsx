@@ -102,8 +102,13 @@ export default function PurchaseRequestMobile(p: PurchaseRequestMobileProps) {
 
     /* ---------- what came in from WhatsApp ---------- */
     const PHOTO = P0.request.photo;
-    const PROJECTS: [string, string][] = P0.projects.map((x) => [x.name, x.sub]);
-    const PAYEES: [string, string][] = P0.payees.map((x) => [x.name, x.sub]);
+    // The org's projects/suppliers arrive from their OWN queries, often AFTER this (imperative) component
+    // has mounted. This effect runs once, so we must NOT capture them here — read the LATEST props at use
+    // time via pRef, or the picker shows an empty list. `addedPayees` holds a just-created party until the
+    // parent's state round-trips it back through props.
+    const addedPayees: [string, string][] = [];
+    const currentProjects = (): [string, string][] => pRef.current.projects.map((x) => [x.name, x.sub]);
+    const currentPayees = (): [string, string][] => [...addedPayees, ...pRef.current.payees.map((x) => [x.name, x.sub] as [string, string])];
     let uid = 0;
     const IT = (name: string, qty: number, o?: Partial<PqrItem>): PqrItem & { id: number } =>
       Object.assign({ id: ++uid, rowId: '', name, qty: String(qty), unit: 'Nos', w: '', h: '', brand: '', spec: '', note: '', raw: '', read: {} as Record<string, number> }, o || {});
@@ -123,8 +128,8 @@ export default function PurchaseRequestMobile(p: PurchaseRequestMobileProps) {
     // NOT a raw name the reader guessed off the quote. Only a resolved one earns the green tick; an
     // unresolved one must be saved or picked before we proceed.
     const norm = (s: string) => (s || '').trim().toLowerCase();
-    const payeeOk = () => !!S.payee.trim() && PAYEES.some((x) => norm(x[0]) === norm(S.payee));
-    const projOk = () => !!S.project.trim() && PROJECTS.some((x) => norm(x[0]) === norm(S.project));
+    const payeeOk = () => !!S.payee.trim() && currentPayees().some((x) => norm(x[0]) === norm(S.payee));
+    const projOk = () => !!S.project.trim() && currentProjects().some((x) => norm(x[0]) === norm(S.project));
     let shown = 0, lit = 0, flashKey = '', settling = false;
 
     /* ---------- 1. did it come through? ---------- */
@@ -257,7 +262,7 @@ export default function PurchaseRequestMobile(p: PurchaseRequestMobileProps) {
     function paintPick() {
       const isP = P!.kind === 'project';
       const q = ((P!.q as string) || '').trim();
-      const base = isP ? PROJECTS : PAYEES;
+      const base = isP ? currentProjects() : currentPayees();
       // Rank by best match (the shared matchers), so the most-matched supplier/project is at the top —
       // and a fuzzy hit ("sreenu" → "Srinu") surfaces, which a raw substring filter would hide.
       let list = base;
@@ -441,7 +446,7 @@ export default function PurchaseRequestMobile(p: PurchaseRequestMobileProps) {
       if (!P) return;
       if (P.kind !== 'item') {
         if (el.dataset.pick) { setPick(P.kind, el.dataset.pick); return; }
-        if (el.dataset.create) { PAYEES.unshift([el.dataset.create, 'New party']); pRef.current.onCreatePayee(el.dataset.create); setPick('payee', el.dataset.create); say(el.dataset.create + ' added to your parties'); return; }
+        if (el.dataset.create) { addedPayees.unshift([el.dataset.create, 'New party']); pRef.current.onCreatePayee(el.dataset.create); setPick('payee', el.dataset.create); say(el.dataset.create + ' added to your parties'); return; }
         return;
       }
       const it = P.it as Row;
