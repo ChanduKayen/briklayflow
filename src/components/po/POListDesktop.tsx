@@ -155,8 +155,8 @@ export default function POListDesktop({ projectId }: { projectId?: string }) {
           <div className="hd">
             <span className="mark"><Wa /></span>
             {pending.length
-              ? <><h2>Waiting from WhatsApp<b>{pending.length}</b></h2><span className="n">Not orders yet. Check each one, then make the PO.</span></>
-              : <><h2>Nothing waiting from WhatsApp</h2><span className="n">Requests your site sends on WhatsApp land here to review.</span></>}
+              ? <><h2>Material requests from WhatsApp<b>{pending.length}</b></h2><span className="n">Not orders yet. Check each one, then make the PO.</span></>
+              : <><h2>No material requests from WhatsApp</h2><span className="n">Requests your site sends on WhatsApp land here to review.</span></>}
           </div>
           {pending.map((r) => <ReqRow key={r.id} r={r} canOrder={canOrder} busy={busyId === r.id}
             onPhoto={() => r.imageUrl && setViewer(r.imageUrl)} onReview={() => setPeekId(r.id)} onMake={() => makePO.mutate({ prId: r.id, asRfq: false })} />)}
@@ -231,12 +231,17 @@ function needsOf(r: PendingPR): [string, string][] { return [['Project', r.site]
 const ready = (r: PendingPR) => needsOf(r).every((x) => x[1]);
 
 function ReqRow({ r, canOrder, busy, onPhoto, onReview, onMake }: { r: PendingPR; canOrder: boolean; busy: boolean; onPhoto: () => void; onReview: () => void; onMake: () => void }) {
+  // The row carries its ITEMS, exactly as a PO row does — not a generic "Materials request".
+  const names = r.items.map((i) => i.name).filter(Boolean);
+  const shown = names.slice(0, 2).join(', ');
+  const more = names.length - 2;
+  const itemsLine = shown ? shown + (more > 0 ? ` +${more}` : '') : (r.title || 'Materials request');
   return (
     <div className="req">
       {r.pages
         ? <button type="button" className="paper" aria-label="See the photo" onClick={onPhoto}>{r.imageUrl && <img src={r.imageUrl} alt="" />}<span className="pg">{r.pages} page</span></button>
         : <div className="paper" style={{ background: 'none', boxShadow: 'none', border: '1.5px dashed var(--line-2)', cursor: 'default' }} />}
-      <div className="what"><b>{r.title}</b><span>{r.items.length} {r.items.length === 1 ? 'item' : 'items'} read {r.pages ? 'from the photo' : 'from the message'}</span>{r.said && <i title={r.said}>“{r.said}”</i>}</div>
+      <div className="what"><b>{itemsLine}</b><span>{r.items.length} {r.items.length === 1 ? 'item' : 'items'} read {r.pages ? 'from the photo' : 'from the message'}</span>{r.said && <i title={r.said}>“{r.said}”</i>}</div>
       <div className="who"><span className="av">{initials(r.from)}</span><div>{r.from}<span>{r.when}</span></div></div>
       <div className={`site${r.site ? '' : ' none'}`}>{r.site ? <><i style={{ background: siteColor(r.site) }} />{short(r.site)}</> : '—'}</div>
       <div className="needs">{needsOf(r).map(([label, val]) => (
@@ -415,7 +420,7 @@ function PeekEditor({ prId, orgId, projects, vendors, canOrder, creating, onClos
 
       {msg && <p className="pmsg">{msg}</p>}
       <div className="pfoot">
-        <button type="button" className="btn" disabled={!dirty || busy} onClick={save}>{saying ? <><span className="spin" />Saving…</> : 'Save'}</button>
+        <button type="button" className={`btn${dirty ? ' ink' : ''}`} disabled={busy} onClick={save}>{saying ? <><span className="spin" />Saving…</> : dirty ? 'Save changes' : 'Save'}</button>
         {canOrder && <>
           <button type="button" className="btn" disabled={!readyToOrder || busy} onClick={() => create(true)}>Request quotes</button>
           <button type="button" className="btn pri" disabled={!readyToOrder || busy} onClick={() => create(false)}>{creating ? <><span className="spin" />Creating…</> : 'Create PO'}</button>
@@ -444,16 +449,16 @@ function DarkResolve({ label, text, id, placeholder, rank, hint, createLabel, or
   return (
     <label className={`fld rz${id ? ' ok' : ''}`} ref={boxRef as any}>
       <span>{label}</span>
-      <input className="in" value={text} placeholder={placeholder} onChange={(e) => { onText(e.target.value); setOpen(true); }} onFocus={() => setOpen(true)} />
-      {id
-        ? <button type="button" className="x" style={{ position: 'absolute', right: 6, bottom: 6, width: 30, height: 30, borderRadius: 8 }} title="Change" onClick={onClear}><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round"><path d="M6 6l12 12M18 6 6 18" /></svg></button>
-        : null}
-      {open && !id && (hits.length > 0 || canAdd) && (
-        <div className="rz-drop">
-          {hits.map((h) => <button key={h.id} type="button" className="rz-opt" onMouseDown={(e) => { e.preventDefault(); onPick(h); setOpen(false); }}>{h.name}{h.sub ? <small>{h.sub}</small> : null}</button>)}
-          {canAdd && <button type="button" className="rz-opt rz-add" onMouseDown={(e) => { e.preventDefault(); void addNew(); }}>{adding ? 'Adding…' : `+ Add “${text.trim()}” as a new ${createLabel}`}</button>}
-        </div>
-      )}
+      <div className="rzwrap">
+        <input className="in" value={text} placeholder={placeholder} onChange={(e) => { onText(e.target.value); setOpen(true); }} onFocus={() => setOpen(true)} />
+        {id && <button type="button" className="rz-x" title="Change" onClick={onClear}><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18" /></svg></button>}
+        {open && !id && (hits.length > 0 || canAdd) && (
+          <div className="rz-drop">
+            {hits.map((h) => <button key={h.id} type="button" className="rz-opt" onMouseDown={(e) => { e.preventDefault(); onPick(h); setOpen(false); }}>{h.name}{h.sub ? <small>{h.sub}</small> : null}</button>)}
+            {canAdd && <button type="button" className="rz-opt rz-add" onMouseDown={(e) => { e.preventDefault(); void addNew(); }}>{adding ? 'Adding…' : `+ Add “${text.trim()}” as a new ${createLabel}`}</button>}
+          </div>
+        )}
+      </div>
       {!id && text.trim() && hint && <em className="rz-hint">{hint}</em>}
     </label>
   );

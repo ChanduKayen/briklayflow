@@ -30,7 +30,7 @@ export const PO_LIST_DESKTOP_CSS = `
 .pox .btn svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
 
 /* the inbox */
-.pox .inbox{margin:26px -16px 0;padding:6px 16px 4px;border-radius:24px;background:#F1ECE1}
+.pox .inbox{margin:26px -16px 0;padding:6px 16px 4px;border-radius:24px;background:linear-gradient(180deg,#F6EFE2 0%,#EFE7D7 55%,#EAE0CE 100%);box-shadow:inset 0 0 0 1px rgba(43,33,26,.05)}
 .pox .inbox .hd{display:flex;align-items:center;gap:10px;padding:10px 8px 6px}
 .pox .inbox .hd .mark{width:22px;height:22px;display:grid;place-items:center}
 .pox .inbox .hd .mark svg{width:15px;height:15px;fill:var(--wa)}
@@ -99,7 +99,8 @@ export const PO_LIST_DESKTOP_CSS = `
 .pox .grp span{font-size:13px;color:var(--ink-3)}
 .pox .grp span b{font-family:var(--mono);font-weight:500;color:var(--ink-2)}
 .pox .tbl{margin-top:14px;background:var(--paper);border:1px solid var(--line);border-radius:22px;overflow:hidden}
-.pox .tr{display:grid;grid-template-columns:1.5fr 1.7fr 1fr .9fr 1.5fr .8fr;gap:20px;align-items:center;padding:0 24px;min-height:66px;border-top:1px solid var(--rule);cursor:pointer;transition:background .15s}
+.pox .tr{display:grid;grid-template-columns:1.6fr 1.6fr 1fr .8fr 1.5fr .7fr;gap:18px;align-items:center;padding:0 24px;min-height:66px;border-top:1px solid var(--rule);cursor:pointer;transition:background .15s}
+.pox .tr > *{min-width:0}
 .pox .tr:hover{background:#FCFAF6}
 .pox .tr.fresh{animation:poxFresh 1.8s ease-out}
 @keyframes poxFresh{0%,25%{background:var(--sage-wash)}100%{background:var(--paper)}}
@@ -176,6 +177,11 @@ export const PO_LIST_DESKTOP_CSS = `
 .pox-peek .in::placeholder{color:rgba(var(--cream),.4)}
 .pox-peek .in:focus{border-color:var(--clay-hi)}
 .pox-peek .rz{position:relative}
+.pox-peek .rzwrap{position:relative}
+.pox-peek .rzwrap .in{padding-right:38px}
+.pox-peek .rz-x{position:absolute;right:6px;top:50%;transform:translateY(-50%);width:28px;height:28px;border:0;border-radius:8px;background:rgba(var(--cream),.1);color:rgba(var(--cream),.7);display:grid;place-items:center;cursor:pointer}
+.pox-peek .rz-x:hover{background:rgba(var(--cream),.18);color:rgb(var(--cream))}
+.pox-peek .rz-x svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round}
 .pox-peek .rz.ok .in{border-color:rgba(143,199,154,.5)}
 .pox-peek .rz-hint{display:block;margin-top:6px;font-size:12px;color:var(--clay-hi)}
 .pox-peek .rz-drop{position:absolute;z-index:6;top:46px;left:0;right:0;background:#241a13;border:1px solid rgba(var(--cream),.16);border-radius:12px;overflow:auto;max-height:230px;box-shadow:0 22px 44px -18px rgba(0,0,0,.75)}
