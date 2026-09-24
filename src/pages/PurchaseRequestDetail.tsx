@@ -143,6 +143,8 @@ export default function PurchaseRequestDetail({ session }: { session: Session })
   const [dirty, setDirty] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [confirmDel, setConfirmDel] = useState(false);
+  const [act, setAct] = useState<null | 'po' | 'rfq'>(null);   // which create button is working
+  const [created, setCreated] = useState(false);               // brief ✓ beat before we leave
 
   useEffect(() => {
     if (!pr) return;
@@ -212,13 +214,17 @@ export default function PurchaseRequestDetail({ session }: { session: Session })
       if (asRfq) await supabase.from('purchase_orders').update({ status: 'RFQ' }).eq('po_id', r.po_id);
       return r.po_id;
     },
+    onMutate: (asRfq) => { setMsg(null); setAct(asRfq ? 'rfq' : 'po'); },
     onSuccess: (poId, asRfq) => {
-      // Land on the new order with a success beat, and leave the LIST behind it so Back returns there
+      // Hold a ✓ beat on the button, THEN leave the LIST behind the new order so Back returns there
       // (not to this now-converted request). replace drops the request; the push adds the order.
-      navigate('/purchase-orders?status=draft', { replace: true });
-      navigate(`/purchase-orders/${poId}`, { state: { justCreated: true, createdKind: asRfq ? 'rfq' : 'po' } });
+      setCreated(true);
+      setTimeout(() => {
+        navigate('/purchase-orders?status=draft', { replace: true });
+        navigate(`/purchase-orders/${poId}`, { state: { justCreated: true, createdKind: asRfq ? 'rfq' : 'po' } });
+      }, 650);
     },
-    onError: (e) => setMsg((e as Error)?.message || 'Could not create it'),
+    onError: (e) => { setAct(null); setMsg((e as Error)?.message || 'Could not create it'); },
   });
 
   // Discard a draft request (items cascade). Only a not-yet-promoted draft can be deleted.
@@ -253,7 +259,7 @@ export default function PurchaseRequestDetail({ session }: { session: Session })
   );
 
   const fromWa = !!pr.sender_number;
-  const busy = save.isPending || create.isPending;
+  const busy = save.isPending || create.isPending || created;
   const dateStr = new Date(pr.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
 
   return (
@@ -322,8 +328,12 @@ export default function PurchaseRequestDetail({ session }: { session: Session })
                 <span className="sp" />
                 {/* Placing the order is the office's call — management / principal / accountant only. */}
                 {canAct && <>
-                  <button className="prim2" disabled={busy} onClick={() => create.mutate(true)}>Request quotes</button>
-                  <button className="prim" disabled={busy} onClick={() => create.mutate(false)}>{create.isPending ? 'Creating…' : 'Create purchase order'}</button>
+                  <button className={`prim2${created && act === 'rfq' ? ' ok' : ''}`} disabled={busy} onClick={() => create.mutate(true)}>
+                    {created && act === 'rfq' ? '✓ Requested' : act === 'rfq' ? <><span className="spin" />Requesting…</> : 'Request quotes'}
+                  </button>
+                  <button className={`prim${created && act === 'po' ? ' ok' : ''}`} disabled={busy} onClick={() => create.mutate(false)}>
+                    {created && act === 'po' ? '✓ Created' : act === 'po' ? <><span className="spin" />Creating…</> : 'Create purchase order'}
+                  </button>
                 </>}
               </div>
             )}
@@ -414,7 +424,12 @@ const CSS = `
 .prx .actions .prim{background:var(--terra);border-color:var(--terra);color:#fff}
 .prx .actions .prim:hover{background:var(--terra-deep)}
 .prx .actions .prim2{background:var(--gold-tint);border-color:#EBD9B4;color:#8A5A0B}
-.prx .actions button:disabled{opacity:.55;cursor:default}
+.prx .actions button{transition:transform .12s ease,background .15s ease,opacity .15s ease}
+.prx .actions button:active:not(:disabled){transform:scale(.975)}
+.prx .actions button:disabled{opacity:.6;cursor:default}
+.prx .actions .prim.ok,.prx .actions .prim2.ok{background:var(--sage);border-color:var(--sage);color:#fff;opacity:1}
+.prx .actions .spin{display:inline-block;width:14px;height:14px;margin-right:8px;border-radius:50%;border:2px solid currentColor;border-right-color:transparent;vertical-align:-2px;animation:prxSpin .7s linear infinite}
+@keyframes prxSpin{to{transform:rotate(360deg)}}
 .prx .msg{margin:10px 0 0;font-size:13px;color:var(--sage)}
 .prx .danger{margin-top:20px;padding-top:14px;border-top:1px dashed var(--line)}
 .prx .del{background:none;border:0;color:var(--ink-3);font:inherit;font-size:13px;cursor:pointer;padding:4px 0}

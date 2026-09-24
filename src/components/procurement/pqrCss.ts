@@ -151,6 +151,10 @@ export const PQR_CSS = `
 .pqr .dock .pair button{flex:1;height:56px;border:0;border-radius:28px;font-size:15.5px;font-weight:600;box-shadow:0 12px 24px -14px rgba(21,16,12,.6)}
 .pqr .dock .pair .g{background:var(--paper);color:var(--ink);border:1px solid var(--line-2)}
 .pqr .dock .pair .p{background:var(--clay);color:#fff}
+.pqr .dock .pair button{transition:transform .12s ease,opacity .15s ease}
+.pqr .dock .pair button:active:not(:disabled){transform:scale(.97)}
+.pqr .dock .pair button:disabled{opacity:.6}
+.pqr .dock .pair button.loading{opacity:.9}
 
 /* =====================================================================
    AN ITEM.  Read first, edit on a tap.

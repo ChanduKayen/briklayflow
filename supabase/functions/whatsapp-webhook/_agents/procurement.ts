@@ -11,8 +11,9 @@ import type { TxnCtx } from './transaction.ts'
 import type { ConvoRow } from '../_conversation.ts'
 import { openConversation, closeConversation, abandonConversation } from '../_conversation.ts'
 import { matchPayee, matchProject } from '../_match.ts'
-import { gateProcurement, extractProcurements, titleWithCount, type ProcRequest } from '../_proc_extract.ts'
+import { gateProcurement, extractProcurements, extractProcContext, titleWithCount, type ProcRequest } from '../_proc_extract.ts'
 import { extractProcurementFromImage } from '../_extract.ts'
+import { APP_ORIGIN } from '../_links.ts'
 import { signedMediaUrl, storeMedia } from '../_normalize.ts'
 import { recentInboundText } from './transaction.ts'   // reunite a photo with the site/vendor typed just before it
 import {
@@ -249,6 +250,73 @@ async function handleSingle(ctx: ProcCtx, req: ProcRequest | null, imageUrl: str
     itemsLine: req.items.map((i) => i.item_name).slice(0, 6).join(', '),
     prId,
   }), meta)
+
+  // Under-specified (no vendor and/or no site)? Leave a short PROCUREMENT lingering window so a text sent
+  // RIGHT AFTER the photo ("Chakradhar site, pattabhi traders") is CLAIMED by this agent and fills the
+  // gaps — instead of being routed fresh to SiteOps. Mirrors the transaction note-hold. Only when needed.
+  const hasVendor = !!(vendorId || req.vendor_raw)
+  const hasSite = !!(siteId || req.site_raw)
+  if (!hasVendor || !hasSite) await armEnrichWindow(ctx, prId)
+}
+
+/** Leave a closed (lingering) PROCUREMENT conversation carrying the staged PR id, so the dispatcher hands a
+ *  trailing text back to enrichProcurement within the window. open→close keeps owning_agent = PROCUREMENT. */
+async function armEnrichWindow(ctx: ProcCtx, prId: string): Promise<void> {
+  const { supabase, from, orgId, wamid } = ctx
+  await openConversation(supabase, {
+    orgId, sender: from, owningAgent: 'PROCUREMENT',
+    pendingQuestion: 'PROC_ENRICH', stagedEntryId: prId, lastMessageId: wamid,
+  })
+  await closeConversation(supabase, {
+    orgId, sender: from, lastActionSummary: 'PR staged — open for site/vendor', stagedEntryId: prId, lastMessageId: wamid,
+  })
+}
+
+/** A text arriving in the lingering window right after a photo request — fill the request's missing site
+ *  and/or vendor from it. Returns true when it CLAIMED the text (updated the request); false to let the
+ *  dispatcher route it normally (it wasn't context, or the request is already complete). */
+export async function enrichProcurement(ctx: ProcCtx, prId: string, text: string): Promise<boolean> {
+  const { supabase, from, orgId, wamid, lang } = ctx
+  const meta = { org_id: orgId, wamid }
+  const { data: pr } = await supabase.from('purchase_requests')
+    .select('vendor_id, vendor_raw, site_id, site_raw, converted_po_id').eq('id', prId).maybeSingle()
+  if (!pr || pr.converted_po_id) return false
+  const hasVendor = !!(pr.vendor_id || pr.vendor_raw)
+  const hasSite = !!(pr.site_id || pr.site_raw)
+  if (hasVendor && hasSite) return false                        // nothing to fill — let it route fresh
+
+  const projects = await loadProjects(ctx)
+  const parsed = await extractProcContext(text, projects.map((p) => p.name))
+  if (!parsed.vendor_raw && !parsed.site_raw) return false      // not context → fall through
+
+  const updates: Record<string, unknown> = {}
+  let siteName: string | null = null, vendorName: string | null = null
+  if (!hasSite && parsed.site_raw) {
+    const m = matchProject(parsed.site_raw, projects)
+    if (m.band === 'auto') { updates.site_id = m.id; updates.site_raw = null; siteName = m.name }
+    else { updates.site_raw = parsed.site_raw; siteName = parsed.site_raw }
+  }
+  if (!hasVendor && parsed.vendor_raw) {
+    const vendors = await loadVendors(ctx)
+    const m = matchPayee(parsed.vendor_raw, vendors.map((v) => ({ stakeholder_id: v.stakeholder_id, name: v.name })))
+    if (m.band === 'auto') { updates.vendor_id = m.id; updates.vendor_raw = null; vendorName = m.name }
+    else { updates.vendor_raw = parsed.vendor_raw; vendorName = parsed.vendor_raw }
+  }
+  if (Object.keys(updates).length === 0) return false
+
+  await supabase.from('purchase_requests').update(updates).eq('id', prId)
+  const bits = [siteName, vendorName].filter(Boolean).join(' · ')
+  void lang
+  await send(supabase, from, {
+    kind: 'cta', body: `✓ Added to the request${bits ? ` — ${bits}` : ''}`,
+    cta: { text: 'Open the request', url: `${APP_ORIGIN}/purchase-orders/pr/${prId}` },
+  }, meta)
+
+  // Still missing the other half? Re-arm so a further text can fill it too.
+  const nowVendor = hasVendor || !!(updates.vendor_id || updates.vendor_raw)
+  const nowSite = hasSite || !!(updates.site_id || updates.site_raw)
+  if (!nowVendor || !nowSite) await armEnrichWindow(ctx, prId)
+  return true
 }
 
 // ── Interruption — a NEW order arrives mid-sourcing ─────────────────────────────

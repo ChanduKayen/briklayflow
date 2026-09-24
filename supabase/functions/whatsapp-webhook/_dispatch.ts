@@ -11,7 +11,7 @@ import {
 import { agentFor } from './_registry.ts'
 import type { ImageKind } from './_normalize.ts'
 import { runTransaction, retryBatchEntries, type TxnCtx } from './_agents/transaction.ts'   // direct: the replay path
-import { startVendorFlow } from './_agents/procurement.ts'   // direct: vendor-Flow test trigger
+import { startVendorFlow, enrichProcurement } from './_agents/procurement.ts'   // direct: vendor-Flow test trigger + trailing-text enrich
 import { runConcierge } from './_agents/concierge.ts'   // direct: first-touch orientation
 import { billReplyKind } from './_agents/bill.ts'   // note-vs-amount during the open bill-payment question
 import { looksLikeBillCaption, hasInflightPhoto } from './_media_race.ts'   // hold a bare caption for its photo
@@ -435,6 +435,17 @@ export async function dispatch(ctx: DispatchCtx, text: string): Promise<void> {
       }
     }
     // amount / no / cancel / bare-ok / a genuine new intent → fall through to normal routing below
+  }
+
+  // ── A text right after a PHOTO materials-request → fill the request's missing site/vendor ──────────────
+  // A supervisor sends the photo, then types "Chakradhar site, pattabhi traders" as a second message. The
+  // request staged under-specified and left a lingering PROCUREMENT window; claim that trailing text here
+  // (before routing) so it fills the gaps on the request instead of parking fresh in SiteOps. Mirrors the
+  // transaction note-hold below. enrichProcurement returns false (falls through) when the text is not
+  // context — a fresh order, a question — or the request is already complete.
+  if (view.lingering?.staged_entry_id && view.lingering.owning_agent === 'PROCUREMENT'
+      && !ctx.image && !isInteractiveReply && text.trim()) {
+    if (await enrichProcurement(actx, view.lingering.staged_entry_id, text)) return
   }
 
   // ── A NOTE right after a money entry → attach it to that entry, never leak it to SiteOps ──────────────

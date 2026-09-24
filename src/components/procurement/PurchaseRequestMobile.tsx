@@ -375,11 +375,20 @@ export default function PurchaseRequestMobile(p: PurchaseRequestMobileProps) {
       if (el.hasAttribute('data-rfq') || el.hasAttribute('data-po')) {
         const rfq = el.hasAttribute('data-rfq');
         if (el.disabled) return;
-        el.disabled = true;
+        const pair = el.closest('.pair');
+        const btns = pair ? Array.from(pair.querySelectorAll('button')) as HTMLButtonElement[] : [el];
+        const orig = el.innerHTML;
+        btns.forEach((b) => { b.disabled = true; });          // whole pair locks while one is working
+        el.classList.add('loading'); el.textContent = rfq ? 'Requesting…' : 'Creating…';
         void (async () => {
-          try { await (rfq ? pRef.current.onRequestQuotes() : pRef.current.onCreatePO()); }
-          catch (err) { el.disabled = false; say((err as Error)?.message || 'Could not create it — try again'); }
-          // On success the host navigates away (this screen unmounts), so no re-enable is needed.
+          try {
+            await (rfq ? pRef.current.onRequestQuotes() : pRef.current.onCreatePO());
+            // Success: the host navigates to the new order (which celebrates); leave the button locked.
+          } catch (err) {
+            btns.forEach((b) => { b.disabled = false; });
+            el.classList.remove('loading'); el.innerHTML = orig;
+            say((err as Error)?.message || 'Could not create it — try again');
+          }
         })();
         return;
       }

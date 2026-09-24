@@ -166,6 +166,30 @@ export async function extractProcurements(text: string, knownProjects: string[] 
   return requestsFrom(parsed)
 }
 
+// ── Context-only extraction — for a text that FOLLOWS a photo request, adding the site/vendor ──
+// A supervisor sends the materials photo, then a short message like "Chakradhar site, pattabhi traders".
+// This pulls just those two fields so a trailing text can FILL a request that came in under-specified —
+// it deliberately returns nothing for a fresh order (with items), a question or an instruction.
+const CONTEXT_SYSTEM = `A short WhatsApp message adding CONTEXT to a materials request that was just sent as a photo — usually the SITE and/or the VENDOR to order from. Extract ONLY those two.
+
+OUTPUT — STRICT JSON only: { "vendor_raw": string|null, "site_raw": string|null }
+VENDOR — the supplier/shop to order from, in Latin/Roman letters, RAW as written; null if none named.
+SITE — the user's known projects: {{KNOWN_PROJECTS}}. The EXACT project name if it clearly matches one; else the raw site words as written; else null.
+If the message is NOT such context — it lists items to order, asks a question, gives an instruction, or is a bare "ok" — return BOTH null. JSON only.`
+
+export async function extractProcContext(text: string, knownProjects: string[] = []): Promise<{ vendor_raw: string | null; site_raw: string | null }> {
+  const openai = Deno.env.get('OPENAI_API_KEY')
+  const anthropic = Deno.env.get('ANTHROPIC_API_KEY')
+  const system = CONTEXT_SYSTEM.replace('{{KNOWN_PROJECTS}}', renderKnownProjects(knownProjects))
+  const user = `<msg>\n${text}\n</msg>`
+  let parsed: Record<string, unknown> | null = null
+  try {
+    if (openai) parsed = safeParseJSON(await callOpenAIJson(openai, system, user, PROC_GATE_MODEL, 120))
+    else if (anthropic) parsed = safeParseJSON(await callClaude(anthropic, system, user, 120, 0))
+  } catch (e) { console.error('[proc] extractProcContext failed:', (e as Error)?.message ?? e) }
+  return { vendor_raw: str(parsed?.vendor_raw), site_raw: str(parsed?.site_raw) }
+}
+
 function requestsFrom(parsed: Record<string, unknown> | null): ProcRequest[] {
   const arr = Array.isArray((parsed as { requests?: unknown })?.requests) ? (parsed as { requests: unknown[] }).requests : []
   const out: ProcRequest[] = []
