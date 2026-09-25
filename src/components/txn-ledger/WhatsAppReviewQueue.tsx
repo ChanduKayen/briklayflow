@@ -113,13 +113,10 @@ export default function WhatsAppReviewQueue() {
   const [filing, setFiling] = useState<Set<string>>(new Set());
   const [toast, setToast] = useState('');
   const [lightbox, setLightbox] = useState<string | null>(null);
-  // The queue opens COLLAPSED — a quiet one-line summary that invites a tap. The choice is remembered.
-  const [collapsed, setCollapsed] = useState<boolean>(() => {
-    try { return localStorage.getItem('bk-warq-open') !== '1'; } catch { return true; }
-  });
-  const setCollapsedPersist = useCallback((v: boolean) => {
-    setCollapsed(v); try { localStorage.setItem('bk-warq-open', v ? '0' : '1'); } catch { /* private mode */ }
-  }, []);
+  // The queue always opens COLLAPSED — a quiet one-line peek that invites a tap (not remembered open, so a
+  // fresh visit is always calm). Expanding is a per-visit choice.
+  const [collapsed, setCollapsed] = useState(true);
+  const [shakeId, setShakeId] = useState<string | null>(null);   // an entry whose missing fields are wobbling
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const say = useCallback((m: string) => {
     setToast(m);
@@ -189,7 +186,15 @@ export default function WhatsAppReviewQueue() {
   const approve = useCallback(async (e: RoughEntry, quiet = false) => {
     if (filing.has(e.id)) return;
     const d = draftFor(e);
-    if (!readyOf(e)) { setOpenId(e.id); say('One thing before this posts — fill what is marked.'); return; }
+    if (!readyOf(e)) {
+      // Not ready — wobble the marked fields instead of posting, and name what's missing.
+      const d0 = draftFor(e);
+      const miss = [!d0.payeeId && 'who was paid', !d0.projectId && !isBillEntry(e) && 'the project'].filter(Boolean);
+      setShakeId(e.id);
+      window.setTimeout(() => setShakeId((s) => (s === e.id ? null : s)), 560);
+      say('One thing before this posts — ' + miss.join(' and ') + '.');
+      return;
+    }
     setFiling((s) => new Set(s).add(e.id));
     try {
       if (isBillEntry(e)) {
@@ -253,7 +258,7 @@ export default function WhatsAppReviewQueue() {
     return (
       <section className="war war-collapsed">
         <style>{CSS}</style>
-        <button type="button" className="war-peek" onClick={() => setCollapsedPersist(false)}>
+        <button type="button" className="war-peek" onClick={() => setCollapsed(false)}>
           <span className="war-mark" dangerouslySetInnerHTML={{ __html: WA }} />
           <span className="war-peek-avs">{senders.slice(0, 3).map((s) => <span key={s} className="av">{initials(s)}</span>)}</span>
           <span className="war-peek-txt">
@@ -276,7 +281,7 @@ export default function WhatsAppReviewQueue() {
           <button type="button" className="war-all" onClick={approveAll}>Approve all {entries.length}</button>
         </h2>
         <span className="war-n">{allReady ? 'Everything is read. Approve them one by one, or all at once.' : 'Not posted yet. Approve what is ready; anything missing will ask.'}</span>
-        <button type="button" className="war-collapse" title="Collapse" aria-label="Collapse" onClick={() => setCollapsedPersist(true)}><span className="chev up" dangerouslySetInnerHTML={{ __html: CHV }} /></button>
+        <button type="button" className="war-collapse" title="Collapse" aria-label="Collapse" onClick={() => setCollapsed(true)}><span className="chev up" dangerouslySetInnerHTML={{ __html: CHV }} /></button>
       </div>
 
       {entries.map((e) => {
@@ -285,7 +290,7 @@ export default function WhatsAppReviewQueue() {
         const isFiling = filing.has(e.id);
         const projColor = d.projectName ? siteColor(d.projectName) : '#8A7B6E';
         return (
-          <div key={e.id} className={'war-req' + (open ? ' open' : '') + (isFiling ? ' filing' : '')}>
+          <div key={e.id} className={'war-req' + (open ? ' open' : '') + (isFiling ? ' filing' : '') + (shakeId === e.id ? ' shake' : '')}>
             <div className="war-row" onClick={(ev) => { if (!(ev.target as HTMLElement).closest('button,a,input,.war-menu')) setOpenId(open ? null : e.id); }}>
               <EntryPaper entry={e} amount={d.amount} onOpen={setLightbox} />
               {/* what */}
@@ -587,8 +592,13 @@ const CSS = `
 .war .war-need b{font-weight:600;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:170px}
 .war .war-need small{color:var(--ink-3);font-weight:400}
 .war .war-need.ok i{background:var(--sage);box-shadow:none;color:#fff}
-.war .war-need.ok:hover,.war .war-need:hover{border-color:var(--ink-3);background:#FFFDF9}
-.war .war-need:not(.ok){border:1.5px dashed var(--clay);color:var(--clay);background:var(--clay-wash)}
+.war .war-need.ok:hover{border-color:var(--ink-3);background:#FFFDF9}
+/* a MISSING detail is calm at rest — a soft amber dot + muted text — and only warms to an action on hover.
+   (When you try to Approve without it, the row's .shake flips these to an urgent red — see below.) */
+.war .war-need:not(.ok){border:1px solid #E9E1D2;color:var(--ink-2);background:#FCFAF5;font-weight:500}
+.war .war-need:not(.ok) i{box-shadow:inset 0 0 0 1.5px #CB9A55;background:none}
+.war .war-need:not(.ok):hover{border-color:var(--clay);color:var(--clay);background:var(--clay-wash)}
+.war .war-need:not(.ok):hover i{box-shadow:inset 0 0 0 1.5px var(--clay)}
 .war .war-amt{text-align:right;font-family:'DM Mono',monospace;font-size:17px;font-weight:500;color:var(--ink-2);padding-top:2px}
 .war .war-amt small{display:block;font-family:'DM Sans',sans-serif;font-size:11.5px;color:var(--ink-3);font-weight:500;margin-top:2px}
 .war .war-go{display:flex;gap:6px;justify-content:flex-end;position:relative;min-width:max-content}
@@ -665,6 +675,12 @@ const CSS = `
 .war .war-rej:hover{color:#B3261E;border-color:#E8B4AD;background:#FDF0EE}
 .war .war-rej.fld{position:static;opacity:.55;transform:none;width:26px;height:26px;border-radius:13px;flex:none;margin-left:-2px}
 .war .war-rej.fld:hover{opacity:1}
+/* the wobble — clicking Approve without a required detail flips the calm chip to urgent red and jitters it */
+.war .war-req.shake .war-need:not(.ok){border:1px solid #E4A99F;color:#B3261E;background:#FDF0EE;animation:war-jitter .5s var(--ease)}
+.war .war-req.shake .war-need:not(.ok) i{box-shadow:inset 0 0 0 1.5px #B3261E}
+.war .war-req.shake .war-fld .ctl.miss{border-color:#E4A99F;color:#B3261E;background:#FDF0EE;animation:war-jitter .5s var(--ease)}
+.war .war-req.shake .war-btn.pri{animation:war-jitter .5s var(--ease)}
+@keyframes war-jitter{0%,100%{transform:translateX(0)}14%{transform:translateX(-5px)}28%{transform:translateX(4px)}42%{transform:translateX(-3px)}58%{transform:translateX(3px)}72%{transform:translateX(-2px)}86%{transform:translateX(1px)}}
 /* header collapse control */
 .war .war-collapse{width:28px;height:28px;border-radius:14px;border:1px solid transparent;background:none;color:var(--ink-3);display:grid;place-items:center;cursor:pointer;transition:background .15s,color .15s}
 .war .war-collapse:hover{background:rgba(43,33,26,.05);color:var(--ink-2)}
@@ -691,5 +707,5 @@ const CSS = `
 .war .war-lb img{max-width:min(92vw,900px);max-height:90vh;border-radius:10px;box-shadow:0 30px 80px -20px rgba(0,0,0,.7)}
 @keyframes war-fade{from{opacity:0}to{opacity:1}}
 @media (max-width:1100px){.war .war-more{grid-template-columns:1fr}.war .war-form{border-left:0;padding-left:0}.war .war-peek-txt .pv{display:none}}
-@media (prefers-reduced-motion:reduce){.war *{transition:none!important}}
+@media (prefers-reduced-motion:reduce){.war *{transition:none!important;animation:none!important}}
 `;
