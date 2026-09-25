@@ -179,7 +179,7 @@ const CONTEXT_SYSTEM = `A short WhatsApp message adding CONTEXT to a materials r
 OUTPUT — STRICT JSON only: { "vendor_raw": string|null, "site_raw": string|null }
 VENDOR — the supplier/shop to order from, in Latin/Roman letters, RAW as written; null if none named.
 SITE — the user's known projects: {{KNOWN_PROJECTS}}. The EXACT project name when the mention clearly fits ONE; else a SHORT site reference only (the name or the person it is named for), never a sentence or surrounding words; else null.
-If the message is NOT such context — it lists items to order, asks a question, gives an instruction, or is a bare "ok" — return BOTH null. JSON only.`
+If the message NAMES ANY material/quantity to order (even alongside a site or vendor), it is a NEW request, NOT context — return BOTH null. Likewise for a question, an instruction, or a bare "ok". Only a message that is JUST a site and/or vendor, with no items, is context. JSON only.`
 
 export async function extractProcContext(text: string, knownProjects: string[] = []): Promise<{ vendor_raw: string | null; site_raw: string | null }> {
   const openai = Deno.env.get('OPENAI_API_KEY')

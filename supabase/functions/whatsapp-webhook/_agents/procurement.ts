@@ -290,7 +290,20 @@ export async function enrichProcurement(ctx: ProcCtx, prId: string, text: string
   if (hasVendor && hasSite) return false                        // nothing to fill — let it route fresh
 
   const projects = await loadProjects(ctx)
-  const parsed = await extractProcContext(text, projects.map((p) => p.name))
+  const projNames = projects.map((p) => p.name)
+
+  // CODE-FLOOR against the "swallowed order" bug: a trailing message that itself lists MATERIALS to order
+  // is a NEW request, not context for the lingering one. Never enrich (which would drop its items) — return
+  // false so the dispatcher routes it fresh (→ its own PR). The context LLM alone is probabilistic here
+  // (it sometimes returned the site/vendor of a full order and swallowed the items), so this is deterministic.
+  const reqs = await extractProcurements(text, projNames)
+  if (reqs.some((r) => r.items.length > 0)) return false
+
+  // Pure context (a site/vendor line, no items). Prefer what the deep pass saw; else the context extractor.
+  let vendorRaw = reqs[0]?.vendor_raw ?? null
+  let siteRaw = reqs[0]?.site_raw ?? null
+  if (!vendorRaw && !siteRaw) { const c = await extractProcContext(text, projNames); vendorRaw = c.vendor_raw; siteRaw = c.site_raw }
+  const parsed = { vendor_raw: vendorRaw, site_raw: siteRaw }
   if (!parsed.vendor_raw && !parsed.site_raw) return false      // not context → fall through
 
   const updates: Record<string, unknown> = {}
