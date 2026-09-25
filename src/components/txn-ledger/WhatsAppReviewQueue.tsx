@@ -622,8 +622,8 @@ const CSS = `
 .war .war-btn.dots{width:36px;padding:0;justify-content:center;color:var(--ink-3);font-size:17px;letter-spacing:.5px}
 .war .war-btn.dots:hover,.war .war-btn.split:hover{filter:brightness(1.05)}
 /* expanded */
-.war .war-more{display:grid;grid-template-columns:1fr 480px;gap:36px;padding:2px 8px 22px;align-items:start}
-.war .war-story{min-width:0}
+.war .war-more{display:grid;grid-template-columns:1fr 480px;gap:36px;padding:2px 8px 22px;align-items:center}
+.war .war-story{min-width:0;align-self:center}
 .war .war-story .said{font-family:var(--serif);font-style:italic;font-size:16.5px;line-height:1.5;color:var(--ink);margin:0}
 .war .war-story .meta{margin-top:6px;font-size:12.5px;color:var(--ink-3);font-family:'DM Mono',monospace}
 .war .war-form{border-left:1px dashed var(--line-2);padding-left:32px}
