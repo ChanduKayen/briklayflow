@@ -33,6 +33,7 @@ import {
 import { matchPayee, searchPayees } from '../../lib/payeeSearch';
 import { matchProject } from '../../lib/projectSearch';
 import { CardSplitPanel } from '../day-book/CardSplitPanel';
+import { useSignedDocUrl } from '../../lib/storage';
 
 // resolveEntry's StakeholderLite has no aliases; the daybook query selects them and the fuzzy matchers use
 // them, so carry a widened type (assignable back to StakeholderLite for resolveEntry / CardSplitPanel).
@@ -111,6 +112,14 @@ export default function WhatsAppReviewQueue() {
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [filing, setFiling] = useState<Set<string>>(new Set());
   const [toast, setToast] = useState('');
+  const [lightbox, setLightbox] = useState<string | null>(null);
+  // The queue opens COLLAPSED — a quiet one-line summary that invites a tap. The choice is remembered.
+  const [collapsed, setCollapsed] = useState<boolean>(() => {
+    try { return localStorage.getItem('bk-warq-open') !== '1'; } catch { return true; }
+  });
+  const setCollapsedPersist = useCallback((v: boolean) => {
+    setCollapsed(v); try { localStorage.setItem('bk-warq-open', v ? '0' : '1'); } catch { /* private mode */ }
+  }, []);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const say = useCallback((m: string) => {
     setToast(m);
@@ -149,6 +158,14 @@ export default function WhatsAppReviewQueue() {
     setDrafts((prev) => ({ ...prev, [e.id]: { ...draftFor(e), ...patch } }));
   }, [draftFor]);
 
+  // Reject the AI's reading of ONE field before approving — it drops back to "needs input" so the reviewer
+  // picks the right one. The raw heard value is kept as the hint (menu default), only the resolved id clears.
+  const rejectField = useCallback((e: RoughEntry, field: 'party' | 'site') => {
+    if (field === 'party') patchDraft(e, { payeeId: '', payeeType: '', alias: undefined });
+    else patchDraft(e, { projectId: '' });
+    say(field === 'party' ? 'Cleared the payee — pick the right one' : 'Cleared the project — pick the right one');
+  }, [patchDraft, say]);
+
   const isBillEntry = (e: RoughEntry) => e.ai_extracted?.kind === 'BILL';
   const readyOf = useCallback((e: RoughEntry): boolean => {
     const d = draftFor(e);
@@ -159,7 +176,6 @@ export default function WhatsAppReviewQueue() {
   const said = (e: RoughEntry) =>
     e.raw_text || e.transcribed_text || e.ai_extracted?.description_raw || e.ai_extracted?.description || 'Photo / voice note';
   const ref = (e: RoughEntry) => e.re_number || ('DB-' + e.id.slice(0, 4).toUpperCase());
-  const mode = (e: RoughEntry) => e.ai_extracted?.mode || null;
 
   const invalidateAll = useCallback(() => {
     qc.invalidateQueries({ queryKey: ['rough_entries'] });
@@ -228,9 +244,31 @@ export default function WhatsAppReviewQueue() {
 
   const sum = entries.reduce((a, e) => a + draftFor(e).amount, 0);
   const allReady = entries.every(readyOf);
+  const senders = Array.from(new Set(entries.map((e) => e.sender_name || 'WhatsApp')));
+  const previewNames = senders.slice(0, 3).map(first).join(', ') + (senders.length > 3 ? ' +' + (senders.length - 3) : '');
+  const latest = entries[entries.length - 1];   // oldest-first, so the last is the most recent
+
+  // ── collapsed: a quiet one-line peek that invites a tap ──
+  if (collapsed) {
+    return (
+      <section className="war war-collapsed">
+        <style>{CSS}</style>
+        <button type="button" className="war-peek" onClick={() => setCollapsedPersist(false)}>
+          <span className="war-mark" dangerouslySetInnerHTML={{ __html: WA }} />
+          <span className="war-peek-avs">{senders.slice(0, 3).map((s) => <span key={s} className="av">{initials(s)}</span>)}</span>
+          <span className="war-peek-txt">
+            <b>{entries.length} waiting from WhatsApp<em>{inr(sum)}</em></b>
+            <span className="pv">from {previewNames} · <i>“{said(latest).slice(0, 60)}{said(latest).length > 60 ? '…' : ''}”</i></span>
+          </span>
+          <span className="war-peek-cta">Review<span className="chev" dangerouslySetInnerHTML={{ __html: CHV }} /></span>
+        </button>
+        {lightbox && <div className="war-lb" onClick={() => setLightbox(null)}><img src={lightbox} alt="what was sent" /></div>}
+      </section>
+    );
+  }
 
   return (
-    <section className="war">
+    <section className="war war-open">
       <style>{CSS}</style>
       <div className="war-hd">
         <span className="war-mark" dangerouslySetInnerHTML={{ __html: WA }} />
@@ -238,6 +276,7 @@ export default function WhatsAppReviewQueue() {
           <button type="button" className="war-all" onClick={approveAll}>Approve all {entries.length}</button>
         </h2>
         <span className="war-n">{allReady ? 'Everything is read. Approve them one by one, or all at once.' : 'Not posted yet. Approve what is ready; anything missing will ask.'}</span>
+        <button type="button" className="war-collapse" title="Collapse" aria-label="Collapse" onClick={() => setCollapsedPersist(true)}><span className="chev up" dangerouslySetInnerHTML={{ __html: CHV }} /></button>
       </div>
 
       {entries.map((e) => {
@@ -248,10 +287,7 @@ export default function WhatsAppReviewQueue() {
         return (
           <div key={e.id} className={'war-req' + (open ? ' open' : '') + (isFiling ? ' filing' : '')}>
             <div className="war-row" onClick={(ev) => { if (!(ev.target as HTMLElement).closest('button,a,input,.war-menu')) setOpenId(open ? null : e.id); }}>
-              {/* paper */}
-              <div className="war-paper">
-                <span className="rc">{inr(d.amount).replace('₹', '')}<small>{mode(e) ? 'paid via ' + mode(e) : (isBillEntry(e) ? 'vendor bill' : 'paid')}</small></span>
-              </div>
+              <EntryPaper entry={e} amount={d.amount} onOpen={setLightbox} />
               {/* what */}
               <div className="war-what">
                 <b>{d.payeeName || 'Not read'}</b>
@@ -263,13 +299,13 @@ export default function WhatsAppReviewQueue() {
                 <span className="av">{initials(e.sender_name || 'WA')}</span>
                 <div><span className="nm">{e.sender_name || 'WhatsApp'}</span><span className="sub">{whenLabel(e.created_at)}</span></div>
               </div>
-              {/* needs */}
+              {/* needs — a resolved chip carries a reject ✕ so a wrong reading can be cleared before approving */}
               <div className="war-needs">
                 {d.payeeId
-                  ? <button type="button" className="war-need ok" data-fix onClick={() => setMenu({ id: e.id, kind: 'party' })} title="Change who was paid"><i dangerouslySetInnerHTML={{ __html: TICK }} /><b>{d.payeeName}</b>{d.alias ? <small>also “{d.alias}”</small> : null}<span className="ch" dangerouslySetInnerHTML={{ __html: CHV }} /></button>
+                  ? <span className="war-chip"><button type="button" className="war-need ok" data-fix onClick={() => setMenu({ id: e.id, kind: 'party' })} title="Change who was paid"><i dangerouslySetInnerHTML={{ __html: TICK }} /><b>{d.payeeName}</b>{d.alias ? <small>also “{d.alias}”</small> : null}<span className="ch" dangerouslySetInnerHTML={{ __html: CHV }} /></button><button type="button" className="war-rej" title="Not the right payee — clear it" aria-label="Reject payee" onClick={(ev) => { ev.stopPropagation(); rejectField(e, 'party'); }} dangerouslySetInnerHTML={{ __html: X }} /></span>
                   : <button type="button" className="war-need" data-fix onClick={() => setMenu({ id: e.id, kind: 'party' })}><i />Add to contacts<span className="ch" dangerouslySetInnerHTML={{ __html: CHV }} /></button>}
                 {d.projectId
-                  ? <button type="button" className="war-need ok" data-fix onClick={() => setMenu({ id: e.id, kind: 'site' })} title="Change the project"><i style={{ boxShadow: 'none', background: projColor }} /><b>{short(d.projectName)}</b><span className="ch" dangerouslySetInnerHTML={{ __html: CHV }} /></button>
+                  ? <span className="war-chip"><button type="button" className="war-need ok" data-fix onClick={() => setMenu({ id: e.id, kind: 'site' })} title="Change the project"><i style={{ boxShadow: 'none', background: projColor }} /><b>{short(d.projectName)}</b><span className="ch" dangerouslySetInnerHTML={{ __html: CHV }} /></button><button type="button" className="war-rej" title="Not the right project — clear it" aria-label="Reject project" onClick={(ev) => { ev.stopPropagation(); rejectField(e, 'site'); }} dangerouslySetInnerHTML={{ __html: X }} /></span>
                   : <button type="button" className="war-need" data-fix onClick={() => setMenu({ id: e.id, kind: 'site' })}><i />Which project?<span className="ch" dangerouslySetInnerHTML={{ __html: CHV }} /></button>}
                 {menu && menu.id === e.id && (menu.kind === 'party' || menu.kind === 'site' || menu.kind === 'type' || menu.kind === 'from') && !open &&
                   <FieldMenu kind={menu.kind} entry={e} draft={d} stakeholders={stakeholders} projects={projects}
@@ -293,7 +329,7 @@ export default function WhatsAppReviewQueue() {
             {open &&
               <div className="war-more">
                 <div className="war-story">
-                  <div className="big"><span className="rc">{inr(d.amount).replace('₹', '')}<small>{mode(e) ? 'paid via ' + mode(e) : (isBillEntry(e) ? 'bill' : 'paid')}</small></span></div>
+                  <EntryPaper entry={e} amount={d.amount} big onOpen={setLightbox} />
                   <div>
                     <p className="said">“{said(e)}”</p>
                     <div className="meta">{e.sender_name || 'WhatsApp'} · {whenLabel(e.created_at)} · via WhatsApp · Nº {ref(e)}</div>
@@ -310,22 +346,44 @@ export default function WhatsAppReviewQueue() {
                     </div>
                   : <ReviewForm entry={e} draft={d} isBill={isBillEntry(e)} menu={menu}
                       stakeholders={stakeholders} projects={projects} orgId={orgId}
-                      onPatch={(p) => patchDraft(e, p)} setMenu={setMenu} say={say} whenLabel={whenLabel(e.created_at)} />}
+                      onPatch={(p) => patchDraft(e, p)} onReject={(f) => rejectField(e, f)} setMenu={setMenu} say={say} whenLabel={whenLabel(e.created_at)} />}
               </div>}
           </div>
         );
       })}
 
       {toast && <div className="war-toast">{toast}</div>}
+      {lightbox && <div className="war-lb" onClick={() => setLightbox(null)}><img src={lightbox} alt="what was sent" /></div>}
     </section>
   );
 }
 
+// ── the paper — the actual photo when the entry carried one, else the amount slip ─────────────────────────
+function EntryPaper({ entry, amount, big, onOpen }: { entry: RoughEntry; amount: number; big?: boolean; onOpen: (url: string) => void }) {
+  const signed = useSignedDocUrl(entry.raw_image_url);   // the stored URL can go stale — re-sign it
+  const url = signed ?? entry.raw_image_url ?? null;
+  const isBill = entry.ai_extracted?.kind === 'BILL';
+  const modeTxt = entry.ai_extracted?.mode ? 'paid via ' + entry.ai_extracted.mode : (isBill ? 'bill' : 'paid');
+  if (url) {
+    return (
+      <button type="button" className={'war-paper has-img' + (big ? ' big' : '')} title="Open the photo" aria-label="Open the photo"
+        onClick={(ev) => { ev.stopPropagation(); onOpen(url); }}>
+        <img src={url} alt="what was sent" />
+      </button>
+    );
+  }
+  return (
+    <div className={'war-paper' + (big ? ' big' : '')}>
+      <span className="rc">{inr(amount).replace('₹', '')}<small>{modeTxt}</small></span>
+    </div>
+  );
+}
+
 // ── the expanded review form (right column) ───────────────────────────────────
-function ReviewForm({ entry, draft, isBill, menu, stakeholders, projects, orgId, onPatch, setMenu, say }: {
+function ReviewForm({ entry, draft, isBill, menu, stakeholders, projects, orgId, onPatch, onReject, setMenu, say }: {
   entry: RoughEntry; draft: Draft; isBill: boolean; menu: MenuState;
   stakeholders: StakeLite[]; projects: ProjectLite[]; orgId: string;
-  onPatch: (p: Partial<Draft>) => void; setMenu: (m: MenuState) => void; say: (m: string) => void; whenLabel: string;
+  onPatch: (p: Partial<Draft>) => void; onReject: (f: 'party' | 'site') => void; setMenu: (m: MenuState) => void; say: (m: string) => void; whenLabel: string;
 }) {
   const projColor = draft.projectName ? siteColor(draft.projectName) : '#8A7B6E';
   const open = (kind: NonNullable<MenuState>['kind']) => setMenu(menu && menu.id === entry.id && menu.kind === kind ? null : { id: entry.id, kind });
@@ -339,6 +397,7 @@ function ReviewForm({ entry, draft, isBill, menu, stakeholders, projects, orgId,
             <span className="v">{draft.payeeId ? <>{draft.payeeName}{draft.payeeType ? <small>{draft.payeeType}</small> : null}</> : <>Add “{draft.payeeName || 'party'}” to contacts</>}</span>
             <span className="ch" dangerouslySetInnerHTML={{ __html: CHV }} />
           </button>
+          {draft.payeeId && <button type="button" className="war-rej fld" title="Not the right payee — clear it" aria-label="Reject payee" onClick={() => onReject('party')} dangerouslySetInnerHTML={{ __html: X }} />}
           {menu && menu.id === entry.id && (menu.kind === 'party' || menu.kind === 'type') &&
             <FieldMenu kind={menu.kind} entry={entry} draft={draft} stakeholders={stakeholders} projects={projects} onPatch={onPatch} onClose={() => setMenu(null)} say={say} orgId={orgId} setMenu={setMenu} inForm />}
         </div>
@@ -349,6 +408,7 @@ function ReviewForm({ entry, draft, isBill, menu, stakeholders, projects, orgId,
             <span className="v">{draft.projectId ? <><i style={{ background: projColor }} />{draft.projectName}</> : 'Choose a project'}</span>
             <span className="ch" dangerouslySetInnerHTML={{ __html: CHV }} />
           </button>
+          {draft.projectId && <button type="button" className="war-rej fld" title="Not the right project — clear it" aria-label="Reject project" onClick={() => onReject('site')} dangerouslySetInnerHTML={{ __html: X }} />}
           {menu && menu.id === entry.id && menu.kind === 'site' &&
             <FieldMenu kind="site" entry={entry} draft={draft} stakeholders={stakeholders} projects={projects} onPatch={onPatch} onClose={() => setMenu(null)} say={say} orgId={orgId} setMenu={setMenu} inForm />}
         </div>
@@ -474,6 +534,7 @@ const WA = '<svg viewBox="0 0 24 24" style="width:15px;height:15px;fill:#25A65B"
 const WA_G = '<svg viewBox="0 0 24 24" style="width:14px;height:14px;fill:#25A65B"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2Z"/></svg>';
 const TICK = '<svg viewBox="0 0 24 24" style="width:12px;height:12px;fill:none;stroke:currentColor;stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round"><path d="m5 12 4.5 4.5L19 7"/></svg>';
 const CHV = '<svg viewBox="0 0 24 24" style="fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round"><path d="m6 9 6 6 6-6"/></svg>';
+const X = '<svg viewBox="0 0 24 24" style="width:11px;height:11px;fill:none;stroke:currentColor;stroke-width:2.4;stroke-linecap:round"><path d="M6 6l12 12M18 6 6 18"/></svg>';
 const LINK = '<svg viewBox="0 0 24 24"><path d="M10 13a4 4 0 0 0 5.7 0l2.6-2.6a4 4 0 1 0-5.7-5.7L11.3 6"/><path d="M14 11a4 4 0 0 0-5.7 0l-2.6 2.6a4 4 0 1 0 5.7 5.7L12.7 18"/></svg>';
 const BANK = '<svg viewBox="0 0 24 24"><path d="M3 10 12 4l9 6M5 10v8M9 10v8M15 10v8M19 10v8M3 20h18"/></svg>';
 const WAL = '<svg viewBox="0 0 24 24"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H18a2 2 0 0 1 2 2v1H6a1.5 1.5 0 0 0 0 3h15v6.5a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5v-10Z"/><circle cx="16.5" cy="14.5" r="1"/></svg>';
@@ -481,7 +542,9 @@ const WAL = '<svg viewBox="0 0 24 24"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H18a2 2
 // ── scoped styles (ported from the artifact's inbox section) ───────────────────
 const CSS = `
 .war{--ink:#2B211A;--ink-2:#5C4F45;--ink-3:#8A7B6E;--line-2:#DCD2C4;--paper:#FFFFFF;--wash:#F3EEE5;--sheet:#F4EFE6;--clay:#B5472A;--clay-wash:#FBEDE6;--sage:#2F5D3A;--wa:#25A65B;--serif:'Playfair Display',Georgia,serif;--ease:cubic-bezier(.22,.8,.24,1);
-  margin:0 0 26px;padding:6px 16px 4px;border-radius:24px;background:#F1ECE1;position:relative;font-family:'DM Sans',system-ui,sans-serif;color:var(--ink-2)}
+  /* the shared, lightened card surface — also used on the PO page (see bk-soft-card) */
+  --card:linear-gradient(180deg,#FEFCF8 0%,#F7F2EA 100%);--card-line:#EFE7DA;
+  margin:0 0 22px;padding:6px 16px 4px;border-radius:22px;background:var(--card);box-shadow:0 1px 0 rgba(43,33,26,.02),inset 0 0 0 1px var(--card-line);position:relative;font-family:'DM Sans',system-ui,sans-serif;color:var(--ink-2)}
 .war *{box-sizing:border-box}
 .war .war-hd{display:flex;align-items:center;gap:12px;padding:10px 8px 6px;flex-wrap:wrap}
 .war .war-mark{width:22px;height:22px;display:grid;place-items:center}
@@ -491,17 +554,23 @@ const CSS = `
 .war .war-all{margin-left:14px;height:30px;padding:0 13px;border-radius:16px;border:1px solid var(--clay);background:none;color:var(--clay);font-size:13px;font-weight:600;line-height:1;cursor:pointer}
 .war .war-all:hover{background:var(--clay-wash)}
 .war .war-n{margin-left:auto;font-size:12.5px;color:var(--ink-3)}
-.war .war-req{border-top:1px dashed var(--line-2);border-radius:14px;transition:background .2s,transform .5s var(--ease),opacity .4s}
+.war .war-req{border-top:1px dashed var(--card-line);border-radius:14px;transition:background .28s var(--ease),box-shadow .28s var(--ease),transform .5s var(--ease),opacity .4s}
 .war .war-req:first-of-type{border-top:0}
-.war .war-req:hover{background:rgba(255,255,255,.55)}
-.war .war-req.open{background:rgba(255,255,255,.75);position:relative;z-index:3}
+.war .war-req:hover{background:rgba(255,255,255,.5)}
+.war .war-req.open{background:linear-gradient(180deg,#FFFFFF 0%,#FDFBF7 100%);box-shadow:0 8px 26px -18px rgba(43,33,26,.35);position:relative;z-index:3}
 .war .war-req.filing{opacity:0;transform:translateY(40px) scale(.98)}
 .war .war-row{display:grid;grid-template-columns:64px minmax(0,1.35fr) minmax(0,.9fr) minmax(0,1.35fr) 130px max-content;gap:20px;align-items:center;padding:14px 8px;cursor:pointer}
 .war .war-row>*{min-width:0}
-.war .war-paper{position:relative;width:52px;height:68px;border-radius:5px;background:var(--sheet);box-shadow:0 10px 18px -12px rgba(43,33,26,.65),0 0 0 1px rgba(43,33,26,.07);transform:rotate(-3deg);display:grid;place-items:center}
+.war .war-paper{position:relative;width:52px;height:68px;border:0;padding:0;border-radius:5px;background:#FBF7F0;box-shadow:0 10px 18px -12px rgba(43,33,26,.55),0 0 0 1px rgba(43,33,26,.06);transform:rotate(-3deg);display:grid;place-items:center;overflow:hidden;transition:transform .3s var(--ease),box-shadow .3s var(--ease)}
 .war .war-req:nth-of-type(odd) .war-paper{transform:rotate(2.5deg)}
-.war .war-paper .rc{width:40px;text-align:center;font-family:'DM Mono',monospace;font-size:9px;font-weight:500;color:var(--ink);letter-spacing:-.02em}
+.war .war-paper.has-img{cursor:zoom-in}
+.war .war-paper.has-img:hover{transform:rotate(0) scale(1.04);box-shadow:0 14px 24px -12px rgba(43,33,26,.6),0 0 0 1px rgba(43,33,26,.08)}
+.war .war-paper img{width:100%;height:100%;object-fit:cover;display:block}
+.war .war-paper .rc{width:44px;text-align:center;font-family:'DM Mono',monospace;font-size:9px;font-weight:500;color:var(--ink);letter-spacing:-.02em}
 .war .war-paper .rc small{display:block;font-size:6px;color:var(--ink-3);margin-top:1px}
+.war .war-paper.big{width:112px;height:140px;border-radius:8px;transform:rotate(-2deg);box-shadow:0 14px 26px -16px rgba(43,33,26,.6),0 0 0 1px rgba(43,33,26,.07)}
+.war .war-paper.big .rc{width:auto;font-size:15px}
+.war .war-paper.big .rc small{font-size:8px;font-family:'DM Sans',sans-serif;margin-top:2px}
 .war .war-what b{display:block;font-size:15.5px;font-weight:600;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .war .war-what span{display:block;margin-top:2px;font-size:13px;color:var(--ink-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .war .war-what span i{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:7px;vertical-align:1px}
@@ -534,9 +603,6 @@ const CSS = `
 /* expanded */
 .war .war-more{display:grid;grid-template-columns:1fr 480px;gap:36px;padding:2px 8px 22px;align-items:start}
 .war .war-story{display:grid;grid-template-columns:112px 1fr;gap:24px;align-items:start}
-.war .war-story .big{width:112px;height:140px;border-radius:8px;background:var(--sheet);box-shadow:0 14px 26px -16px rgba(43,33,26,.7),0 0 0 1px rgba(43,33,26,.07);display:grid;place-items:center;transform:rotate(-2deg)}
-.war .war-story .big .rc{text-align:center;font-family:'DM Mono',monospace;font-size:15px;font-weight:500;color:var(--ink)}
-.war .war-story .big .rc small{display:block;font-size:8px;color:var(--ink-3);margin-top:2px;font-family:'DM Sans',sans-serif}
 .war .war-story .said{font-family:var(--serif);font-style:italic;font-size:16.5px;line-height:1.5;color:var(--ink);margin:0}
 .war .war-story .meta{margin-top:6px;font-size:12.5px;color:var(--ink-3);font-family:'DM Mono',monospace}
 .war .war-form{border-left:1px dashed var(--line-2);padding-left:32px}
@@ -592,6 +658,38 @@ const CSS = `
 .war .war-menu .wa button small{margin-left:6px}
 .war .war-menu .note{font-size:12px;color:var(--ink-3);padding:6px 10px}
 .war .war-toast{position:fixed;left:50%;bottom:34px;transform:translateX(-50%);background:#15100C;color:#FAF8F3;padding:12px 18px;border-radius:14px;font-size:14px;z-index:60;box-shadow:0 18px 40px -18px rgba(0,0,0,.6);max-width:520px;text-align:center}
-@media (max-width:1100px){.war .war-more{grid-template-columns:1fr}.war .war-form{border-left:0;padding-left:0}}
+/* reject ✕ — a resolved chip / field carries a quiet way to clear a wrong reading before approving */
+.war .war-chip{position:relative;display:inline-flex}
+.war .war-rej{position:absolute;top:-6px;right:-6px;width:16px;height:16px;border-radius:8px;border:1px solid var(--line-2);background:#FFFDF9;color:var(--ink-3);display:grid;place-items:center;padding:0;opacity:0;transform:scale(.7);transition:opacity .15s,transform .15s,color .15s,border-color .15s;cursor:pointer;z-index:2}
+.war .war-chip:hover .war-rej,.war .war-rej:focus-visible{opacity:1;transform:scale(1)}
+.war .war-rej:hover{color:#B3261E;border-color:#E8B4AD;background:#FDF0EE}
+.war .war-rej.fld{position:static;opacity:.55;transform:none;width:26px;height:26px;border-radius:13px;flex:none;margin-left:-2px}
+.war .war-rej.fld:hover{opacity:1}
+/* header collapse control */
+.war .war-collapse{width:28px;height:28px;border-radius:14px;border:1px solid transparent;background:none;color:var(--ink-3);display:grid;place-items:center;cursor:pointer;transition:background .15s,color .15s}
+.war .war-collapse:hover{background:rgba(43,33,26,.05);color:var(--ink-2)}
+.war .war-collapse .chev.up{display:block;transform:rotate(180deg)}
+.war .war-collapse .chev.up svg{width:14px;height:14px}
+/* collapsed: the quiet peek that invites a tap */
+.war.war-collapsed{padding:0}
+.war .war-peek{display:flex;align-items:center;gap:14px;width:100%;padding:12px 16px;border:0;background:none;border-radius:22px;text-align:left;cursor:pointer;color:var(--ink-2);transition:background .2s var(--ease)}
+.war .war-peek:hover{background:rgba(255,255,255,.5)}
+.war .war-peek .war-mark{flex:none}
+.war .war-peek-avs{display:inline-flex;flex:none}
+.war .war-peek-avs .av{width:26px;height:26px;border-radius:13px;background:#EBE3D6;box-shadow:0 0 0 2px var(--card-line, #FEFCF8);display:grid;place-items:center;font-size:10px;font-weight:700;color:var(--ink-2);margin-left:-8px}
+.war .war-peek-avs .av:first-child{margin-left:0}
+.war .war-peek-txt{min-width:0;flex:1;display:flex;flex-direction:column;gap:1px}
+.war .war-peek-txt b{font-size:14px;font-weight:600;color:var(--ink);display:flex;align-items:baseline;gap:8px}
+.war .war-peek-txt b em{font-style:normal;font-family:'DM Mono',monospace;font-weight:500;font-size:13px;color:var(--clay)}
+.war .war-peek-txt .pv{font-size:12.5px;color:var(--ink-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.war .war-peek-txt .pv i{font-family:var(--serif);font-style:italic;color:var(--ink-2)}
+.war .war-peek-cta{flex:none;display:inline-flex;align-items:center;gap:4px;height:32px;padding:0 12px;border-radius:16px;border:1px solid var(--clay);color:var(--clay);font-size:13px;font-weight:600;background:none;transition:background .18s}
+.war .war-peek:hover .war-peek-cta{background:var(--clay-wash)}
+.war .war-peek-cta .chev{width:13px;height:13px;transform:rotate(-90deg)}
+/* lightbox */
+.war .war-lb{position:fixed;inset:0;z-index:80;background:rgba(21,16,12,.78);display:grid;place-items:center;padding:32px;cursor:zoom-out;animation:war-fade .2s ease}
+.war .war-lb img{max-width:min(92vw,900px);max-height:90vh;border-radius:10px;box-shadow:0 30px 80px -20px rgba(0,0,0,.7)}
+@keyframes war-fade{from{opacity:0}to{opacity:1}}
+@media (max-width:1100px){.war .war-more{grid-template-columns:1fr}.war .war-form{border-left:0;padding-left:0}.war .war-peek-txt .pv{display:none}}
 @media (prefers-reduced-motion:reduce){.war *{transition:none!important}}
 `;
