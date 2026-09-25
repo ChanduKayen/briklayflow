@@ -12,6 +12,7 @@ import {
 import { send, sendNow, keepTyping } from './_format.ts'
 import { normalize, deriveDispatchMedia } from './_normalize.ts'
 import { waitForInflightPhoto } from './_media_race.ts'
+import { coalesceBurst } from './_burst.ts'
 import { dispatch } from './_dispatch.ts'
 import { handleReaction } from './_agents/siteops.ts'   // STEP 5: reactions-as-confirm / retract
 import { runDemo } from './_agents/demo.ts'
@@ -516,6 +517,26 @@ async function processJob(
   // attaches to it downstream. Best-effort + bounded — a slow/crashed photo just times out and we proceed.
   if (norm.source_type === 'text' && norm.text.trim()) {
     await waitForInflightPhoto(supabase, from, messageId)
+  }
+
+  // ── COALESCE A BURST OF TEXT BUBBLES INTO ONE THOUGHT ─────────────────────────────────────────────────
+  // People split one request across quick bubbles (a forwarded materials list, then "need iron for shyam
+  // site"; "Ramu 5000", then "cash"). Each bubble is its own POST, so without this they route independently
+  // — two PRs for one order, a duplicate "Got it" ack, a fragment grabbed as a pending answer. Debounce:
+  // hold this text a short quiet window; only the LAST bubble drains the whole burst and routes the COMBINED
+  // text once (earlier bubbles drop). Extractors still split a real multi-order/-payment back into N.
+  // EXEMPT: a button/list tap, a Flow reply and a quoted reply are TARGETED answers, never a burst — route
+  // them at once. (Photos are coalesced separately by the media sender-lock; only plain text debounces here.)
+  const coalesceOn = (Deno.env.get('WA_BURST_COALESCE') ?? 'on').toLowerCase() !== 'off'
+  if (coalesceOn && norm.source_type === 'text' && norm.text.trim() && !interactiveId && !flowResponse && !quotedWamid) {
+    const burst = await coalesceBurst(supabase, { orgId, sender: from, wamid: messageId, body: norm.text })
+    if (!burst.proceed) {
+      // A newer bubble arrived (or a sibling drained first) — that job routes the whole burst. This one is done.
+      if (jobId) await markJob(supabase, jobId, 'WRITTEN')
+      stopTyping()
+      return
+    }
+    norm = { ...norm, text: burst.text ?? norm.text }
   }
 
   // Feed the normalized text into the dispatcher, serialized per sender.

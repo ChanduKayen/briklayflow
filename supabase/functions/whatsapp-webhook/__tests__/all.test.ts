@@ -100,6 +100,7 @@ import './bill_note_answer.test';
 import './split_reconcile.test';
 import './demo.test';
 import './proc_batch_fold.test';
+import './burst_coalesce.test';
 import { runAll } from './harness';
 
 await runAll();
