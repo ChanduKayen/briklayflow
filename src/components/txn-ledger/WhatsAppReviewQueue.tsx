@@ -572,7 +572,7 @@ const CSS = `
 .war .war-all:hover{background:var(--clay-wash)}
 .war .war-req{border-top:1px dashed var(--card-line);border-radius:14px;transition:background .28s var(--ease),box-shadow .28s var(--ease),transform .5s var(--ease),opacity .4s}
 .war .war-req:first-of-type{border-top:0}
-.war .war-req:hover{background:rgba(255,255,255,.5)}
+.war .war-req:hover{background:#FFFFFF;box-shadow:0 4px 16px -12px rgba(43,33,26,.22)}
 .war .war-req.open{background:linear-gradient(180deg,#FFFFFF 0%,#FDFBF7 100%);box-shadow:0 8px 26px -18px rgba(43,33,26,.35);position:relative;z-index:3}
 .war .war-req.filing{opacity:0;transform:translateY(40px) scale(.98)}
 .war .war-row{display:grid;grid-template-columns:64px minmax(0,1.35fr) minmax(0,.9fr) minmax(0,1.35fr) 130px max-content;gap:20px;align-items:center;padding:14px 8px;cursor:pointer}

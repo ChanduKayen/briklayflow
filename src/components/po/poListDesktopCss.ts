@@ -40,7 +40,7 @@ export const PO_LIST_DESKTOP_CSS = `
 .pox .inbox .hd .n{margin-left:auto;font-size:12.5px;color:var(--ink-3)}
 .pox .req{display:grid;grid-template-columns:72px 1.4fr 1.1fr .9fr 1.3fr 190px;gap:20px;align-items:center;padding:14px 8px;border-top:1px dashed var(--line-2);border-radius:14px;color:var(--ink-2);cursor:pointer;transition:background .2s,transform .5s var(--ease),opacity .4s}
 .pox .req:first-of-type{border-top:0}
-.pox .req:hover{background:rgba(255,255,255,.55)}
+.pox .req:hover{background:#FFFFFF;box-shadow:0 4px 16px -12px rgba(43,33,26,.22)}
 .pox .req.filing{opacity:0;transform:translateY(60px) scale(.98)}
 .pox .req > *{min-width:0}
 .pox .paper{position:relative;width:52px;height:68px;border-radius:5px;background:var(--sheet);overflow:hidden;box-shadow:0 10px 18px -12px rgba(43,33,26,.65),0 0 0 1px rgba(43,33,26,.07);transform:rotate(-3deg);cursor:zoom-in;transition:transform .4s var(--ease)}
