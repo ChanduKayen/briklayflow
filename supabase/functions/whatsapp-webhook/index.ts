@@ -362,6 +362,29 @@ async function handleProspect(
   })
 }
 
+/** True when this sender sent ANOTHER inbound in the last minute — used to SUPPRESS a stray
+ *  "unsupported" help reply that would otherwise interrupt a real burst (two photos + a malformed
+ *  3rd event). Best-effort: a query miss errs toward replying (never swallows a real cold message). */
+async function senderActiveRecently(
+  supabase: ReturnType<typeof createClient>,
+  from: string,
+  exceptWamid: string,
+): Promise<boolean> {
+  try {
+    const since = new Date(Date.now() - 60_000).toISOString()
+    const { data } = await supabase.from('wa_message_log')
+      .select('wa_message_id')
+      .eq('phone_number', from).eq('direction', 'IN')
+      .gte('created_at', since)
+      .neq('wa_message_id', exceptWamid)
+      .limit(1)
+    return Array.isArray(data) && data.length > 0
+  } catch (e) {
+    console.error('[wa-webhook] senderActiveRecently error (defaulting to reply):', e)
+    return false
+  }
+}
+
 /** Cheap script-based language guess for senders with no router context (prospects).
  *  Romanized Telugu/Hindi can't be detected from script → 'en' (the LLM still mirrors). */
 function guessLang(text: string): 'en' | 'te' | 'hi' {
@@ -447,7 +470,13 @@ async function processJob(
 
   // Graceful terminal replies that don't enter the legacy dispatch (still terminal + reply).
   if (norm.source_type === 'unsupported') {
-    await send(supabase, from, M.mUnsupported('en'), { org_id: orgId, wamid: messageId })
+    // Do NOT interrupt a genuine burst. An unsupported/malformed event (a sticker, or a stray/duplicate
+    // delivery that raced in while the sender was sending photos) must not throw a help card into the
+    // middle of a real conversation — the "send me a payment like Ramu 5000" line landing between two
+    // materials-list photos (2026-09-25). Stay silent when the sender was active in the last minute; only
+    // a truly cold, unsupported message earns the one-line reply.
+    const recentlyActive = await senderActiveRecently(supabase, from, messageId)
+    if (!recentlyActive) await send(supabase, from, M.mUnsupported('en'), { org_id: orgId, wamid: messageId })
     if (jobId) await markJob(supabase, jobId, 'WRITTEN')
     stopTyping()
     return
@@ -491,7 +520,13 @@ async function processJob(
 
   // Feed the normalized text into the dispatcher, serialized per sender.
   const lockKey = messageId || from
-  await acquireSenderLock(supabase, from, lockKey)
+  // A photo/voice turn holds the lock ~10s (vision/STT + staging). A SECOND photo sent in the same burst
+  // must WAIT for the first to finish — so a multi-page materials list folds into one request (batching
+  // sees the staged PR) and the two never race — but the default 4s wait times out on a slow gpt-4.1 read
+  // ("[spine] lock wait timed out … proceeding without exclusive lock", 2026-09-25). Give media a longer
+  // wait; text keeps the snappy default. The 60s lock TTL still self-heals a crashed holder.
+  const lockOpts = mediaKind ? { attempts: 40, delayMs: 500 } : undefined   // media ≈ 20s; text ≈ 4s
+  await acquireSenderLock(supabase, from, lockKey, lockOpts)
   try {
     // thread the ALREADY-stored media path (from _normalize's storeMedia) alongside the image/voice so the
     // siteops branch attaches it without re-uploading (clause 1: evidence findable). Payment path ignores
