@@ -953,6 +953,19 @@ export function mProcComplete(
   return { kind: 'cta', body, cta: { text: pick(lang, { en: 'Open the request' }), url } }
 }
 
+/** A follow-up PHOTO folded into the request the previous photo just opened (a multi-page
+ *  materials list sent as 2+ images). Confirms the merge + the running item count. */
+export function mProcBatchAppended(
+  lang: Lang,
+  p: { added: number; total: number; title?: string | null; prId: string | null },
+): OutMessage {
+  const head = pick(lang, { en: `✓ Added ${p.added} more ${p.added === 1 ? 'item' : 'items'} to the same request` })
+  const sub = pick(lang, { en: `Now ${p.total} ${p.total === 1 ? 'item' : 'items'}${p.title ? ` — ${p.title}` : ''}.` })
+  const body = [head, sub].join('\n')
+  const url = p.prId ? `${APP_ORIGIN}/purchase-orders/pr/${p.prId}` : `${APP_ORIGIN}/purchase-orders?status=draft`
+  return { kind: 'cta', body, cta: { text: pick(lang, { en: 'Open the request' }), url } }
+}
+
 // ── Agent-agnostic pending-question credibility (2026-07-11) ──────────────────
 // A question we asked can be interrupted by a new turn. The dispatcher STASHES it, handles the turn, then
 // RE-SURFACES it (with a Dismiss button) or DROPS it with a notice. These are the strings for that lifecycle.

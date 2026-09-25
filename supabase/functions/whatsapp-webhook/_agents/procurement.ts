@@ -11,13 +11,13 @@ import type { TxnCtx } from './transaction.ts'
 import type { ConvoRow } from '../_conversation.ts'
 import { openConversation, closeConversation, abandonConversation } from '../_conversation.ts'
 import { matchPayee, matchProject } from '../_match.ts'
-import { gateProcurement, extractProcurements, extractProcContext, titleWithCount, type ProcRequest } from '../_proc_extract.ts'
+import { gateProcurement, extractProcurements, extractProcContext, titleWithCount, type ProcRequest, type ProcItem } from '../_proc_extract.ts'
 import { extractProcurementFromImage } from '../_extract.ts'
 import { APP_ORIGIN } from '../_links.ts'
 import { signedMediaUrl, storeMedia } from '../_normalize.ts'
 import { recentInboundText } from './transaction.ts'   // reunite a photo with the site/vendor typed just before it
 import {
-  mProcMultiGuard, buildSourcingPrompt, buildVendorList, mProcComplete,
+  mProcMultiGuard, buildSourcingPrompt, buildVendorList, mProcComplete, mProcBatchAppended,
   buildSelectVendorFlow, buildPickVendorsFlow, type FlowVendor,
 } from '../_messages.ts'
 
@@ -160,6 +160,93 @@ async function procImageUrl(ctx: ProcCtx): Promise<string | null> {
   } catch (e) { console.error('[proc] image url failed:', (e as Error).message); return null }
 }
 
+// ── multi-page photo batch (fold a follow-up page into the request the last page opened) ──────────────
+// WhatsApp delivers several images sent together as separate messages; the per-sender lock in the webhook
+// serialises them, so the 2nd photo runs after the 1st has staged its draft PR. This folds page 2..N into
+// that same PR when they belong together, so one list photographed across pages is ONE request.
+const PROC_BATCH_MS = Number(Deno.env.get('WA_PROC_BATCH_MS') ?? '90000')   // "sent together" ≈ seconds apart
+
+type ProcHead = { vendor_raw: string | null; site_raw: string | null; title: string | null }
+
+/** A loose key for exact-duplicate collapse — makes a re-processed page idempotent (append the same page
+ *  twice → one copy) without needing per-item provenance. Only a FULL row match collapses. */
+export function itemKey(it: ProcItem): string {
+  return [it.item_name, it.quantity, it.unit, it.width_mm, it.height_mm, it.spec, it.brand, it.note]
+    .map((v) => (v == null ? '' : String(v).trim().toLowerCase())).join('|')
+}
+
+/** Fold an incoming page into the request's existing items, collapsing FULL-row duplicates so a page
+ *  processed twice adds nothing the second time. Pure — the DB read/write lives in tryBatchAppend. */
+export function foldItems(existing: ProcItem[], incoming: ProcItem[]): { merged: ProcItem[]; added: number } {
+  const merged: ProcItem[] = []
+  const seen = new Set<string>()
+  for (const it of [...existing, ...incoming]) {
+    const k = itemKey(it)
+    if (seen.has(k)) continue
+    seen.add(k)
+    merged.push(it)
+  }
+  return { merged, added: merged.length - existing.length }
+}
+
+/** True when this photo was folded into an already-open request (page 2+ of a list). False → stage fresh. */
+async function tryBatchAppend(ctx: ProcCtx, newItems: ProcItem[], head: ProcHead): Promise<boolean> {
+  const { supabase, from, orgId, wamid, lang } = ctx
+  try {
+    const since = new Date(Date.now() - PROC_BATCH_MS).toISOString()
+    const { data: recent } = await supabase.from('purchase_requests')
+      .select('id, wa_message_id, vendor_id, vendor_raw, site_id, site_raw, title, status, image_url')
+      .eq('org_id', orgId).eq('sender_number', from).eq('status', 'draft')
+      .gte('created_at', since)
+      .order('created_at', { ascending: false }).limit(1).maybeSingle()
+    if (!recent || !recent.id) return false
+    if (recent.wa_message_id && recent.wa_message_id === wamid) return false   // this very message's own PR — not a new page
+    if (!recent.image_url) return false   // only fold a photo INTO another photo's request — never into a text order
+
+    // COMPATIBILITY — a page that names a DIFFERENT vendor or site is a separate request, never a merge.
+    const projects = await loadProjects(ctx)
+    const vendors = await loadVendors(ctx)
+    const newVendor = head.vendor_raw ? matchPayee(head.vendor_raw, vendors.map((v) => ({ stakeholder_id: v.stakeholder_id, name: v.name }))) : null
+    const newSite = head.site_raw ? matchProject(head.site_raw, projects) : null
+    const vendorConflict = (newVendor?.band === 'auto' && recent.vendor_id && newVendor.id !== recent.vendor_id)
+      || rawConflict(head.vendor_raw, recent.vendor_raw)
+    const siteConflict = (newSite?.band === 'auto' && recent.site_id && newSite.id !== recent.site_id)
+      || rawConflict(head.site_raw, recent.site_raw)
+    if (vendorConflict || siteConflict) return false
+
+    // MERGE — existing items + this page, exact-duplicate rows collapsed → atomic replace.
+    const { data: existing } = await supabase.from('purchase_request_items')
+      .select('item_name, quantity, unit, width_mm, height_mm, spec, brand, note')
+      .eq('purchase_request_id', recent.id).order('item_index')
+    const { merged, added } = foldItems((existing ?? []) as ProcItem[], newItems)
+    if (added <= 0) return true   // nothing new (a re-processed identical page) — already folded in, stay quiet-idempotent
+
+    const { data: res, error } = await supabase.rpc('set_purchase_request_items', { p_pr_id: recent.id, p_items: merged })
+    if (error || !(res as { success?: boolean } | null)?.success) return false   // couldn't merge → let it stage fresh
+
+    // Fill a header gap this page supplies (page 1 lacked the vendor/site/title; a later page names it).
+    const patch: Record<string, unknown> = {}
+    if (!recent.vendor_id && !recent.vendor_raw && head.vendor_raw) patch.vendor_raw = head.vendor_raw
+    if (!recent.site_id && !recent.site_raw && head.site_raw) patch.site_raw = head.site_raw
+    if (!recent.title && head.title) patch.title = head.title
+    if (Object.keys(patch).length) await supabase.from('purchase_requests').update(patch).eq('id', recent.id)
+
+    await send(supabase, from, mProcBatchAppended(lang, { added, total: merged.length, title: (recent.title ?? head.title) ?? null, prId: recent.id }), { org_id: orgId, wamid })
+    return true
+  } catch (e) {
+    console.error('[proc] batch append failed (staging fresh):', (e as Error)?.message ?? e)
+    return false
+  }
+}
+
+/** Two RAW references clearly name different things (both present, neither a substring of the other). */
+export function rawConflict(a: string | null, b: string | null): boolean {
+  const x = (a ?? '').trim().toLowerCase()
+  const y = (b ?? '').trim().toLowerCase()
+  if (!x || !y) return false
+  return !(x === y || x.includes(y) || y.includes(x))
+}
+
 // ── entry (NEW_INTENT) ───────────────────────────────────────────────────────
 
 export async function runProcurementMessage(
@@ -185,6 +272,15 @@ export async function runProcurementMessage(
     const items = read.items.length
       ? read.items
       : [{ item_name: (read.title || ctx.image.caption || text || 'Materials').trim(), quantity: null, unit: null, width_mm: null, height_mm: null, spec: null, brand: null, note: null }]
+
+    // ── MULTI-PAGE BATCH — a materials list photographed across 2+ images arrives as 2+ separate
+    //    messages seconds apart. The per-sender lock serialises them, so by the time the 2nd photo
+    //    runs the 1st has already staged its PR. If a fresh draft PR from THIS sender is still open
+    //    within the batch window and this page doesn't CONTRADICT it (no different vendor/site), fold
+    //    this page's items into that request instead of splitting one list across two PRs. A page
+    //    that names a different vendor or site is its own request → falls through to a fresh stage. ──
+    if (read.items.length && await tryBatchAppend(ctx, items, read)) return
+
     const req: ProcRequest = {
       vendor_raw: read.vendor_raw, sourcing_intent: null,
       site_raw: read.site_raw, items, title: read.title,

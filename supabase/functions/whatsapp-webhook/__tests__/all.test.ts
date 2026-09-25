@@ -99,6 +99,7 @@ import './caption_claim.test';
 import './bill_note_answer.test';
 import './split_reconcile.test';
 import './demo.test';
+import './proc_batch_fold.test';
 import { runAll } from './harness';
 
 await runAll();
