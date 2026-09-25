@@ -253,36 +253,28 @@ export default function WhatsAppReviewQueue() {
   const previewNames = senders.slice(0, 3).map(first).join(', ') + (senders.length > 3 ? ' +' + (senders.length - 3) : '');
   const latest = entries[entries.length - 1];   // oldest-first, so the last is the most recent
 
-  // ── collapsed: a quiet one-line peek that invites a tap ──
-  if (collapsed) {
-    return (
-      <section className="war war-collapsed">
-        <style>{CSS}</style>
-        <button type="button" className="war-peek" onClick={() => setCollapsed(false)}>
-          <span className="war-mark" dangerouslySetInnerHTML={{ __html: WA }} />
-          <span className="war-peek-avs">{senders.slice(0, 3).map((s) => <span key={s} className="av">{initials(s)}</span>)}</span>
-          <span className="war-peek-txt">
-            <b>{entries.length} waiting from WhatsApp<em>{inr(sum)}</em></b>
-            <span className="pv">from {previewNames} · <i>“{said(latest).slice(0, 60)}{said(latest).length > 60 ? '…' : ''}”</i></span>
-          </span>
-          <span className="war-peek-cta">Review<span className="chev" dangerouslySetInnerHTML={{ __html: CHV }} /></span>
-        </button>
-        {lightbox && <div className="war-lb" onClick={() => setLightbox(null)}><img src={lightbox} alt="what was sent" /></div>}
-      </section>
-    );
-  }
-
+  // ONE continuous surface: a header bar that IS the toggle, and a list that grows/shrinks beneath it. The
+  // icon, title, count and sum never move between states — only the sub-line swaps and the list reveals — so
+  // it reads as the same card opening, not a swap. The chevron rotates; the list animates via grid-rows.
   return (
-    <section className="war war-open">
+    <section className={'war' + (collapsed ? ' is-collapsed' : ' is-open')}>
       <style>{CSS}</style>
-      <div className="war-hd">
+      <button type="button" className="war-bar" aria-expanded={!collapsed} aria-controls="war-list"
+        onClick={() => { setCollapsed((c) => !c); setMenu(null); }}>
         <span className="war-mark" dangerouslySetInnerHTML={{ __html: WA }} />
-        <h2>Waiting from WhatsApp<b>{entries.length}</b><b>{inr(sum)}</b>
-          <button type="button" className="war-all" onClick={approveAll}>Approve all {entries.length}</button>
-        </h2>
-        <span className="war-n">{allReady ? 'Everything is read. Approve them one by one, or all at once.' : 'Not posted yet. Approve what is ready; anything missing will ask.'}</span>
-        <button type="button" className="war-collapse" title="Collapse" aria-label="Collapse" onClick={() => setCollapsed(true)}><span className="chev up" dangerouslySetInnerHTML={{ __html: CHV }} /></button>
-      </div>
+        <span className="war-bar-main">
+          <span className="war-bar-title"><b>Waiting from WhatsApp</b><em className="count">{entries.length}</em><em className="sum">{inr(sum)}</em></span>
+          <span className="war-bar-sub">
+            {collapsed
+              ? <><span className="avs">{senders.slice(0, 3).map((s) => <span key={s} className="av">{initials(s)}</span>)}</span><span className="pv">from {previewNames} · <i>“{said(latest).slice(0, 60)}{said(latest).length > 60 ? '…' : ''}”</i></span></>
+              : <span className="status">{allReady ? 'Everything is read — approve one by one, or all at once.' : 'Not posted yet — approve what is ready; anything missing will ask.'}</span>}
+          </span>
+        </span>
+        <span className="war-chev" dangerouslySetInnerHTML={{ __html: CHV }} />
+      </button>
+
+      <div className="war-listwrap"><div className="war-list" id="war-list">
+      <div className="war-actions"><button type="button" className="war-all" onClick={approveAll}>Approve all {entries.length}</button></div>
 
       {entries.map((e) => {
         const d = draftFor(e);
@@ -356,6 +348,7 @@ export default function WhatsAppReviewQueue() {
           </div>
         );
       })}
+      </div></div>
 
       {toast && <div className="war-toast">{toast}</div>}
       {lightbox && <div className="war-lb" onClick={() => setLightbox(null)}><img src={lightbox} alt="what was sent" /></div>}
@@ -549,16 +542,36 @@ const CSS = `
 .war{--ink:#2B211A;--ink-2:#5C4F45;--ink-3:#8A7B6E;--line-2:#DCD2C4;--paper:#FFFFFF;--wash:#F3EEE5;--sheet:#F4EFE6;--clay:#B5472A;--clay-wash:#FBEDE6;--sage:#2F5D3A;--wa:#25A65B;--serif:'Playfair Display',Georgia,serif;--ease:cubic-bezier(.22,.8,.24,1);
   /* the shared, lightened card surface — also used on the PO page (see bk-soft-card) */
   --card:linear-gradient(180deg,#FEFCF8 0%,#F7F2EA 100%);--card-line:#EFE7DA;
-  margin:0 0 22px;padding:6px 16px 4px;border-radius:22px;background:var(--card);box-shadow:0 1px 0 rgba(43,33,26,.02),inset 0 0 0 1px var(--card-line);position:relative;font-family:'DM Sans',system-ui,sans-serif;color:var(--ink-2)}
+  margin:0 0 22px;padding:0;border-radius:22px;background:var(--card);box-shadow:0 1px 0 rgba(43,33,26,.02),inset 0 0 0 1px var(--card-line);position:relative;font-family:'DM Sans',system-ui,sans-serif;color:var(--ink-2)}
 .war *{box-sizing:border-box}
-.war .war-hd{display:flex;align-items:center;gap:12px;padding:10px 8px 6px;flex-wrap:wrap}
-.war .war-mark{width:22px;height:22px;display:grid;place-items:center}
-.war .war-hd h2{margin:0;display:flex;align-items:center;gap:0;font-weight:600;font-size:12.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3)}
-.war .war-hd h2 b{font-family:'DM Mono',monospace;font-weight:500;color:var(--ink-2);margin-left:8px;letter-spacing:0}
-.war .war-hd h2 b+b{color:var(--ink-3)}
-.war .war-all{margin-left:14px;height:30px;padding:0 13px;border-radius:16px;border:1px solid var(--clay);background:none;color:var(--clay);font-size:13px;font-weight:600;line-height:1;cursor:pointer}
+.war .war-mark{width:22px;height:22px;display:grid;place-items:center;flex:none}
+/* the header bar IS the toggle — the same element in both states, so nothing swaps */
+.war .war-bar{display:flex;align-items:center;gap:14px;width:100%;padding:13px 16px;border:0;background:none;text-align:left;cursor:pointer;color:var(--ink-2);border-radius:22px;transition:background .2s var(--ease)}
+.war .war-bar:hover{background:rgba(255,255,255,.42)}
+.war.is-open .war-bar{border-bottom-left-radius:0;border-bottom-right-radius:0}
+.war .war-bar-main{min-width:0;flex:1;display:flex;flex-direction:column;gap:2px}
+.war .war-bar-title{display:flex;align-items:baseline;gap:9px;min-width:0}
+.war .war-bar-title b{font-size:14px;font-weight:600;color:var(--ink)}
+.war .war-bar-title .count{font-style:normal;font-family:'DM Mono',monospace;font-weight:500;font-size:12px;color:#fff;background:var(--clay);min-width:18px;height:18px;padding:0 5px;border-radius:9px;display:inline-grid;place-items:center;align-self:center}
+.war .war-bar-title .sum{font-style:normal;font-family:'DM Mono',monospace;font-weight:500;font-size:13px;color:var(--ink-3)}
+.war .war-bar-sub{display:flex;align-items:center;gap:8px;min-width:0;font-size:12.5px;color:var(--ink-3)}
+.war .war-bar-sub .avs{display:inline-flex;flex:none}
+.war .war-bar-sub .avs .av{width:22px;height:22px;border-radius:11px;background:#EBE3D6;box-shadow:0 0 0 2px #FBF6EF;display:grid;place-items:center;font-size:9px;font-weight:700;color:var(--ink-2);margin-left:-7px}
+.war .war-bar-sub .avs .av:first-child{margin-left:0}
+.war .war-bar-sub .pv,.war .war-bar-sub .status{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.war .war-bar-sub .pv i{font-family:var(--serif);font-style:italic;color:var(--ink-2)}
+.war .war-chev{flex:none;width:26px;height:26px;border-radius:13px;display:grid;place-items:center;color:var(--ink-3);transition:transform .42s var(--ease),background .2s}
+.war .war-chev svg{width:15px;height:15px}
+.war.is-open .war-chev{transform:rotate(180deg)}
+.war .war-bar:hover .war-chev{background:rgba(43,33,26,.05)}
+/* the list grows/shrinks smoothly — grid-rows 0fr→1fr animates to auto height, no JS measuring */
+.war .war-listwrap{display:grid;grid-template-rows:0fr;transition:grid-template-rows .42s var(--ease)}
+.war.is-open .war-listwrap{grid-template-rows:1fr}
+.war .war-list{overflow:hidden;min-height:0;opacity:0;transform:translateY(-4px);transition:opacity .28s var(--ease) .04s,transform .34s var(--ease);padding:0 12px 10px}
+.war.is-open .war-list{opacity:1;transform:none}
+.war .war-actions{display:flex;justify-content:flex-end;padding:2px 4px 6px}
+.war .war-all{height:30px;padding:0 14px;border-radius:16px;border:1px solid var(--clay);background:none;color:var(--clay);font-size:13px;font-weight:600;line-height:1;cursor:pointer;transition:background .18s}
 .war .war-all:hover{background:var(--clay-wash)}
-.war .war-n{margin-left:auto;font-size:12.5px;color:var(--ink-3)}
 .war .war-req{border-top:1px dashed var(--card-line);border-radius:14px;transition:background .28s var(--ease),box-shadow .28s var(--ease),transform .5s var(--ease),opacity .4s}
 .war .war-req:first-of-type{border-top:0}
 .war .war-req:hover{background:rgba(255,255,255,.5)}
@@ -681,31 +694,10 @@ const CSS = `
 .war .war-req.shake .war-fld .ctl.miss{border-color:#E4A99F;color:#B3261E;background:#FDF0EE;animation:war-jitter .5s var(--ease)}
 .war .war-req.shake .war-btn.pri{animation:war-jitter .5s var(--ease)}
 @keyframes war-jitter{0%,100%{transform:translateX(0)}14%{transform:translateX(-5px)}28%{transform:translateX(4px)}42%{transform:translateX(-3px)}58%{transform:translateX(3px)}72%{transform:translateX(-2px)}86%{transform:translateX(1px)}}
-/* header collapse control */
-.war .war-collapse{width:28px;height:28px;border-radius:14px;border:1px solid transparent;background:none;color:var(--ink-3);display:grid;place-items:center;cursor:pointer;transition:background .15s,color .15s}
-.war .war-collapse:hover{background:rgba(43,33,26,.05);color:var(--ink-2)}
-.war .war-collapse .chev.up{display:block;transform:rotate(180deg)}
-.war .war-collapse .chev.up svg{width:14px;height:14px}
-/* collapsed: the quiet peek that invites a tap */
-.war.war-collapsed{padding:0}
-.war .war-peek{display:flex;align-items:center;gap:14px;width:100%;padding:12px 16px;border:0;background:none;border-radius:22px;text-align:left;cursor:pointer;color:var(--ink-2);transition:background .2s var(--ease)}
-.war .war-peek:hover{background:rgba(255,255,255,.5)}
-.war .war-peek .war-mark{flex:none}
-.war .war-peek-avs{display:inline-flex;flex:none}
-.war .war-peek-avs .av{width:26px;height:26px;border-radius:13px;background:#EBE3D6;box-shadow:0 0 0 2px var(--card-line, #FEFCF8);display:grid;place-items:center;font-size:10px;font-weight:700;color:var(--ink-2);margin-left:-8px}
-.war .war-peek-avs .av:first-child{margin-left:0}
-.war .war-peek-txt{min-width:0;flex:1;display:flex;flex-direction:column;gap:1px}
-.war .war-peek-txt b{font-size:14px;font-weight:600;color:var(--ink);display:flex;align-items:baseline;gap:8px}
-.war .war-peek-txt b em{font-style:normal;font-family:'DM Mono',monospace;font-weight:500;font-size:13px;color:var(--clay)}
-.war .war-peek-txt .pv{font-size:12.5px;color:var(--ink-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.war .war-peek-txt .pv i{font-family:var(--serif);font-style:italic;color:var(--ink-2)}
-.war .war-peek-cta{flex:none;display:inline-flex;align-items:center;gap:4px;height:32px;padding:0 12px;border-radius:16px;border:1px solid var(--clay);color:var(--clay);font-size:13px;font-weight:600;background:none;transition:background .18s}
-.war .war-peek:hover .war-peek-cta{background:var(--clay-wash)}
-.war .war-peek-cta .chev{width:13px;height:13px;transform:rotate(-90deg)}
 /* lightbox */
 .war .war-lb{position:fixed;inset:0;z-index:80;background:rgba(21,16,12,.78);display:grid;place-items:center;padding:32px;cursor:zoom-out;animation:war-fade .2s ease}
 .war .war-lb img{max-width:min(92vw,900px);max-height:90vh;border-radius:10px;box-shadow:0 30px 80px -20px rgba(0,0,0,.7)}
 @keyframes war-fade{from{opacity:0}to{opacity:1}}
-@media (max-width:1100px){.war .war-more{grid-template-columns:1fr}.war .war-form{border-left:0;padding-left:0}.war .war-peek-txt .pv{display:none}}
+@media (max-width:1100px){.war .war-more{grid-template-columns:1fr}.war .war-form{border-left:0;padding-left:0}.war .war-bar-sub .pv{display:none}}
 @media (prefers-reduced-motion:reduce){.war *{transition:none!important;animation:none!important}}
 `;
