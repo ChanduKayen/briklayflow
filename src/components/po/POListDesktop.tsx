@@ -388,9 +388,10 @@ function PeekEditor({ prId, orgId, projects, vendors, canOrder, onClose, onPhoto
       w: it.width_mm != null ? String(it.width_mm) : '', h: it.height_mm != null ? String(it.height_mm) : '', brand: it.brand || '', spec: it.spec || '', note: it.note || '',
     })));
     setDirty(false);
-    // The message it came in with — best-effort from the WhatsApp row.
-    if (d.wa_message_id) supabase.from('rough_entries').select('raw_text').eq('org_id', d.org_id).eq('wa_message_id', d.wa_message_id).limit(1)
-      .then(({ data }) => setSaid((data?.[0]?.raw_text as string) || ''));
+    // The message it came in with. For a procurement request this lives on the WhatsApp message log
+    // (content = the text, or the voice transcript backfilled after STT), NOT rough_entries.
+    if (d.wa_message_id) supabase.from('wa_message_log').select('content').eq('wa_message_id', d.wa_message_id).eq('direction', 'IN').limit(1)
+      .then(({ data }) => setSaid(((data?.[0]?.content as string) || '').trim()));
     else setSaid('');
   }, [pr.data]);
 

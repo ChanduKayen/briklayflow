@@ -132,14 +132,18 @@ export default function PurchaseRequestMobileHost({ id, session }: { id: string;
   // The message the photo arrived with lives on the WhatsApp message the request was read from — the
   // same wa_message_id the day book keys its own rows by. A request raised any other way has none.
   const waQ = useQuery({
-    queryKey: ['purchase_request_wa', pr?.org_id, pr?.wa_message_id],
-    enabled: !!pr?.wa_message_id && !!pr?.org_id,
+    queryKey: ['purchase_request_wa', pr?.wa_message_id],
+    enabled: !!pr?.wa_message_id,
     queryFn: async () => {
-      const { data } = await supabase.from('rough_entries')
-        .select('raw_text, raw_image_url, sender_name, created_at')
-        .eq('org_id', pr!.org_id).eq('wa_message_id', pr!.wa_message_id!)
+      // The inbound message (text, or the voice transcript) lives on wa_message_log — procurement
+      // requests never write a rough_entries row, so the message must come from here.
+      const { data } = await supabase.from('wa_message_log')
+        .select('content, media_url, created_at')
+        .eq('wa_message_id', pr!.wa_message_id!).eq('direction', 'IN')
         .order('created_at', { ascending: true });
-      return (data ?? []) as { raw_text: string | null; raw_image_url: string | null; sender_name: string | null }[];
+      return (data ?? []).map((w: { content: string | null; media_url: string | null }) => ({
+        raw_text: w.content, raw_image_url: w.media_url, sender_name: null,
+      })) as { raw_text: string | null; raw_image_url: string | null; sender_name: string | null }[];
     },
   });
 

@@ -495,12 +495,13 @@ export function usePendingPRs(projectId?: string) {
       if (projectId) q = q.eq('site_id', projectId);
       const { data } = await q;
       const rows = (data ?? []) as any[];
-      // The message the request came with lives on the WhatsApp row it was read from — fetch them in one go.
+      // The message the request came with lives on the WhatsApp message log (content = text, or the
+      // voice transcript) — procurement never writes rough_entries, so read it from there.
       const wamids = rows.map((r) => r.wa_message_id).filter(Boolean);
       const saidBy: Record<string, string> = {};
       if (wamids.length) {
-        const { data: re } = await supabase.from('rough_entries').select('wa_message_id, raw_text').in('wa_message_id', wamids);
-        (re ?? []).forEach((x: any) => { if (x.wa_message_id && x.raw_text && !saidBy[x.wa_message_id]) saidBy[x.wa_message_id] = x.raw_text; });
+        const { data: re } = await supabase.from('wa_message_log').select('wa_message_id, content').in('wa_message_id', wamids).eq('direction', 'IN');
+        (re ?? []).forEach((x: any) => { if (x.wa_message_id && x.content && !saidBy[x.wa_message_id]) saidBy[x.wa_message_id] = x.content; });
       }
       return rows.map((r) => ({
         id: r.id, title: r.title || 'Materials request', imageUrl: r.image_url, pages: r.image_url ? 1 : 0,
