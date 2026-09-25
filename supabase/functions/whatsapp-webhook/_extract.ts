@@ -697,25 +697,26 @@ export async function extractProcurementFromImage(
     `{\n` +
     `  "vendor_raw": "supplier/shop to order from, exactly as written, or null",\n` +
     `  "site_raw": "the project/site ONLY — the EXACT known project name when one clearly fits (the header/title often names it), else a SHORT site reference. NEVER a sentence. null if none",\n` +
-    `  "title": "short construction-literate header for 3+ items (e.g. Electrical fittings), else null",\n` +
-    `  "items": [ { "item_name": "16 modular plate", "quantity": 4, "unit": null, "width_mm": null, "height_mm": null, "spec": "16 module", "brand": null, "note": null } ]\n` +
+    `  "title": "short construction-literate header for 3+ items, else null",\n` +
+    `  "items": [ { "item_name": "cement (OPC 53 grade)", "quantity": 200, "unit": "bags", "width_mm": null, "height_mm": null, "spec": "OPC 53 grade", "brand": null, "note": null } ]\n` +
     `}\n\n` +
-    `HOW TO READ EACH LINE — a line is:  <item description>   <separator>   <quantity>.\n` +
-    `- QUANTITY is the number on the RIGHT, after the separator (= : - → or a plain gap). That ONE number is the count to order.\n` +
-    `- THE SEPARATOR IS NOT A DIGIT. A handwritten "=" or ":" is often shaped like "2", "z", "≈" or "⌐" — NEVER read the separator as the quantity. Example: "10 Amps 1-way switches = 105" → quantity 105 (NOT 2). "16 modular plates = 4" → quantity 4 (NOT 2).\n` +
-    `- NUMBERS INSIDE THE DESCRIPTION ARE SPEC, NEVER QUANTITY: an amperage ("10 Amps", "20 Amps", "63 Amps"), a module/gang count ("16 modular", "8 modular" = a 16-module / 8-module switch plate), a physical size ("16 inch", "1½ inch", "2 inch"). These stay in item_name and/or spec. ONLY the number after the separator is the quantity.\n` +
-    `- DITTO MARKS: a row whose description is written as " or ,, or -do- or -"- or left blank REPEATS the description of the row directly above — expand it in full. After "16 modular plates = 4", a row "12 " " " = 3" means item_name "12 modular plate", quantity 3.\n` +
-    `- INDENTED SUB-LINES under a heading are their own items and inherit the heading's noun where ditto marks indicate: under "20 Amps MCB = 3", the line "16 " = 4" means "16 Amps MCB" quantity 4, and "10 " = 5" means "10 Amps MCB" quantity 5.\n` +
-    `- One item PER LINE. Never merge lines, never summarise, never drop a line.\n\n` +
+    `READING A MATERIALS LIST (the same skill for ANY trade — civil, steel, plumbing, electrical, finishing):\n` +
+    `- Each line pairs a DESCRIPTION (what to buy) with an ORDER QUANTITY (how many to buy). Separate the two before you fill any field.\n` +
+    `- The ORDER QUANTITY is the standalone count the writer set apart for that line — usually to the right, in its own column, often after a separator (= : - x → or just a gap). Read THAT number, and read its own digits.\n` +
+    `- A DESCRIBING NUMBER is not the quantity. Any number that says WHAT the item is or grades it — a rating, dimension, size, thickness, gauge, diameter, length, pack/module/gang count, grade, class, model or code — belongs in item_name / spec. It answers "which item", never "how many". (e.g. a "6 mm rod", "4x7 ft shutter", "M25 mix", "20 mm pipe", a "16-module plate", a "63 A breaker" — the 6 / 4x7 / 25 / 20 / 16 / 63 describe the item; they are not the order count.)\n` +
+    `- Do NOT read a SEPARATOR or a stray mark as a number. A handwritten "=", ":" or "-" can look like a digit ("2", "z", "≈"); it merely joins the description to the quantity — take the quantity's digits, not the connector.\n` +
+    `- REPEAT NOTATION: a line whose description is a ditto (" , ,, , -do- , -"-) or is left blank copies the description of the line directly ABOVE — expand it in full, changing only what that line changes (its leading spec and its quantity).\n` +
+    `- INDENTED or grouped sub-lines belong to the heading above them; each is its own item, inheriting the heading's noun.\n` +
+    `- ONE item per line. Never merge, summarise, or drop a line — capture every row.\n\n` +
     `FIELDS:\n` +
-    `- item_name: the material with the spec that names it, COMPLETE and in ENGLISH ("16 modular plate", "10 Amps 1-way switch", "63 Amps 4-pole isolator", "Fan regulator", "Bell switch", "PVC tape roll", "Black screws").\n` +
-    `- quantity: ONLY the count after the separator. null if truly none written. NEVER invent one; NEVER put an amperage, size or module-count here.\n` +
-    `- unit: ONLY when a real unit WORD is written by the quantity (Box, bag, bags, nos, rolls, ton, kg, m, ft, sqft). A bare number → unit null. Do NOT invent "units".\n` +
-    `- width_mm / height_mm: a stated size as NUMBERS in millimetres (convert inch/ft). Else null. A size is NEVER the quantity and NEVER money.\n` +
-    `- spec: material grade/type/rating/size that is not already the item's own name, compact and " · "-joined. brand: the make. note: only a genuine remark that is none of the above.\n\n` +
+    `- item_name: the material named in full, WITH the words/numbers that identify it (its type and grade), in ENGLISH.\n` +
+    `- quantity: ONLY the order count (the set-apart number). null if none is written. Never invent it; never move a rating / size / grade here.\n` +
+    `- unit: ONLY when a real unit WORD is written next to the count (nos, pcs, bag, bags, box, roll, rolls, ton, kg, m, ft, sqft, cft, brass). A bare number → unit null. Do NOT invent "units".\n` +
+    `- width_mm / height_mm: a stated physical size as NUMBERS in millimetres (convert inch/ft). Else null. A size is a spec — never the quantity, never money.\n` +
+    `- spec: the rating / grade / type / size / finish that isn't already inside item_name, compact and " · "-joined. brand: the make. note: only a genuine remark that fits nothing above.\n\n` +
     `LANGUAGE: write item_name, unit, note and title in ENGLISH even if handwritten in Telugu/Hindi/another script (సిమెంట్→"cement", ఇసుక→"sand", కడ్డీలు→"steel bars", ఇటుకలు→"bricks"). Keep a BRAND/proper-noun transliterated in Roman letters; never translate a brand. NEVER invent — if a word isn't clearly a known material, transliterate it faithfully.\n` +
     `Do NOT read any figure as a paid amount/price — this is a request, not a payment.\n` +
-    `vendor_raw is RAW as written (matched to your vendors later). site_raw: the EXACT known project name when one clearly fits, else a SHORT reference, else null.`
+    `vendor_raw is RAW as written (matched to your vendors later). site_raw: the EXACT known project name when one clearly fits (the header often names it), else a SHORT reference, else null.`
 
   const ANTHROPIC_KEY = Deno.env.get('ANTHROPIC_API_KEY')
   const OPENAI_KEY    = Deno.env.get('OPENAI_API_KEY')
