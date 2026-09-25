@@ -426,7 +426,8 @@ export default function PurchaseRequestMobile(p: PurchaseRequestMobileProps) {
     }
     function openQuotes() {
       Q = { step: 1, picked: [], q: '', hi: 0, lastHi: null, adding: '', note: '', by: '2 days', sent: false };
-      P = { kind: 'quotes' }; openPanel(''); paintQ(); setTimeout(() => { const f = $('#qq') as HTMLInputElement | null; f && f.focus({ preventScroll: true }); }, 340);
+      // Do NOT auto-focus the search — the keyboard only comes up when the field is tapped.
+      P = { kind: 'quotes' }; openPanel(''); paintQ();
     }
     function paintQ(keep?: boolean) {
       const y = panel.scrollTop, n = S.items.length;
@@ -450,13 +451,20 @@ export default function PurchaseRequestMobile(p: PurchaseRequestMobileProps) {
           '<div class="qrow"><span class="l">Reply by</span><div class="chips">' + ['Tomorrow', '2 days', 'This week'].map((b) => '<button type="button" class="chip" data-by="' + b + '" aria-pressed="' + (b === Q!.by) + '">' + b + '</button>').join('') + '</div></div>' +
           '<div class="qfoot"><button type="button" class="big" data-qsend>Send to ' + Q!.picked.length + (Q!.picked.length === 1 ? ' supplier' : ' suppliers') + '</button></div>';
       } else {
-        ($('#pBody') as HTMLElement).innerHTML = '<div class="p-head"><div class="t"><h2>' + (Q!.sent ? 'Quotes requested' : 'Sending') + '</h2><span>' + (Q!.sent ? 'Their replies will land on this request.' : 'On WhatsApp') + '</span></div>' + X + '</div>' +
-          Q!.picked.map((pn, i) => '<div class="sentl" data-sent="' + i + '"><span class="tk">' + TICK + '</span><b>' + esc(pn) + '</b><span>' + esc(supByName(pn)?.phone || qAdded[pn] || 'new') + '</span></div>').join('') +
-          '<div class="qfoot"><button type="button" class="big' + (Q!.sent ? ' ok' : ' busy') + '" data-close' + (Q!.sent ? '' : ' disabled') + '>' + (Q!.sent ? 'Done' : 'Sending…') + '</button></div>';
+        ($('#pBody') as HTMLElement).innerHTML = '<div class="p-head"><div class="t"><h2>' + (Q!.sent ? 'Quotes requested' : 'Sending…') + '</h2><span>' + (Q!.sent ? 'Their rates will land on this request.' : 'Reaching each supplier on WhatsApp') + '</span></div>' + X + '</div>' +
+          '<div class="qsent">' + Q!.picked.map((pn, i) => '<div class="sentl" data-sent="' + i + '"><span class="tk">' + TICK + '</span><span class="m"><b>' + esc(pn) + '</b><span>' + esc(supByName(pn)?.phone || qAdded[pn] || 'new number') + '</span></span></div>').join('') + '</div>' +
+          '<div class="qfoot"><button type="button" class="big' + (Q!.sent ? ' ok' : ' busy') + '" data-close' + (Q!.sent ? '' : ' disabled') + '>' + (Q!.sent ? 'Done · ' + Q!.picked.length + (Q!.picked.length === 1 ? ' request sent' : ' requests sent') : 'Sending…') + '</button></div>';
       }
       if (keep) panel.scrollTop = y;
     }
-    function qPick(name: string) { const i = Q!.picked.indexOf(name); if (i >= 0) Q!.picked.splice(i, 1); else Q!.picked.push(name); Q!.lastHi = null; buzz(4); Q!.q = ''; Q!.hi = 0; paintQ(true); const f = $('#qq') as HTMLInputElement | null; f && f.focus({ preventScroll: true }); }
+    function qPick(name: string) {
+      const i = Q!.picked.indexOf(name); if (i >= 0) Q!.picked.splice(i, 1); else Q!.picked.push(name);
+      Q!.lastHi = null; buzz(4); Q!.q = ''; Q!.hi = 0;
+      // Only keep the keyboard up if the user was typing in the search; a tap on a row must not raise it.
+      const wasTyping = document.activeElement === $('#qq');
+      paintQ(true);
+      if (wasTyping) { const f = $('#qq') as HTMLInputElement | null; f && f.focus({ preventScroll: true }); }
+    }
     async function qSend() {
       Q!.step = 3; paintQ(); (document.activeElement as HTMLElement | null)?.blur();
       const recipients = Q!.picked.map((name) => { const s = supByName(name); return { id: s?.id, name, phone: s?.phone || qAdded[name] || '' }; });

@@ -32,6 +32,10 @@ export type ProcItem = {
   item_name: string
   quantity: number | null
   unit: string | null
+  width_mm: number | null
+  height_mm: number | null
+  spec: string | null
+  brand: string | null
   note: string | null
 }
 
@@ -135,13 +139,13 @@ A purchase request = ONE vendor + ONE site + N items.
 
 OUTPUT — STRICT JSON only:
 { "requests": [ { "vendor_raw": string|null, "sourcing_intent": "direct"|"rfq"|null, "site_raw": string|null, "title": string|null,
-                  "items": [ { "item_name": string, "quantity": number|null, "unit": string|null, "note": string|null } ] } ] }
+                  "items": [ { "item_name": string, "quantity": number|null, "unit": string|null, "width_mm": number|null, "height_mm": number|null, "spec": string|null, "brand": string|null, "note": string|null } ] } ] }
 
 SEGMENTATION — one request per DISTINCT (vendor, site). A different vendor OR a different site => a separate request. Same vendor+site with many materials => ONE request with many items.
 VENDOR — the supplier to order from, written in Latin/Roman letters, RAW as the user said it (do NOT guess or match to a list). null if none named.
 SITE — the user's known projects: {{KNOWN_PROJECTS}}. When the mention clearly fits ONE listed project (by name, or the person/place it is named for), return that project's name EXACTLY. Otherwise a SHORT site reference ONLY — the name or the person it is named for, never a sentence, an item, or the surrounding words. null if no site is referenced.
 SOURCING_INTENT — "direct" if a specific vendor to order from; "rfq" if they want quotes / to compare prices; else null.
-ITEMS — each material as its own item. Pull quantity + unit when stated ("200 bags cement" -> item_name "cement", quantity 200, unit "bags"; "2 ton steel" -> quantity 2, unit "ton"). quantity/unit null when not stated. note = any spec/grade/brand detail.
+ITEMS — each material as its own item, with STRUCTURED specs (do not dump everything into note). Pull quantity + unit when stated ("200 bags cement" -> item_name "cement", quantity 200, unit "bags"; "2 ton steel" -> quantity 2, unit "ton"). A stated size -> width_mm & height_mm as NUMBERS in mm ("4x7 ft window" -> width_mm 1219, height_mm 2134). The material specification (grade, type, class, thickness, colour, system, code) -> spec. The brand/make -> brand. note only for a genuine remark that is none of the above. quantity/width_mm/height_mm null when not stated; never invent one.
 TITLE — for 3 OR MORE items, a short construction-literate header for the list ("Slab materials", "Plastering supplies", "Finishing items"); null for 1-2 items.
 
 OUTPUT LANGUAGE — item_name, unit, note and title MUST be written in ENGLISH, however the request arrived. Voice notes are transcribed in the speaker's own script (Telugu, Hindi, Tamil, …); the message may be code-mixed. Do NOT echo that script — render every field in English.
@@ -218,7 +222,7 @@ function normalizeItems(raw: unknown): ProcItem[] {
     const r = it as Record<string, unknown>
     const name = str(r.item_name)
     if (!name) continue
-    out.push({ item_name: name, quantity: num(r.quantity), unit: str(r.unit), note: str(r.note) })
+    out.push({ item_name: name, quantity: num(r.quantity), unit: str(r.unit), width_mm: num(r.width_mm), height_mm: num(r.height_mm), spec: str(r.spec), brand: str(r.brand), note: str(r.note) })
   }
   return out
 }

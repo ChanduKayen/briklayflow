@@ -31,7 +31,7 @@ interface PrItemRow {
 }
 interface PrRow {
   id: string; org_id: string; status: string; created_at: string; image_url: string | null;
-  sender_name: string | null; wa_message_id: string | null; converted_po_id: string | null;
+  sender_name: string | null; wa_message_id: string | null; converted_po_id: string | null; rfq_id: string | null;
   site_id: string | null; site_raw: string | null; vendor_id: string | null; vendor_raw: string | null;
   purchase_request_items: PrItemRow[];
   projects: { name: string } | null;
@@ -78,6 +78,35 @@ function PqrSkeleton() {
   );
 }
 
+/* A request that already became a PO or a quote request — the deep link lands here, says what it became,
+ * and offers to open it (never re-opens the editable screen). Dark, on-theme, one clear action. */
+function PrConvertedNotice({ kind, refLabel, onOpen, onBack }: { kind: 'po' | 'rfq'; refLabel: string; onOpen: () => void; onBack: () => void }) {
+  const isPO = kind === 'po';
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: '#15100C', color: '#FAF8F3', display: 'flex', flexDirection: 'column', padding: 'calc(14px + env(safe-area-inset-top)) 20px calc(20px + env(safe-area-inset-bottom))', fontFamily: "'DM Sans',system-ui,sans-serif", zIndex: 40 }}>
+      <button type="button" onClick={onBack} aria-label="Back" style={{ display: 'flex', alignItems: 'center', gap: 6, height: 44, marginLeft: -8, padding: '0 10px', border: 0, borderRadius: 22, background: 'none', color: 'rgba(250,248,243,.75)', font: 'inherit', fontSize: 15, fontWeight: 600 }}>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 5l-7 7 7 7" /></svg>Requests
+      </button>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', textAlign: 'center', gap: 14, maxWidth: 360, margin: '0 auto' }}>
+        <span style={{ width: 66, height: 66, borderRadius: 33, background: isPO ? 'rgba(47,93,58,.9)' : 'rgba(212,99,62,.9)', display: 'grid', placeItems: 'center' }}>
+          <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5" /></svg>
+        </span>
+        <h1 style={{ margin: 0, fontFamily: "'Playfair Display',Georgia,serif", fontWeight: 600, fontSize: 26, lineHeight: 1.15 }}>
+          {isPO ? 'This became a purchase order' : 'Quotes have been requested'}
+        </h1>
+        <p style={{ margin: 0, fontSize: 15, lineHeight: 1.5, color: 'rgba(250,248,243,.65)' }}>
+          {isPO
+            ? <>This request is now <b style={{ color: '#FAF8F3', fontFamily: "'DM Mono',ui-monospace,monospace", fontWeight: 500 }}>{refLabel}</b>. Open it to send, receive or bill it.</>
+            : <>This request went out to suppliers for quotes. Their rates will land on the enquiry as they reply.</>}
+        </p>
+      </div>
+      <button type="button" onClick={onOpen} style={{ height: 56, border: 0, borderRadius: 28, background: isPO ? '#2F5D3A' : '#B5472A', color: '#fff', fontSize: 16.5, fontWeight: 600, boxShadow: `0 16px 28px -14px ${isPO ? 'rgba(47,93,58,.9)' : 'rgba(181,71,42,.95)'}` }}>
+        {isPO ? `Open ${refLabel}` : 'Open the quote request'}
+      </button>
+    </div>
+  );
+}
+
 export default function PurchaseRequestMobileHost({ id, session }: { id: string; session: Session }) {
   const navigate = useNavigate();
   const orgId = useOrgId();
@@ -90,7 +119,7 @@ export default function PurchaseRequestMobileHost({ id, session }: { id: string;
     enabled: !!id,
     queryFn: async () => {
       const { data, error } = await supabase.from('purchase_requests')
-        .select('id, org_id, status, created_at, image_url, sender_name, wa_message_id, converted_po_id, site_id, site_raw, vendor_id, vendor_raw, '
+        .select('id, org_id, status, created_at, image_url, sender_name, wa_message_id, converted_po_id, rfq_id, site_id, site_raw, vendor_id, vendor_raw, '
           + 'purchase_request_items(id, item_index, item_name, quantity, unit, note, width_mm, height_mm, brand, spec, source_line, read_fields), '
           + 'projects(name), stakeholders(name)')
         .eq('id', id).single();
@@ -179,6 +208,21 @@ export default function PurchaseRequestMobileHost({ id, session }: { id: string;
 
   if (prQ.isLoading || !request || !pr) return <PqrSkeleton />;
 
+  // This request is no longer a draft — it became a PO or went out for quotes. Don't re-open the editable
+  // screen (which would let it be ordered twice); say what it became and offer to open it.
+  const isPO = !!pr.converted_po_id || pr.status === 'placed' || pr.status === 'fulfilled';
+  const isRfq = !isPO && (pr.status === 'quoted' || !!pr.rfq_id);
+  if (isPO || isRfq) {
+    return (
+      <PrConvertedNotice
+        kind={isPO ? 'po' : 'rfq'}
+        refLabel={isPO ? (pr.converted_po_id || 'the purchase order') : 'the quote request'}
+        onOpen={() => navigate(isPO && pr.converted_po_id ? `/purchase-orders/${pr.converted_po_id}` : pr.rfq_id ? `/rfq/${pr.rfq_id}` : '/purchase-orders')}
+        onBack={() => navigate('/purchase-orders?status=draft')}
+      />
+    );
+  }
+
   const projects = projQ.data ?? [];
   const payees = [...extraPayees, ...(payeeQ.data ?? [])];
   const idOf = (list: { name: string; id?: string }[], name: string) =>
@@ -246,9 +290,13 @@ export default function PurchaseRequestMobileHost({ id, session }: { id: string;
       body: { orgId: pr.org_id, projectId: siteId, deliveryLocation: request.project || null, quoteBy: by.toISOString(), note: note || null, items, recipients: recips },
     });
     if (error) throw error;
-    const res = data as { ok?: boolean; error?: string } | null;
+    const res = data as { ok?: boolean; error?: string; rfq_id?: string } | null;
     if (!res?.ok) throw new Error(res?.error || 'Could not send the requests');
+    // The request has gone out for quotes — move it out of the review inbox, linked to its enquiry.
+    await supabase.from('purchase_requests').update({ status: 'quoted', rfq_id: res.rfq_id ?? null }).eq('id', pr.id);
     qc.invalidateQueries({ queryKey: ['pqr_payees', orgId] });
+    qc.invalidateQueries({ queryKey: ['po_list_pending_prs'] });
+    qc.invalidateQueries({ queryKey: ['daybook_purchase_requests', orgId] });
   };
 
   return (

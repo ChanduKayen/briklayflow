@@ -200,13 +200,13 @@ export const PQR_CSS = `
 .pqr .ln .l{flex:none;width:96px;display:flex;flex-direction:column;font-size:14px;color:rgba(var(--cream),.55)}
 .pqr .ln .l em{font-style:normal;font-size:10.5px;color:rgba(var(--cream),.35)}
 .pqr .ln .v{flex:1;min-width:0;font-size:16px;font-weight:600;line-height:1.3;overflow-wrap:anywhere}
-.pqr .ln .v.none{color:rgba(var(--cream),.4);font-weight:400}
+.pqr .ln .v.none{color:rgba(var(--cream),.34);font-weight:400;font-size:13.5px;font-style:italic;letter-spacing:.01em}
 .pqr .ln .v small{display:block;font-family:var(--mono);font-size:12px;font-weight:400;color:rgba(var(--cream),.5);margin-top:2px}
 .pqr .ln.editing{box-shadow:none}
 .pqr .ed{display:flex;align-items:center;gap:8px;padding:0 0 12px;box-shadow:0 1px 0 0 rgba(var(--cream),.08);animation:pqr_pickIn .3s var(--ease) both}
 .pqr .ed .l{flex:none;width:96px;font-size:14px;color:var(--clay-hi)}
 .pqr .ed .inp{flex:1;min-width:0;height:44px;border:0;border-radius:12px;background:rgba(var(--cream),.08);padding:0 12px;font-size:16px;font-weight:600;color:rgb(var(--cream));outline:none;box-shadow:inset 0 0 0 1.5px var(--clay-hi)}
-.pqr .ed .inp::placeholder{font-weight:400;color:rgba(var(--cream),.35)}
+.pqr .ed .inp::placeholder{font-weight:400;font-style:italic;color:rgba(var(--cream),.3);font-size:14px}
 .pqr .ed .two{flex:1;min-width:0;display:flex;align-items:center;gap:6px}
 .pqr .ed .two .inp{width:auto;flex:1;text-align:center;padding:0 6px}
 .pqr .ed .two span{color:rgba(var(--cream),.5)}
@@ -333,7 +333,7 @@ body.pqr-kb .mnav{opacity:0;pointer-events:none;transition:opacity .2s}
 .pqr .pick{padding:2px 4px 14px;box-shadow:0 1px 0 0 rgba(var(--cream),.08);animation:pqr_pickIn .38s var(--ease) both}
 @keyframes pqr_pickIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
 .pqr .inp{display:block;width:100%;height:48px;border:0;border-radius:14px;background:rgba(var(--cream),.07);padding:0 14px;font-size:16px;color:rgb(var(--cream));outline:none}
-.pqr .inp::placeholder{color:rgba(var(--cream),.4)}
+.pqr .inp::placeholder{color:rgba(var(--cream),.32);font-style:italic;font-size:14px}
 .pqr .inp:focus{box-shadow:inset 0 0 0 1.5px var(--clay-hi)}
 .pqr .two{display:flex;align-items:center;gap:8px}
 .pqr .two .inp{flex:1;min-width:0}
@@ -427,12 +427,15 @@ body.pqr-kb .mnav{opacity:0;pointer-events:none;transition:opacity .2s}
 .pqr .qrow input::placeholder{font-weight:400;color:rgba(var(--cream),.35)}
 .pqr .qrow .chips{margin:0 0 0 auto;flex-wrap:nowrap}
 .pqr .qrow .chip{height:32px;padding:0 11px;font-size:13px}
-.pqr .sentl{display:flex;align-items:center;gap:12px;min-height:54px;box-shadow:0 1px 0 0 rgba(var(--cream),.08)}
-.pqr .sentl .tk{flex:none;width:24px;height:24px;border-radius:12px;background:rgba(var(--cream),.1);display:grid;place-items:center;transition:background-color .3s}
-.pqr .sentl .tk svg{width:13px;height:13px;fill:none;stroke:#fff;stroke-width:3;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:22;stroke-dashoffset:22}
+.pqr .qsent{margin-top:10px;padding:2px 14px;border-radius:18px;background:rgba(var(--cream),.05);box-shadow:inset 0 0 0 1px rgba(var(--cream),.08)}
+.pqr .sentl{display:flex;align-items:center;gap:12px;min-height:56px;box-shadow:0 1px 0 0 rgba(var(--cream),.07)}
+.pqr .sentl:last-child{box-shadow:none}
+.pqr .sentl .tk{flex:none;width:26px;height:26px;border-radius:13px;background:rgba(var(--cream),.1);display:grid;place-items:center;transition:background-color .3s}
+.pqr .sentl .tk svg{width:14px;height:14px;fill:none;stroke:#fff;stroke-width:3;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:22;stroke-dashoffset:22}
 .pqr .sentl.ok .tk{background:var(--sage)}.pqr .sentl.ok .tk svg{animation:pqr_tick .4s ease-out forwards}
-.pqr .sentl b{flex:1;font-size:15px;font-weight:600}
-.pqr .sentl span{font-size:12.5px;color:rgba(var(--cream),.5)}
+.pqr .sentl .m{flex:1;min-width:0}
+.pqr .sentl .m b{display:block;font-size:15px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pqr .sentl .m span{display:block;font-size:12.5px;color:rgba(var(--cream),.5);font-family:var(--mono)}
 .pqr .qstate{margin:14px 16px 0;padding:14px 16px;border-radius:18px;background:var(--paper);border:1px solid var(--line);display:flex;align-items:center;gap:12px}
 .pqr .qstate .dotq{flex:none;width:10px;height:10px;border-radius:50%;background:var(--clay-hi);animation:pqr_breath 1.5s ease-in-out infinite}
 .pqr .qstate b{display:block;font-size:15px}

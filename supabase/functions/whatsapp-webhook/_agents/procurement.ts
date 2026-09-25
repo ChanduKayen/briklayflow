@@ -126,7 +126,7 @@ async function stageRequest(
   vendorId: string | null, siteId: string | null, sourcing: string | null,
   imageUrl: string | null = null,
 ): Promise<string | null> {
-  const items = req.items.map((it) => ({ item_name: it.item_name, quantity: it.quantity, unit: it.unit, note: it.note }))
+  const items = req.items.map((it) => ({ item_name: it.item_name, quantity: it.quantity, unit: it.unit, width_mm: it.width_mm, height_mm: it.height_mm, spec: it.spec, brand: it.brand, note: it.note }))
   for (let attempt = 1; attempt <= 3; attempt++) {
     const { data, error } = await ctx.supabase.rpc('stage_purchase_request', {
       p_org_id: ctx.orgId, p_sender: ctx.from, p_sender_name: ctx.senderName,
@@ -184,7 +184,7 @@ export async function runProcurementMessage(
     )
     const items = read.items.length
       ? read.items
-      : [{ item_name: (read.title || ctx.image.caption || text || 'Materials').trim(), quantity: null, unit: null, note: null }]
+      : [{ item_name: (read.title || ctx.image.caption || text || 'Materials').trim(), quantity: null, unit: null, width_mm: null, height_mm: null, spec: null, brand: null, note: null }]
     const req: ProcRequest = {
       vendor_raw: read.vendor_raw, sourcing_intent: null,
       site_raw: read.site_raw, items, title: read.title,
@@ -400,7 +400,7 @@ export async function startVendorFlow(
 
   const req: ProcRequest = {
     vendor_raw: null, sourcing_intent: mode === 'rfq' ? 'rfq' : 'direct', site_raw: null,
-    items: [{ item_name: description, quantity: null, unit: null, note: null }],
+    items: [{ item_name: description, quantity: null, unit: null, width_mm: null, height_mm: null, spec: null, brand: null, note: null }],
     title: description,
   }
   const prId = await stageRequest(ctx, req, 0, null, null, mode === 'rfq' ? 'rfq' : null)

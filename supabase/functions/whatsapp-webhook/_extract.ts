@@ -676,7 +676,7 @@ export async function extractProcurementFromImage(
   contentType: string,
   userContext: string | null,
   knownProjects: string[],
-): Promise<{ vendor_raw: string | null; site_raw: string | null; title: string | null; items: Array<{ item_name: string; quantity: number | null; unit: string | null; note: string | null }> }> {
+): Promise<{ vendor_raw: string | null; site_raw: string | null; title: string | null; items: Array<{ item_name: string; quantity: number | null; unit: string | null; width_mm: number | null; height_mm: number | null; spec: string | null; brand: string | null; note: string | null }> }> {
   const prompt =
     `This is a construction-site PURCHASE REQUEST — a list of MATERIALS TO BUY / ORDER (an indent, materials/shopping list, or quotation ask). It is NOT a paid bill or a payment.\n` +
     (userContext ? `User note: "${userContext}" — use as additional context.\n` : '') +
@@ -686,14 +686,14 @@ export async function extractProcurementFromImage(
     `  "vendor_raw": "supplier/shop to order from, exactly as written, or null",\n` +
     `  "site_raw": "the project/site ONLY — the EXACT known project name when one clearly fits, else a SHORT site reference (the name, or the person/place it is named for). NEVER a sentence or the surrounding words. null if no site is referenced",\n` +
     `  "title": "short construction-literate header for 3+ items (e.g. Slab materials), else null",\n` +
-    `  "items": [ { "item_name": "cement", "quantity": 200, "unit": "bags", "note": "every spec/dimension/grade/brand for this line, or null" } ]\n` +
+    `  "items": [ { "item_name": "cement", "quantity": 200, "unit": "bags", "width_mm": null, "height_mm": null, "spec": "material spec — glass/grade/system/code/thickness/colour, compact and · -joined, or null", "brand": "brand/make, or null", "note": "any genuine remark that is none of the above, or null" } ]\n` +
     `}\n\n` +
     `Rules:\n` +
     `- Every material / line on the list is its OWN item. Pull quantity + unit when written ("200 bags cement" -> item_name "cement", quantity 200, unit "bags").\n` +
-    `- CAPTURE EVERY DETAIL — do not summarise. If the list is a TABLE with spec columns (size, glass/material type, code, system, width, height, area, colour, thickness, brand, grade, model, etc.), keep the primary Description as item_name, read the Qty column into quantity, and FOLD ALL OTHER COLUMNS for that row into note as a compact " · "-separated string in the row's own words — e.g. "8mm clear glass (1,2,3,4) · code NA · system BS 40 (SD1) · 5867×2515 mm · 158.83 sqft". Skip only empty cells. NEVER leave note null when the row has any spec.\n` +
+    `- CAPTURE EVERY DETAIL as STRUCTURED fields — never dump everything into note. For a TABLE row (columns like description, size, glass/material type, code, system, width, height, area, colour, thickness, brand, grade, model): Description -> item_name; Qty -> quantity; a WIDTH×HEIGHT or separate W/H columns -> width_mm & height_mm as NUMBERS in millimetres (convert if needed); the material specification (glass type, grade, system, code, thickness, colour, finish) -> spec as a compact " · "-joined string e.g. "8mm clear glass · system BS 40 (SD1)"; the brand/make -> brand. note ONLY for a genuine remark that is none of the above. Skip empty cells. NEVER leave spec null when the row states a material spec.\n` +
     `- Keep item_name COMPLETE — never truncate it.\n` +
-    `- quantity/unit null when not written. NEVER invent a quantity.\n` +
-    `- Do NOT read any figure as a paid amount/price — this is a request, not a payment. Dimensions and areas are SPECS (put them in note), not money.\n` +
+    `- quantity/width_mm/height_mm null when not written. NEVER invent a quantity or a dimension.\n` +
+    `- Do NOT read any figure as a paid amount/price — this is a request, not a payment. Dimensions go in width_mm/height_mm, areas/other specs in spec — never as money.\n` +
     `- OUTPUT LANGUAGE: write item_name, unit, note and title in ENGLISH even if the list is handwritten in Telugu/Hindi/another script — translate each material to the term a builder writes on an order (సిమెంట్→"cement", ఇసుక→"sand", కడ్డీలు→"steel bars", ఇటుకలు→"bricks"). Keep a BRAND/proper-noun transliterated in Roman letters; never translate a brand. NEVER invent — if a word isn't clearly a known material, transliterate it faithfully rather than guessing another material.\n` +
     `- vendor_raw is RAW as written (matched to your vendors later). site_raw: when the mention clearly fits ONE known project, return that project's name EXACTLY; otherwise a SHORT reference only. Never dump surrounding words into either field.`
 
@@ -710,7 +710,7 @@ export async function extractProcurementFromImage(
   }
 }
 
-function normProcImage(parsed: any): { vendor_raw: string | null; site_raw: string | null; title: string | null; items: Array<{ item_name: string; quantity: number | null; unit: string | null; note: string | null }> } {
+function normProcImage(parsed: any): { vendor_raw: string | null; site_raw: string | null; title: string | null; items: Array<{ item_name: string; quantity: number | null; unit: string | null; width_mm: number | null; height_mm: number | null; spec: string | null; brand: string | null; note: string | null }> } {
   const s = (v: any): string | null => (typeof v === 'string' && v.trim() ? v.trim() : null)
   const num = (v: any): number | null => {
     if (typeof v === 'number' && isFinite(v)) return v
@@ -719,8 +719,8 @@ function normProcImage(parsed: any): { vendor_raw: string | null; site_raw: stri
   }
   const rawItems = Array.isArray(parsed?.items) ? parsed.items : []
   const items = rawItems
-    .map((it: any) => ({ item_name: s(it?.item_name), quantity: num(it?.quantity), unit: s(it?.unit), note: s(it?.note) }))
-    .filter((it: { item_name: string | null }) => !!it.item_name) as Array<{ item_name: string; quantity: number | null; unit: string | null; note: string | null }>
+    .map((it: any) => ({ item_name: s(it?.item_name), quantity: num(it?.quantity), unit: s(it?.unit), width_mm: num(it?.width_mm), height_mm: num(it?.height_mm), spec: s(it?.spec), brand: s(it?.brand), note: s(it?.note) }))
+    .filter((it: { item_name: string | null }) => !!it.item_name) as Array<{ item_name: string; quantity: number | null; unit: string | null; width_mm: number | null; height_mm: number | null; spec: string | null; brand: string | null; note: string | null }>
   return { vendor_raw: s(parsed?.vendor_raw), site_raw: s(parsed?.site_raw), title: s(parsed?.title), items }
 }
 
