@@ -30,7 +30,8 @@ export const PO_LIST_DESKTOP_CSS = `
 .pox .btn svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
 
 /* the inbox */
-.pox .inbox{margin:26px -16px 0;padding:6px 16px 4px;border-radius:24px;background:#F1ECE1}
+/* the WhatsApp-review surface — SAME lightened cream + subtle border as the Transactions review queue */
+.pox .inbox{margin:26px -16px 0;padding:6px 16px 4px;border-radius:24px;background:linear-gradient(180deg,#FEFCF8 0%,#F7F2EA 100%);box-shadow:inset 0 0 0 1px #EFE7DA}
 .pox .inbox .hd{display:flex;align-items:center;gap:10px;padding:10px 8px 6px}
 .pox .inbox .hd .mark{width:22px;height:22px;display:grid;place-items:center}
 .pox .inbox .hd .mark svg{width:15px;height:15px;fill:var(--wa)}
