@@ -488,7 +488,7 @@ function PeekEditor({ prId, orgId, projects, vendors, canOrder, onClose, onPhoto
         <PkResolve label="Project" ask="Which site is this for?" text={siteText} id={siteId} rank={rankProjects}
           onText={(v) => { setSiteText(v); setSiteId(''); touch(); }} onPick={(o) => { setSiteId(o.id); setSiteText(o.name); touch(); }}
           onClear={() => { setSiteId(''); touch(); }} />
-        <PkResolve label="Supplier" ask="Who gave this quote?" text={vendorText} id={vendorId} rank={rankVendors} createLabel="vendor" orgId={orgId}
+        <PkResolve label="Supplier" ask="Who is supplying this order?" text={vendorText} id={vendorId} rank={rankVendors} createLabel="vendor" orgId={orgId}
           onText={(v) => { setVendorText(v); setVendorId(''); touch(); }} onPick={(o) => { setVendorId(o.id); setVendorText(o.name); touch(); }}
           onClear={() => { setVendorId(''); touch(); }} onCreated={(id, name) => { setVendorId(id); setVendorText(name); touch(); }} />
       </div>
