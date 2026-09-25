@@ -684,7 +684,7 @@ export async function extractProcurementFromImage(
     `Return ONLY valid JSON, no other text:\n` +
     `{\n` +
     `  "vendor_raw": "supplier/shop to order from, exactly as written, or null",\n` +
-    `  "site_raw": "the project/site — the EXACT known project name if it clearly matches one, else the raw words, else null",\n` +
+    `  "site_raw": "the project/site ONLY — the EXACT known project name when one clearly fits, else a SHORT site reference (the name, or the person/place it is named for). NEVER a sentence or the surrounding words. null if no site is referenced",\n` +
     `  "title": "short construction-literate header for 3+ items (e.g. Slab materials), else null",\n` +
     `  "items": [ { "item_name": "cement", "quantity": 200, "unit": "bags", "note": "every spec/dimension/grade/brand for this line, or null" } ]\n` +
     `}\n\n` +
@@ -695,7 +695,7 @@ export async function extractProcurementFromImage(
     `- quantity/unit null when not written. NEVER invent a quantity.\n` +
     `- Do NOT read any figure as a paid amount/price — this is a request, not a payment. Dimensions and areas are SPECS (put them in note), not money.\n` +
     `- OUTPUT LANGUAGE: write item_name, unit, note and title in ENGLISH even if the list is handwritten in Telugu/Hindi/another script — translate each material to the term a builder writes on an order (సిమెంట్→"cement", ఇసుక→"sand", కడ్డీలు→"steel bars", ఇటుకలు→"bricks"). Keep a BRAND/proper-noun transliterated in Roman letters; never translate a brand. NEVER invent — if a word isn't clearly a known material, transliterate it faithfully rather than guessing another material.\n` +
-    `- vendor_raw / site_raw are RAW as written; do not guess or match to a list.`
+    `- vendor_raw is RAW as written (matched to your vendors later). site_raw: when the mention clearly fits ONE known project, return that project's name EXACTLY; otherwise a SHORT reference only. Never dump surrounding words into either field.`
 
   const ANTHROPIC_KEY = Deno.env.get('ANTHROPIC_API_KEY')
   const OPENAI_KEY    = Deno.env.get('OPENAI_API_KEY')

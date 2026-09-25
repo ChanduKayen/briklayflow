@@ -139,7 +139,7 @@ OUTPUT — STRICT JSON only:
 
 SEGMENTATION — one request per DISTINCT (vendor, site). A different vendor OR a different site => a separate request. Same vendor+site with many materials => ONE request with many items.
 VENDOR — the supplier to order from, written in Latin/Roman letters, RAW as the user said it (do NOT guess or match to a list). null if none named.
-SITE — the user's known projects: {{KNOWN_PROJECTS}}. Return the EXACT project name if it clearly matches one; otherwise the raw site words as written; otherwise null.
+SITE — the user's known projects: {{KNOWN_PROJECTS}}. When the mention clearly fits ONE listed project (by name, or the person/place it is named for), return that project's name EXACTLY. Otherwise a SHORT site reference ONLY — the name or the person it is named for, never a sentence, an item, or the surrounding words. null if no site is referenced.
 SOURCING_INTENT — "direct" if a specific vendor to order from; "rfq" if they want quotes / to compare prices; else null.
 ITEMS — each material as its own item. Pull quantity + unit when stated ("200 bags cement" -> item_name "cement", quantity 200, unit "bags"; "2 ton steel" -> quantity 2, unit "ton"). quantity/unit null when not stated. note = any spec/grade/brand detail.
 TITLE — for 3 OR MORE items, a short construction-literate header for the list ("Slab materials", "Plastering supplies", "Finishing items"); null for 1-2 items.
@@ -174,7 +174,7 @@ const CONTEXT_SYSTEM = `A short WhatsApp message adding CONTEXT to a materials r
 
 OUTPUT — STRICT JSON only: { "vendor_raw": string|null, "site_raw": string|null }
 VENDOR — the supplier/shop to order from, in Latin/Roman letters, RAW as written; null if none named.
-SITE — the user's known projects: {{KNOWN_PROJECTS}}. The EXACT project name if it clearly matches one; else the raw site words as written; else null.
+SITE — the user's known projects: {{KNOWN_PROJECTS}}. The EXACT project name when the mention clearly fits ONE; else a SHORT site reference only (the name or the person it is named for), never a sentence or surrounding words; else null.
 If the message is NOT such context — it lists items to order, asks a question, gives an instruction, or is a bare "ok" — return BOTH null. JSON only.`
 
 export async function extractProcContext(text: string, knownProjects: string[] = []): Promise<{ vendor_raw: string | null; site_raw: string | null }> {

@@ -227,6 +227,10 @@ async function handleSingle(ctx: ProcCtx, req: ProcRequest | null, imageUrl: str
   const { supabase, from, orgId, wamid, lang } = ctx
   const meta = { org_id: orgId, wamid }
   if (!req) return                                                   // nothing parseable; leave it
+  // A request with NO items is context, not an order (a caption like "glass panel materials", or a
+  // "Chakradhar site" line). Never stage a 0-item ghost PR — the photo path carries its own items and
+  // reunites such text as context. This kills the duplicate "0 items read" request in the inbox.
+  if (!req.items || req.items.length === 0) return
 
   const vendors = await loadVendors(ctx)
   const projects = await loadProjects(ctx)

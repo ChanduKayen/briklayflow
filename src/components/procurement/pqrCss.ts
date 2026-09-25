@@ -33,7 +33,7 @@ export const PQR_CSS = `
 .pqr button{cursor:pointer}
 .pqr :focus-visible{outline:2px solid var(--clay-hi);outline-offset:3px;border-radius:10px}
 .pqr [hidden]{display:none!important}
-.pqr .view{position:absolute;inset:0;overflow-y:auto;overscroll-behavior:contain;padding-bottom:calc(var(--nav-h) + 130px + env(safe-area-inset-bottom))}
+.pqr .view{position:absolute;inset:0;overflow-y:auto;overscroll-behavior:contain;padding-bottom:calc(120px + env(safe-area-inset-bottom))}
 
 /* =====================================================================
    PURCHASE REQUEST, arriving from WhatsApp.
@@ -140,7 +140,9 @@ export const PQR_CSS = `
 .pqr .foot-note b{font-family:var(--mono);font-weight:500;color:var(--ink-2)}
 
 /* the one button: it always does the next thing */
-.pqr .dock{position:absolute;left:16px;right:16px;bottom:calc(var(--nav-gap) + var(--nav-h) + 14px + env(safe-area-inset-bottom));z-index:19;transition:transform .35s var(--ease),opacity .25s}
+/* The global nav is hidden on this screen (its route owns the bottom), and the dock is hidden whenever a
+   panel/card is open — so the dock always sits at the bottom edge, not up where the nav used to be. */
+.pqr .dock{position:absolute;left:16px;right:16px;bottom:calc(var(--nav-gap) + 6px + env(safe-area-inset-bottom));z-index:19;transition:transform .35s var(--ease),opacity .25s}
 .pqr .dock.away{transform:translateY(20px);opacity:0;pointer-events:none}
 .pqr .dock.away{animation:none!important}
 .pqr .next{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;height:56px;border:0;border-radius:28px;background:var(--clay);color:#fff;font-size:16.5px;font-weight:600;
