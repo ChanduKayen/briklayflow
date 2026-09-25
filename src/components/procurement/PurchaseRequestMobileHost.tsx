@@ -244,17 +244,18 @@ export default function PurchaseRequestMobileHost({ id, session }: { id: string;
     }).eq('id', pr.id);
     if (hErr) throw hErr;
 
-    const { error: dErr } = await supabase.from('purchase_request_items').delete().eq('purchase_request_id', pr.id);
-    if (dErr) throw dErr;
-    const rows = out.items.filter((it) => it.name.trim()).map((it, i) => ({
-      purchase_request_id: pr.id, org_id: pr.org_id, item_index: i,
-      item_name: it.name.trim(), quantity: Number(it.qty) || null, unit: it.unit || null,
-      note: it.note.trim() || null,
-      width_mm: it.w.trim() ? Number(it.w) : null, height_mm: it.h.trim() ? Number(it.h) : null,
-      brand: it.brand.trim() || null, spec: it.spec.trim() || null,
-      source_line: it.raw || null, read_fields: it.read || {},
-    }));
-    if (rows.length) { const { error } = await supabase.from('purchase_request_items').insert(rows); if (error) throw error; }
+    // Replace items ATOMICALLY (delete + insert in one transaction) — a failed write can never leave the
+    // request empty (the "edit an item and it vanishes" bug when a spec column was missing).
+    const { data, error: iErr } = await supabase.rpc('set_purchase_request_items', {
+      p_pr_id: pr.id,
+      p_items: out.items.filter((it) => it.name.trim()).map((it) => ({
+        item_name: it.name.trim(), quantity: Number(it.qty) ? String(Number(it.qty)) : '', unit: it.unit || '',
+        note: it.note.trim(), width_mm: it.w.trim() ? String(Number(it.w) || '') : '', height_mm: it.h.trim() ? String(Number(it.h) || '') : '',
+        brand: it.brand.trim(), spec: it.spec.trim(), source_line: it.raw || '', read_fields: it.read || {},
+      })),
+    });
+    const r = data as { success?: boolean; error?: string } | null;
+    if (iErr || (r && r.success === false)) throw new Error(r?.error || iErr?.message || 'Could not save the items');
     qc.invalidateQueries({ queryKey: ['purchase_request', pr.id] });
     qc.invalidateQueries({ queryKey: ['daybook_purchase_requests', orgId] });
   };

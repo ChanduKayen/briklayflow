@@ -413,15 +413,19 @@ function PeekEditor({ prId, orgId, projects, vendors, canOrder, onClose, onPhoto
       site_id: siteId || null, site_raw: siteId ? null : (siteText.trim() || null),
       vendor_id: vendorId || null, vendor_raw: vendorId ? null : (vendorText.trim() || null),
     }).eq('id', prId);
-    await supabase.from('purchase_request_items').delete().eq('purchase_request_id', prId);
-    if (clean.length) {
-      const { error } = await supabase.from('purchase_request_items').insert(clean.map((it, i) => ({
-        purchase_request_id: prId, org_id: orgId, item_index: i, item_name: it.name.trim(),
-        quantity: it.qty.trim() ? Number(it.qty.replace(/[^\d.]/g, '')) || null : null, unit: it.unit.trim() || null, note: it.note.trim() || null,
-        width_mm: it.w.trim() ? Number(it.w) || null : null, height_mm: it.h.trim() ? Number(it.h) || null : null, brand: it.brand.trim() || null, spec: it.spec.trim() || null,
-      })));
-      if (error) throw error;
-    }
+    // Replace items ATOMICALLY (delete + insert in one transaction) so a failed write can never leave the
+    // request with zero items — the "edit an item and it vanishes" bug when a spec column wasn't there yet.
+    const { data, error } = await supabase.rpc('set_purchase_request_items', {
+      p_pr_id: prId,
+      p_items: clean.map((it) => ({
+        item_name: it.name.trim(),
+        quantity: it.qty.trim() ? String(Number(it.qty.replace(/[^\d.]/g, '')) || '') : '',
+        unit: it.unit.trim(), width_mm: it.w.trim() ? String(Number(it.w) || '') : '', height_mm: it.h.trim() ? String(Number(it.h) || '') : '',
+        spec: it.spec.trim(), brand: it.brand.trim(), note: it.note.trim(),
+      })),
+    });
+    const r = data as { success?: boolean; error?: string } | null;
+    if (error || (r && r.success === false)) throw new Error(r?.error || error?.message || 'Could not save the items');
   };
 
   // "Changes are kept as you type" — debounce a save while dirty, and flush on close (unmount).
