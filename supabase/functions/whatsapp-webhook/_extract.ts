@@ -302,6 +302,15 @@ const EXTRACT_MODEL_OPENAI = Deno.env.get('WA_EXTRACT_MODEL') ?? 'gpt-4.1'
 const EXTRACT_IMAGE_MODEL_OPENAI    = Deno.env.get('WA_EXTRACT_IMAGE_MODEL') ?? 'gpt-4o'
 const EXTRACT_IMAGE_MODEL_ANTHROPIC = Deno.env.get('WA_EXTRACT_IMAGE_MODEL_ANTHROPIC') ?? 'claude-sonnet-4-20250514'
 
+// Procurement (materials-list) image reads are a HARDER vision task than a single payment: a dense,
+// handwritten, multi-column indent where the "=" separator, the amperage/module numbers baked into the
+// description, and the real order quantity are easy to confuse. They get their own strong, env-tunable
+// models, OpenAI-first by request (gpt-4.1 reads this handwriting best), with the other provider as a
+// fallback so a zero-item read is retried instead of collapsing to a one-line summary.
+const PROC_IMAGE_MODEL_OPENAI    = Deno.env.get('WA_PROC_IMAGE_MODEL_OPENAI')    ?? 'gpt-4.1'
+const PROC_IMAGE_MODEL_ANTHROPIC = Deno.env.get('WA_PROC_IMAGE_MODEL_ANTHROPIC') ?? EXTRACT_IMAGE_MODEL_ANTHROPIC
+const PROC_IMAGE_PREFER          = (Deno.env.get('WA_PROC_IMAGE_PREFER') ?? 'openai').toLowerCase()
+
 /** Render the known-project list for the prompt; empty -> an explicit "none". */
 function renderKnownProjects(names: string[]): string {
   const clean = names.map((n) => (n ?? '').trim()).filter(Boolean)
@@ -666,6 +675,9 @@ export async function extractPaymentFromImage(
   return { ...PAYMENT_EMPTY }
 }
 
+type ProcImageItem = { item_name: string; quantity: number | null; unit: string | null; width_mm: number | null; height_mm: number | null; spec: string | null; brand: string | null; note: string | null }
+type ProcImageRead = { vendor_raw: string | null; site_raw: string | null; title: string | null; items: ProcImageItem[] }
+
 /**
  * Read a photographed MATERIALS-TO-BUY list (a purchase request) → its items + optional vendor/site.
  * Mirrors extractPaymentFromImage. Raw values only — vendor/site are MATCHED later (like payee raw),
@@ -676,45 +688,60 @@ export async function extractProcurementFromImage(
   contentType: string,
   userContext: string | null,
   knownProjects: string[],
-): Promise<{ vendor_raw: string | null; site_raw: string | null; title: string | null; items: Array<{ item_name: string; quantity: number | null; unit: string | null; width_mm: number | null; height_mm: number | null; spec: string | null; brand: string | null; note: string | null }> }> {
+): Promise<ProcImageRead> {
   const prompt =
-    `This is a construction-site PURCHASE REQUEST — a list of MATERIALS TO BUY / ORDER (an indent, materials/shopping list, or quotation ask). It is NOT a paid bill or a payment.\n` +
+    `This is a construction-site PURCHASE REQUEST — a handwritten or printed list of MATERIALS TO BUY / ORDER (an indent, materials/shopping list, or quotation ask). It is NOT a paid bill or a payment.\n` +
     (userContext ? `User note: "${userContext}" — use as additional context.\n` : '') +
     `Known projects: ${JSON.stringify(knownProjects)}\n\n` +
     `Return ONLY valid JSON, no other text:\n` +
     `{\n` +
     `  "vendor_raw": "supplier/shop to order from, exactly as written, or null",\n` +
-    `  "site_raw": "the project/site ONLY — the EXACT known project name when one clearly fits, else a SHORT site reference (the name, or the person/place it is named for). NEVER a sentence or the surrounding words. null if no site is referenced",\n` +
-    `  "title": "short construction-literate header for 3+ items (e.g. Slab materials), else null",\n` +
-    `  "items": [ { "item_name": "cement", "quantity": 200, "unit": "bags", "width_mm": null, "height_mm": null, "spec": "material spec — glass/grade/system/code/thickness/colour, compact and · -joined, or null", "brand": "brand/make, or null", "note": "any genuine remark that is none of the above, or null" } ]\n` +
+    `  "site_raw": "the project/site ONLY — the EXACT known project name when one clearly fits (the header/title often names it), else a SHORT site reference. NEVER a sentence. null if none",\n` +
+    `  "title": "short construction-literate header for 3+ items (e.g. Electrical fittings), else null",\n` +
+    `  "items": [ { "item_name": "16 modular plate", "quantity": 4, "unit": null, "width_mm": null, "height_mm": null, "spec": "16 module", "brand": null, "note": null } ]\n` +
     `}\n\n` +
-    `Rules:\n` +
-    `- Every material / line on the list is its OWN item. Pull quantity + unit when written ("200 bags cement" -> item_name "cement", quantity 200, unit "bags").\n` +
-    `- CAPTURE EVERY DETAIL as STRUCTURED fields — never dump everything into note. For a TABLE row (columns like description, size, glass/material type, code, system, width, height, area, colour, thickness, brand, grade, model): Description -> item_name; Qty -> quantity; a WIDTH×HEIGHT or separate W/H columns -> width_mm & height_mm as NUMBERS in millimetres (convert if needed); the material specification (glass type, grade, system, code, thickness, colour, finish) -> spec as a compact " · "-joined string e.g. "8mm clear glass · system BS 40 (SD1)"; the brand/make -> brand. note ONLY for a genuine remark that is none of the above. Skip empty cells. NEVER leave spec null when the row states a material spec.\n` +
-    `- Keep item_name COMPLETE — never truncate it.\n` +
-    `- quantity/width_mm/height_mm null when not written. NEVER invent a quantity or a dimension.\n` +
-    `- Do NOT read any figure as a paid amount/price — this is a request, not a payment. Dimensions go in width_mm/height_mm, areas/other specs in spec — never as money.\n` +
-    `- OUTPUT LANGUAGE: write item_name, unit, note and title in ENGLISH even if the list is handwritten in Telugu/Hindi/another script — translate each material to the term a builder writes on an order (సిమెంట్→"cement", ఇసుక→"sand", కడ్డీలు→"steel bars", ఇటుకలు→"bricks"). Keep a BRAND/proper-noun transliterated in Roman letters; never translate a brand. NEVER invent — if a word isn't clearly a known material, transliterate it faithfully rather than guessing another material.\n` +
-    `- vendor_raw is RAW as written (matched to your vendors later). site_raw: when the mention clearly fits ONE known project, return that project's name EXACTLY; otherwise a SHORT reference only. Never dump surrounding words into either field.`
+    `HOW TO READ EACH LINE — a line is:  <item description>   <separator>   <quantity>.\n` +
+    `- QUANTITY is the number on the RIGHT, after the separator (= : - → or a plain gap). That ONE number is the count to order.\n` +
+    `- THE SEPARATOR IS NOT A DIGIT. A handwritten "=" or ":" is often shaped like "2", "z", "≈" or "⌐" — NEVER read the separator as the quantity. Example: "10 Amps 1-way switches = 105" → quantity 105 (NOT 2). "16 modular plates = 4" → quantity 4 (NOT 2).\n` +
+    `- NUMBERS INSIDE THE DESCRIPTION ARE SPEC, NEVER QUANTITY: an amperage ("10 Amps", "20 Amps", "63 Amps"), a module/gang count ("16 modular", "8 modular" = a 16-module / 8-module switch plate), a physical size ("16 inch", "1½ inch", "2 inch"). These stay in item_name and/or spec. ONLY the number after the separator is the quantity.\n` +
+    `- DITTO MARKS: a row whose description is written as " or ,, or -do- or -"- or left blank REPEATS the description of the row directly above — expand it in full. After "16 modular plates = 4", a row "12 " " " = 3" means item_name "12 modular plate", quantity 3.\n` +
+    `- INDENTED SUB-LINES under a heading are their own items and inherit the heading's noun where ditto marks indicate: under "20 Amps MCB = 3", the line "16 " = 4" means "16 Amps MCB" quantity 4, and "10 " = 5" means "10 Amps MCB" quantity 5.\n` +
+    `- One item PER LINE. Never merge lines, never summarise, never drop a line.\n\n` +
+    `FIELDS:\n` +
+    `- item_name: the material with the spec that names it, COMPLETE and in ENGLISH ("16 modular plate", "10 Amps 1-way switch", "63 Amps 4-pole isolator", "Fan regulator", "Bell switch", "PVC tape roll", "Black screws").\n` +
+    `- quantity: ONLY the count after the separator. null if truly none written. NEVER invent one; NEVER put an amperage, size or module-count here.\n` +
+    `- unit: ONLY when a real unit WORD is written by the quantity (Box, bag, bags, nos, rolls, ton, kg, m, ft, sqft). A bare number → unit null. Do NOT invent "units".\n` +
+    `- width_mm / height_mm: a stated size as NUMBERS in millimetres (convert inch/ft). Else null. A size is NEVER the quantity and NEVER money.\n` +
+    `- spec: material grade/type/rating/size that is not already the item's own name, compact and " · "-joined. brand: the make. note: only a genuine remark that is none of the above.\n\n` +
+    `LANGUAGE: write item_name, unit, note and title in ENGLISH even if handwritten in Telugu/Hindi/another script (సిమెంట్→"cement", ఇసుక→"sand", కడ్డీలు→"steel bars", ఇటుకలు→"bricks"). Keep a BRAND/proper-noun transliterated in Roman letters; never translate a brand. NEVER invent — if a word isn't clearly a known material, transliterate it faithfully.\n` +
+    `Do NOT read any figure as a paid amount/price — this is a request, not a payment.\n` +
+    `vendor_raw is RAW as written (matched to your vendors later). site_raw: the EXACT known project name when one clearly fits, else a SHORT reference, else null.`
 
   const ANTHROPIC_KEY = Deno.env.get('ANTHROPIC_API_KEY')
   const OPENAI_KEY    = Deno.env.get('OPENAI_API_KEY')
   try {
-    // STRONG vision, non-negotiable (see EXTRACT_IMAGE_MODEL_* above): a multi-column materials/window
-    // schedule with structured size/spec/brand fields is exactly the read weak -mini/haiku fails — it
-    // returns zero items, and the caller then stages a one-line SUMMARY instead of the extracted list.
-    // Use the same env-tunable sonnet-4 / gpt-4o the transaction + payment-list image extractors use.
-    let parsed: any = null
-    if (ANTHROPIC_KEY)   parsed = await extractImageAnthropic(base64, contentType, prompt, ANTHROPIC_KEY, EXTRACT_IMAGE_MODEL_ANTHROPIC, 2500)
-    else if (OPENAI_KEY) parsed = await extractImageOpenAI(base64, contentType, prompt, OPENAI_KEY, EXTRACT_IMAGE_MODEL_OPENAI, 2500)
-    return normProcImage(parsed)
+    // STRONG vision, non-negotiable: a dense handwritten indent is exactly the read weak -mini/haiku fails
+    // (zero items → the caller stages a one-line SUMMARY). Try the preferred provider first, then the other
+    // as a FALLBACK — so a zero-item read is retried on the second model instead of collapsing to a summary.
+    const order = PROC_IMAGE_PREFER === 'anthropic' ? ['anthropic', 'openai'] : ['openai', 'anthropic']
+    let best: ProcImageRead = { vendor_raw: null, site_raw: null, title: null, items: [] }
+    for (const prov of order) {
+      let parsed: any = null
+      if (prov === 'openai' && OPENAI_KEY)         parsed = await extractImageOpenAI(base64, contentType, prompt, OPENAI_KEY, PROC_IMAGE_MODEL_OPENAI, 3000)
+      else if (prov === 'anthropic' && ANTHROPIC_KEY) parsed = await extractImageAnthropic(base64, contentType, prompt, ANTHROPIC_KEY, PROC_IMAGE_MODEL_ANTHROPIC, 3000)
+      else continue
+      const read = normProcImage(parsed)
+      if (read.items.length) return read              // a real read — take it
+      best = read                                      // remember the (empty) shape; try the fallback provider
+    }
+    return best
   } catch (e) {
     console.error('[extract] extractProcurementFromImage error:', e)
     return { vendor_raw: null, site_raw: null, title: null, items: [] }
   }
 }
 
-function normProcImage(parsed: any): { vendor_raw: string | null; site_raw: string | null; title: string | null; items: Array<{ item_name: string; quantity: number | null; unit: string | null; width_mm: number | null; height_mm: number | null; spec: string | null; brand: string | null; note: string | null }> } {
+function normProcImage(parsed: any): ProcImageRead {
   const s = (v: any): string | null => (typeof v === 'string' && v.trim() ? v.trim() : null)
   const num = (v: any): number | null => {
     if (typeof v === 'number' && isFinite(v)) return v
