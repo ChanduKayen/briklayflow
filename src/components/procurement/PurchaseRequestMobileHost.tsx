@@ -140,15 +140,17 @@ export default function PurchaseRequestMobileHost({ id, session }: { id: string;
     enabled: !!orgId,
     queryFn: async () => {
       const [{ data: vs }, { data: bills }] = await Promise.all([
-        supabase.from('stakeholders').select('stakeholder_id, name, category').eq('type', 'Vendor').is('merged_into', null).order('name'),
+        supabase.from('stakeholders').select('stakeholder_id, name, category, contact').eq('type', 'Vendor').is('merged_into', null).order('name'),
         supabase.from('bills').select('stakeholder_id').eq('org_id', orgId),
       ]);
       const n: Record<string, number> = {};
       (bills ?? []).forEach((b: { stakeholder_id: string | null }) => { if (b.stakeholder_id) n[b.stakeholder_id] = (n[b.stakeholder_id] || 0) + 1; });
-      return (vs ?? []).map((v: { stakeholder_id: string; name: string; category: string | null }) => ({
+      return (vs ?? []).map((v: { stakeholder_id: string; name: string; category: string | null; contact: string | null }) => ({
         name: v.name,
         sub: [v.category, n[v.stakeholder_id] ? `${n[v.stakeholder_id]} bill${n[v.stakeholder_id] === 1 ? '' : 's'}` : null].filter(Boolean).join(' · ') || 'On file',
         id: v.stakeholder_id,
+        phone: v.contact || '',
+        bills: n[v.stakeholder_id] || 0,
       }));
     },
   });
@@ -209,15 +211,44 @@ export default function PurchaseRequestMobileHost({ id, session }: { id: string;
     qc.invalidateQueries({ queryKey: ['daybook_purchase_requests', orgId] });
   };
 
-  // Promote it, the same RPC the desktop page calls. asRfq marks the resulting PO a quotation.
-  const promote = async (asRfq: boolean) => {
+  // The org's suppliers for the quote flow — bought-from ones (they have bills) float to the top.
+  const suppliers = (payeeQ.data ?? []).map((v) => ({ id: v.id, name: v.name, sub: v.sub, phone: v.phone, suggested: v.bills > 0 }));
+
+  // Create the PO — the same RPC the desktop calls — then land on the PO list with the new order
+  // highlighted (NOT open the PO). The mobile list reads location.state.freshPoId to light it up.
+  const createPO = async () => {
     const { data, error } = await supabase.rpc('promote_purchase_request_to_po', { p_pr_id: pr.id, p_approver_id: session.user.id });
     const r = data as { success?: boolean; error?: string; po_id?: string } | null;
     if (error || !r?.success || !r.po_id) throw new Error(r?.error || error?.message || 'Could not create it');
-    if (asRfq) await supabase.from('purchase_orders').update({ status: 'RFQ' }).eq('po_id', r.po_id);
-    // Land on the order with a success beat; leave the list behind it so Back returns to the list.
-    navigate('/purchase-orders?status=draft', { replace: true });
-    navigate(`/purchase-orders/${r.po_id}`, { state: { justCreated: true, createdKind: asRfq ? 'rfq' : 'po' } });
+    qc.invalidateQueries({ queryKey: ['po_list_sheet'] });
+    qc.invalidateQueries({ queryKey: ['po_list_pending_prs'] });
+    qc.invalidateQueries({ queryKey: ['daybook_purchase_requests', orgId] });
+    navigate('/purchase-orders', { state: { freshPoId: r.po_id } });
+  };
+
+  // Request quotes — send the WhatsApp RFQ to the picked suppliers via the send-rfq edge function, with
+  // this request's items. A brand-new supplier is created (with its number) before the send.
+  const sendQuotes = async ({ recipients, note, replyBy }: { recipients: { id?: string; name: string; phone: string }[]; note: string; replyBy: string }) => {
+    const days = replyBy === 'Tomorrow' ? 1 : replyBy === 'This week' ? 5 : 2;
+    const by = new Date(); by.setDate(by.getDate() + days); by.setHours(18, 0, 0, 0);
+    const siteId = idOf(projects, request.project);
+    const items = request.items.filter((it) => it.name.trim()).map((it, i) => ({
+      line: i + 1, item_name: it.name.trim(), unit: it.unit || null,
+      qty: Number(it.qty) || 1, spec: [it.w && it.h ? `${it.w} × ${it.h} mm` : '', it.spec, it.brand].filter(Boolean).join(' · ') || null,
+    }));
+    const recips = await Promise.all(recipients.map(async (rc) => {
+      let id = rc.id;
+      if (!id && rc.name.trim()) id = (await createParty(rc.name.trim(), 'Vendor', pr.org_id)).id;
+      if (id && rc.phone) await supabase.from('stakeholders').update({ contact: rc.phone }).eq('stakeholder_id', id);
+      return { stakeholderId: id, name: rc.name, phone: rc.phone };
+    }));
+    const { data, error } = await supabase.functions.invoke('send-rfq', {
+      body: { orgId: pr.org_id, projectId: siteId, deliveryLocation: request.project || null, quoteBy: by.toISOString(), note: note || null, items, recipients: recips },
+    });
+    if (error) throw error;
+    const res = data as { ok?: boolean; error?: string } | null;
+    if (!res?.ok) throw new Error(res?.error || 'Could not send the requests');
+    qc.invalidateQueries({ queryKey: ['pqr_payees', orgId] });
   };
 
   return (
@@ -225,20 +256,15 @@ export default function PurchaseRequestMobileHost({ id, session }: { id: string;
       request={request}
       projects={projects}
       payees={payees}
+      suppliers={suppliers}
       // The desktop page's rule, unchanged: a supervisor raises requests, the office turns them into
-      // orders. So the pair the screen becomes after saving is not offered to them at all.
+      // orders. So the pair is not offered to them at all.
       canOrder={profile?.role === 'management' || profile?.role === 'principal' || profile?.role === 'accountant'}
       onBack={() => navigate('/purchase-orders?status=draft')}
       onCreatePayee={(name) => setExtraPayees((x) => [{ name, sub: 'New party' }, ...x])}
       onSave={save}
-      // Undo: put back what was on the books before the save. The draft on screen is left alone.
-      onUnsave={() => save({
-        project: pr.projects?.name || pr.site_raw || '',
-        payee: pr.stakeholders?.name || pr.vendor_raw || '',
-        items: request.items,
-      })}
-      onRequestQuotes={() => promote(true)}
-      onCreatePO={() => promote(false)}
+      onCreatePO={createPO}
+      onSendQuotes={sendQuotes}
       // Nothing reads a second sheet yet, so the page says so rather than pretending.
       onAddPage={() => 'Send the next sheet on WhatsApp and it lands here'}
     />

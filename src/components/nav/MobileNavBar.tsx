@@ -371,7 +371,9 @@ export function MobileNavBar({
           </>
         )}
 
-      <div className={`mnav-dock${hidden || kb.open ? ' gone' : ''}`}>
+      {/* A route may hide the bar (its own bottom chrome owns the corner), but a page that has LENT the
+          capsule its own actions — e.g. the phone purchase-request item toolbar — still needs it shown. */}
+      <div className={`mnav-dock${(hidden && !lent) || kb.open ? ' gone' : ''}`}>
         {/* the action — off the bar, above its right end, saying what it makes */}
         <button
           ref={fabRef} type="button"

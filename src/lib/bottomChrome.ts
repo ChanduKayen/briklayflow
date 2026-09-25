@@ -13,6 +13,7 @@
 /** Pages with their own fixed, full-width bottom action bar — the tab bar tucks away for these. */
 export const ownsBottomBar = (pathname: string): boolean =>
   /\/new$/.test(pathname)
+  || /^\/purchase-orders\/pr\/[^/]+$/.test(pathname)   // the phone Purchase-request screen runs its own dock (one button)
   || /^\/purchase-orders\/[^/]+$/.test(pathname)
   || /^\/work-orders\/[^/]+$/.test(pathname)   // WO detail (mobile) has its own action bar — see ContractMobileDetail
   || /^\/ledger\/(?!new$|import$)[^/]+$/.test(pathname);

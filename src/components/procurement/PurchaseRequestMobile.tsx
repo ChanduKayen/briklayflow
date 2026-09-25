@@ -43,10 +43,14 @@ export interface PqrRequest {
   project: string; payee: string; items: PqrItem[];
 }
 export interface PqrOption { name: string; sub: string }
+/** A supplier the quote flow can ask. `suggested` floats it to the top (bought-from before). */
+export interface PqrSupplier { id?: string; name: string; sub: string; phone: string; suggested?: boolean }
 export interface PurchaseRequestMobileProps {
   request: PqrRequest;
   projects: PqrOption[];
   payees: PqrOption[];
+  /** the org's suppliers, for the Request-quotes flow */
+  suppliers: PqrSupplier[];
   /** true while the reader is still working — the hero scans and the items are skeletons */
   reading?: boolean;
   /** hidden from a supervisor: they raise requests, they do not place orders */
@@ -54,18 +58,16 @@ export interface PurchaseRequestMobileProps {
   onBack: () => void;
   /** a name the org does not have yet; the page has already added it to its own list */
   onCreatePayee: (name: string) => void;
-  /** project, supplier and the items as they now stand. Resolves when the write lands. */
+  /** project, supplier and the items as they now stand. Resolves when the write lands. Auto-saved. */
   onSave: (out: { project: string; payee: string; items: PqrItem[] }) => Promise<void>;
-  /** promote to a quote request / a PO — resolves when it lands, REJECTS with a message we surface. */
-  onRequestQuotes: () => void | Promise<void>;
+  /** raise the PO — resolves when it lands (the host navigates to the PO list, highlighted); REJECTS with
+   *  a message we surface. */
   onCreatePO: () => void | Promise<void>;
+  /** send the quote request to the picked suppliers on WhatsApp; REJECTS with a message we surface. */
+  onSendQuotes: (out: { recipients: { id?: string; name: string; phone: string }[]; note: string; replyBy: string }) => Promise<void>;
   /** "Add a page" from the request's own menu — a second sheet of the same quote. Return a sentence
    *  and the page says it, for a host that has nowhere to put one yet. */
   onAddPage: () => string | void;
-  /** Undo, from the toast the save raises: put back what was on the books before it. The draft on
-   *  screen is left alone — the reference's undo only takes the "Saved" mark away, so the request can
-   *  be changed and saved again. */
-  onUnsave: () => Promise<void>;
 }
 
 const UNITS = ['Nos', 'Set', 'Sqft', 'Rft', 'Kg', 'Bag'];
@@ -116,6 +118,7 @@ export default function PurchaseRequestMobile(p: PurchaseRequestMobileProps) {
     const S = {
       from: P0.request.from, when: P0.request.when, said: P0.request.said, pages: P0.request.pages,
       reading: !!P0.reading, project: P0.request.project, payee: P0.request.payee, saved: '',
+      quoted: null as string[] | null,   // suppliers a quote request went to (after the quote flow)
       items: P0.request.items.map((it) => Object.assign({ id: ++uid }, it)) as Row[],
     };
     const specOf = (it: Row) => [it.w && it.h ? it.w + ' × ' + it.h + ' mm' : '', it.brand, it.spec].filter(Boolean).join(' · ');
@@ -132,6 +135,17 @@ export default function PurchaseRequestMobile(p: PurchaseRequestMobileProps) {
     const projOk = () => !!S.project.trim() && currentProjects().some((x) => norm(x[0]) === norm(S.project));
     let shown = 0, lit = 0, flashKey = '', settling = false;
 
+    /* Kept as you go — no Save button. Every change schedules a debounced write; a burst is one save. */
+    let saveT = 0, saving = false, pendingSave = false;
+    async function doSave() {
+      if (saving) { pendingSave = true; return; }
+      saving = true; pendingSave = false;
+      try { await pRef.current.onSave({ project: S.project, payee: S.payee, items: S.items.map((it) => ({ ...it })) }); }
+      catch (e) { /* keep the local edit on screen; the next change retries the write */ }
+      finally { saving = false; if (pendingSave) void doSave(); }
+    }
+    function scheduleSave() { clearTimeout(saveT); saveT = window.setTimeout(() => { void doSave(); }, 800); }
+
     /* ---------- 1. did it come through? ---------- */
     function paintHero() {
       const n = S.items.length;
@@ -140,7 +154,7 @@ export default function PurchaseRequestMobile(p: PurchaseRequestMobileProps) {
         '<div class="origin">' + WA + '<span>' + (S.saved ? 'Saved ' + esc(S.saved) + ' · ' : '') + 'From <b>' + esc(S.from) + '</b> · ' + esc(S.when) + '</span></div>' +
         '<div class="came"><button type="button" class="paper' + (S.reading ? '' : ' done') + '" data-photo aria-label="See the quote"><img src="' + PHOTO + '" alt=""><span class="scan"></span><span class="pg">' + S.pages + (S.pages > 1 ? ' pages' : ' page') + '</span></button>' +
         '<div class="readout">' + (S.reading ? '<div class="n" style="font-family:var(--sans);font-size:17px;font-weight:600"><span class="livedot"></span>Reading the quote</div>'
-          : '<div class="n"><span id="heroN">' + shown + '</span><small>items read from the quote</small></div><p>' + (S.saved ? 'Saved under ' + esc(S.project) + '.' : todo() ? (todo() === 1 ? 'One thing' : 'Two things') + ' to add, then save.' : 'Ready to save.') + '</p>') + '</div></div>';
+          : '<div class="n"><span id="heroN">' + shown + '</span><small>items read from the quote</small></div><p>' + (S.quoted && S.quoted.length ? 'Quotes requested. Kept as you go.' : !S.project ? 'Pick the project, then quote or order.' : 'Kept as you go. Ask for quotes, or make the order.') + '</p>') + '</div></div>';
       if (!S.reading && shown < n && !calm) { const t0 = performance.now(), from = shown; const step = (t: number) => { const k = Math.min(1, (t - t0) / 600); shown = Math.round(from + (n - from) * (1 - Math.pow(1 - k, 3))); const el = $('#heroN'); if (el) el.textContent = String(shown); if (k < 1) requestAnimationFrame(step); }; requestAnimationFrame(step); } else shown = n;
       ($('#cSum') as HTMLElement).textContent = S.reading ? 'reading' : n + ' items' + (todo() ? ' · ' + todo() + ' to add' : '');
     }
@@ -168,8 +182,9 @@ export default function PurchaseRequestMobile(p: PurchaseRequestMobileProps) {
         (S.saved ? '' : '<div class="sec' + (settling ? ' late' : '') + '" style="' + (settling ? 'animation-delay:' + (Math.min(n, 9) * 110 + 300) + 'ms' : '') + '"><h2>Still to add</h2><span><b>' + (2 - todo()) + '</b> of 2</span></div>' +
           '<div class="card' + (todo() ? '' : ' ok') + (settling ? ' late' : '') + '" style="' + (settling ? 'animation-delay:' + (Math.min(n, 9) * 110 + 300) + 'ms' : '') + '">' +
           todoRow('project', 'Project', S.project, 'Which site is this for?', { ok: projOk() }) +
-          todoRow('payee', 'Supplier', S.payee, 'Who gave this quote?', { ok: payeeOk() }) +
-          (todo() ? '' : '<div class="alldone">' + TICK + 'Everything is here. Ready to save.</div>') + '</div>') +
+          todoRow('payee', 'Supplier', S.payee, 'Needed for a PO · not for quotes', { ok: payeeOk(), soft: true }) +
+          (S.project ? '<div class="alldone">' + TICK + 'Kept as you go. Ask for quotes, or make the order.</div>' : '') + '</div>') +
+        (S.quoted && S.quoted.length ? '<div class="qstate"><i class="dotq"></i><div><b>Quotes requested from ' + S.quoted.length + (S.quoted.length === 1 ? ' supplier' : ' suppliers') + '</b><span>' + esc(S.quoted.join(', ')) + ' · replies land here</span></div></div>' : '') +
         '<div class="sec"><h2>On the quote</h2><span><b>' + n + '</b> items' + (totalArea() ? ' · <b>' + totalArea() + '</b> sqft' : '') + '</span></div>' +
         (S.said ? '<p class="said2"><i>“' + esc(S.said) + '”</i> <span>· ' + esc(S.from.split(' ')[0]) + ', with the photo</span></p>' : '') +
         '<div class="card" id="itemsCard">' + S.items.map(itemRow).join('') + '</div>' +
@@ -180,12 +195,14 @@ export default function PurchaseRequestMobile(p: PurchaseRequestMobileProps) {
     function paintDock() {
       const d = $('#dock') as HTMLElement; d.classList.toggle('late', settling); d.style.animationDelay = settling ? (Math.min(S.items.length, 9) * 110 + 500) + 'ms' : '';
       if (S.reading) { d.innerHTML = ''; return; }
-      // A supervisor raises requests; placing the order is not theirs to do, so the pair it turns into
-      // after saving is not offered to them at all.
-      if (S.saved) { d.innerHTML = P0.canOrder === false ? '' : '<div class="pair"><button type="button" class="g" data-rfq>Request quotes</button><button type="button" class="p" data-po>Create PO</button></div>'; return; }
-      d.innerHTML = !S.project ? '<button type="button" class="next" data-todo="project">Choose the project<span class="step">1 / 2</span></button>'
-        : !S.payee ? '<button type="button" class="next" data-todo="payee">Choose the supplier<span class="step">2 / 2</span></button>'
-          : '<button type="button" class="next ink" data-review>Review and save</button>';
+      // A supervisor raises requests; placing the order or asking for quotes is not theirs to do.
+      if (P0.canOrder === false) { d.innerHTML = ''; return; }
+      // No review/save step: edits are kept as you go. Once the project is set, the two real next
+      // actions sit here directly — ask for quotes, or make the order. (A supplier is needed for a PO,
+      // not for quotes, so it does not gate this.) After quotes go out, the left button becomes "Ask more".
+      if (S.quoted && S.quoted.length) { d.innerHTML = '<div class="pair"><button type="button" class="g" data-rfq>Ask more</button><button type="button" class="p" data-po>Create PO</button></div>'; return; }
+      d.innerHTML = !S.project ? '<button type="button" class="next" data-todo="project">Choose the project</button>'
+        : '<div class="pair"><button type="button" class="g" data-rfq>Request quotes</button><button type="button" class="p" data-po>Create PO</button></div>';
     }
     function paint() { paintHero(); paintMain(); paintDock(); }
 
@@ -284,7 +301,7 @@ export default function PurchaseRequestMobile(p: PurchaseRequestMobileProps) {
     }
     function setPick(kind: string, name: string) {
       if (kind === 'project') S.project = name; else S.payee = name;
-      flashKey = kind; buzz(8); closePanel(); paint();
+      flashKey = kind; buzz(8); closePanel(); paint(); scheduleSave();
       const r = root!.querySelector('.todo[data-todo="' + kind + '"]'); if (r) r.scrollIntoView({ block: 'nearest', behavior: calm ? 'auto' : 'smooth' });
     }
 
@@ -367,36 +384,90 @@ export default function PurchaseRequestMobile(p: PurchaseRequestMobileProps) {
       const it = P!.it as Row; panel.querySelectorAll('#pBody [data-f]').forEach((el) => { const k = (el as HTMLElement).dataset.f as string, v = (el as HTMLInputElement).value.trim(); const rec = it as unknown as Record<string, string>; if (rec[k] !== v) { rec[k] = v; if (it.read[k]) it.read[k] = 0; if (k === 'w' || k === 'h') it.read.w = 0; } });
       if (P!.brandAll && it.brand) S.items.forEach((x) => { x.brand = it.brand; });
     }
-    function syncRow(it: Row) { const r = root!.querySelector('.it[data-item="' + it.id + '"]'); if (!r) return; (r as HTMLElement).outerHTML = itemRow(it, S.items.indexOf(it)); paintHero(); const sp = root!.querySelector('#main .sec:last-of-type span'); if (sp) sp.innerHTML = '<b>' + S.items.length + '</b> items' + (totalArea() ? ' · <b>' + totalArea() + '</b> sqft' : ''); }
+    function syncRow(it: Row) { const r = root!.querySelector('.it[data-item="' + it.id + '"]'); if (!r) return; (r as HTMLElement).outerHTML = itemRow(it, S.items.indexOf(it)); paintHero(); const sp = root!.querySelector('#main .sec:last-of-type span'); if (sp) sp.innerHTML = '<b>' + S.items.length + '</b> items' + (totalArea() ? ' · <b>' + totalArea() + '</b> sqft' : ''); scheduleSave(); }
     function syncAll() { S.items.forEach(syncRow); }
 
-    /* review: one slip, then save */
-    function openReview() {
-      P = { kind: 'review' };
-      openPanel('<div class="p-head"><div class="t"><h2>Check the request</h2><span>Nothing is sent yet. Saving keeps it under ' + esc(S.project) + '.</span></div>' + X + '</div>' +
-        '<div class="rowS plain"><span class="l">Project</span><span class="v">' + esc(S.project) + '</span></div>' +
+    /* Create PO — a light confirm (supplier required), then the host raises the order and takes us to the
+       PO list with the new order highlighted. No review/save step: the request was kept as you went. */
+    function openPO() {
+      if (!payeeOk()) { buzz([20, 40, 20]); openPick('payee', S.payee); say('Pick the supplier for the PO, or add it'); return; }
+      P = { kind: 'po' };
+      openPanel('<div class="p-head"><div class="t"><h2>Create the PO</h2><span>Raised under ' + esc(S.project) + ' for ' + esc(S.payee) + '.</span></div>' + X + '</div>' +
         '<div class="rowS plain"><span class="l">Supplier</span><span class="v">' + esc(S.payee) + '</span></div>' +
-        '<div class="rowS plain"><span class="l">Items</span><span class="v mono">' + S.items.length + '</span></div>' +
-        (totalArea() ? '<div class="rowS plain"><span class="l">Area</span><span class="v mono">' + totalArea() + ' sqft</span></div>' : '') +
-        '<div class="rowS plain"><span class="l">Came in</span><span class="v">WhatsApp · ' + esc(S.from) + ' · ' + S.pages + (S.pages > 1 ? ' pages' : ' page') + '</span></div>' +
-        '<div class="foot"><button type="button" class="big" data-save>Save request</button></div>');
+        '<div class="rowS plain"><span class="l">Project</span><span class="v">' + esc(S.project) + '</span></div>' +
+        '<div class="rowS plain"><span class="l">Items</span><span class="v mono">' + S.items.length + (totalArea() ? ' · ' + totalArea() + ' sqft' : '') + '</span></div>' +
+        '<div class="rowS plain"><span class="l">Came in</span><span class="v">WhatsApp · ' + esc(S.from) + '</span></div>' +
+        '<div class="foot"><button type="button" class="big" data-makepo>Create PO</button></div><button type="button" class="quiet" data-close>Change something first</button>');
     }
-    async function save() {
-      const b = panel.querySelector('[data-save]') as HTMLButtonElement | null; if (!b || b.disabled) return;
-      b.disabled = true;
+    async function makePO() {
+      const b = panel.querySelector('[data-makepo]') as HTMLButtonElement | null; if (!b || b.disabled) return;
+      b.disabled = true; b.textContent = 'Creating…';
       try {
-        await pRef.current.onSave({ project: S.project, payee: S.payee, items: S.items.map((it) => ({ ...it })) });
+        if (saveT) { clearTimeout(saveT); await doSave(); }   // land any pending edits first
+        await pRef.current.onCreatePO();                       // the host navigates to the PO list, highlighted
+        if (dead) return; b.classList.add('ok'); b.textContent = 'Created'; buzz([10, 40, 18]);
       } catch (err) {
-        b.disabled = false; say((err as Error)?.message || 'Could not save the request'); return;
+        b.disabled = false; b.textContent = 'Create PO'; say((err as Error)?.message || 'Could not create it — try again');
+      }
+    }
+
+    /* ---------- request quotes: pick suppliers · the message · send (the reference's flow) ---------- */
+    type QState = { step: 1 | 2 | 3; picked: string[]; q: string; hi: number; lastHi: string | null; adding: string; note: string; by: string; sent: boolean };
+    let Q: QState | null = null;
+    const qAdded: Record<string, string> = {};   // suppliers added in the flow: name -> phone
+    const supList = () => pRef.current.suppliers || [];
+    const supByName = (name: string) => supList().find((x) => x.name === name);
+    const sugg = () => supList().filter((x) => x.suggested);
+    function qList() {
+      const k = (Q!.q || '').trim().toLowerCase();
+      const all = supList();
+      if (k) return all.filter((x) => x.name.toLowerCase().includes(k) || (x.sub || '').toLowerCase().includes(k));
+      const s = sugg(); return s.concat(all.filter((x) => !s.includes(x)));
+    }
+    function openQuotes() {
+      Q = { step: 1, picked: [], q: '', hi: 0, lastHi: null, adding: '', note: '', by: '2 days', sent: false };
+      P = { kind: 'quotes' }; openPanel(''); paintQ(); setTimeout(() => { const f = $('#qq') as HTMLInputElement | null; f && f.focus({ preventScroll: true }); }, 340);
+    }
+    function paintQ(keep?: boolean) {
+      const y = panel.scrollTop, n = S.items.length;
+      if (Q!.step === 1) {
+        const list = qList(), k = Q!.q.trim(), exact = supList().some((x) => x.name.toLowerCase() === k.toLowerCase()), sug = sugg();
+        ($('#pBody') as HTMLElement).innerHTML = '<div class="p-head"><div class="t"><h2>Request quotes</h2><span>For ' + n + ' items · ' + esc(S.project || 'no project yet') + '</span></div>' + X + '</div>' +
+          '<div class="qtop"><label class="qfind"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg><input id="qq" type="text" autocomplete="off" autocapitalize="words" enterkeyhint="done" placeholder="Type a supplier&#39;s name" value="' + esc(Q!.q) + '" aria-label="Supplier"></label>' +
+          '<div class="chips2" id="qchips">' + Q!.picked.map((pn) => '<span class="chp' + (Q!.lastHi === pn ? ' last' : '') + '">' + esc(pn) + '<button type="button" data-unpick="' + esc(pn) + '" aria-label="Remove"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button></span>').join('') + '</div></div>' +
+          (Q!.adding ? '<div class="newsup"><div class="tel"><span>+91</span><input id="qtel" type="tel" inputmode="numeric" maxlength="11" placeholder="98480 12321" aria-label="Phone"></div><p>' + esc(Q!.adding) + ' will get the request on this number and be saved as a supplier.</p><button type="button" class="chip" data-addsup style="margin-top:10px" aria-pressed="true">Add and tick</button></div>' : '') +
+          (!k && sug.length ? '<p class="qsec">Suggested · you have bought from them</p>' : '') +
+          list.map((x, i) => (!k && sug.length && i === sug.length ? '<p class="qsec">Others</p>' : '') + '<button type="button" class="sup' + (k && i === Q!.hi ? ' hi' : '') + '" data-pick="' + esc(x.name) + '" aria-pressed="' + Q!.picked.includes(x.name) + '"><span class="av">' + initials(x.name) + '</span><span class="m"><b>' + esc(x.name) + '</b><span>' + esc(x.sub || '') + '</span></span><span class="tk">' + TICK + '</span></button>').join('') +
+          (k && !exact ? '<button type="button" class="sup add" data-adding="' + esc(k) + '"><span class="av">+</span><span class="m"><b>Add “' + esc(k) + '”</b><span>New supplier, with a phone number</span></span></button>' : '') +
+          '<div class="qfoot"><button type="button" class="big" data-qnext' + (Q!.picked.length ? '' : ' disabled') + '>' + (Q!.picked.length ? 'Next · ' + Q!.picked.length + (Q!.picked.length === 1 ? ' supplier' : ' suppliers') : 'Pick a supplier') + '</button></div>';
+      } else if (Q!.step === 2) {
+        const site = esc(S.project || 'Briklay');
+        ($('#pBody') as HTMLElement).innerHTML = '<div class="p-head"><button type="button" class="x" data-qback aria-label="Back" style="margin:-6px 0 0 -8px"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg></button><div class="t"><h2>What they will get</h2><span>A WhatsApp message with a link. Rates come back as a quote here.</span></div>' + X + '</div>' +
+          '<p class="msgto">To ' + Q!.picked.map(esc).join(', ') + ' · each gets their own</p>' +
+          '<div class="msg"><div class="body"><h4>Quotation Request</h4><p>Hello ' + esc(Q!.picked[0] || 'Supplier') + ',</p><p>requesting your quotation for ' + esc(S.items[0]?.name || 'materials') + (n > 1 ? ', ' + esc(S.items[1]?.name || '') : '') + (n > 2 ? ' +' + (n - 2) + ' more (' + n + ' items)' : '') + ', delivery to ' + site + '.' + (Q!.note ? ' ' + esc(Q!.note) : '') + '</p><p>Tap the button to fill your rates — no login needed. Reply by ' + esc(Q!.by.toLowerCase()) + '.</p><div class="meta"><span>Sent via Briklay App</span></div></div><div class="cta"><svg viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 13v6H5V6h6"/></svg>Give Quotation</div></div>' +
+          '<div class="onlink"><span class="mini"><i></i><i></i><i></i><u></u></span><p><b>On the link:</b> your ' + n + ' items with sizes and specs, a box for each rate, and one tap to send it back. Their quote lands on this request.</p></div>' +
+          '<div class="qrow"><span class="l">Note</span><input id="qnote" type="text" autocomplete="off" enterkeyhint="done" placeholder="Delivery to site, GST…" value="' + esc(Q!.note) + '"></div>' +
+          '<div class="qrow"><span class="l">Reply by</span><div class="chips">' + ['Tomorrow', '2 days', 'This week'].map((b) => '<button type="button" class="chip" data-by="' + b + '" aria-pressed="' + (b === Q!.by) + '">' + b + '</button>').join('') + '</div></div>' +
+          '<div class="qfoot"><button type="button" class="big" data-qsend>Send to ' + Q!.picked.length + (Q!.picked.length === 1 ? ' supplier' : ' suppliers') + '</button></div>';
+      } else {
+        ($('#pBody') as HTMLElement).innerHTML = '<div class="p-head"><div class="t"><h2>' + (Q!.sent ? 'Quotes requested' : 'Sending') + '</h2><span>' + (Q!.sent ? 'Their replies will land on this request.' : 'On WhatsApp') + '</span></div>' + X + '</div>' +
+          Q!.picked.map((pn, i) => '<div class="sentl" data-sent="' + i + '"><span class="tk">' + TICK + '</span><b>' + esc(pn) + '</b><span>' + esc(supByName(pn)?.phone || qAdded[pn] || 'new') + '</span></div>').join('') +
+          '<div class="qfoot"><button type="button" class="big' + (Q!.sent ? ' ok' : ' busy') + '" data-close' + (Q!.sent ? '' : ' disabled') + '>' + (Q!.sent ? 'Done' : 'Sending…') + '</button></div>';
+      }
+      if (keep) panel.scrollTop = y;
+    }
+    function qPick(name: string) { const i = Q!.picked.indexOf(name); if (i >= 0) Q!.picked.splice(i, 1); else Q!.picked.push(name); Q!.lastHi = null; buzz(4); Q!.q = ''; Q!.hi = 0; paintQ(true); const f = $('#qq') as HTMLInputElement | null; f && f.focus({ preventScroll: true }); }
+    async function qSend() {
+      Q!.step = 3; paintQ(); (document.activeElement as HTMLElement | null)?.blur();
+      const recipients = Q!.picked.map((name) => { const s = supByName(name); return { id: s?.id, name, phone: s?.phone || qAdded[name] || '' }; });
+      try {
+        await pRef.current.onSendQuotes({ recipients, note: Q!.note, replyBy: Q!.by });
+      } catch (err) {
+        if (dead) return; say((err as Error)?.message || 'Could not send the requests — try again'); Q!.step = 2; paintQ(); return;
       }
       if (dead) return;
-      b.classList.add('ok'); b.textContent = 'Saved'; buzz([10, 40, 18]);
-      await sleep(calm ? 0 : 520); if (dead) return; closePanel();
-      S.saved = new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) + ', ' + new Date().toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' }); paint(); ($('#view') as HTMLElement).scrollTo({ top: 0, behavior: calm ? 'auto' : 'smooth' });
-      say('Saved under ' + S.project, () => { void (async () => {
-        try { await pRef.current.onUnsave(); } catch (err) { say((err as Error)?.message || 'Could not undo'); return; }
-        if (dead) return; S.saved = ''; paint();
-      })(); });
+      for (let i = 0; i < Q!.picked.length; i++) { await sleep(calm ? 0 : 420); if (dead) return; const r = root!.querySelector('[data-sent="' + i + '"]'); r && r.classList.add('ok'); buzz(4); }
+      await sleep(calm ? 0 : 260); if (dead) return; Q!.sent = true; S.quoted = Q!.picked.slice(); paintQ(); buzz([10, 40, 18]); paintDock(); paintMain();
     }
 
     /* ---------- one listener each side ---------- */
@@ -412,37 +483,25 @@ export default function PurchaseRequestMobile(p: PurchaseRequestMobileProps) {
       if (el.hasAttribute('data-draft')) { closePanel(); pRef.current.onBack(); return; }
       if (el.hasAttribute('data-photo')) { ($('#viewerImg') as HTMLImageElement).src = PHOTO; ($('#viewer') as HTMLElement).classList.add('on'); return; }
       if (el.id === 'viewerClose') { ($('#viewer') as HTMLElement).classList.remove('on'); return; }
-      if (el.hasAttribute('data-rfq') || el.hasAttribute('data-po')) {
-        const rfq = el.hasAttribute('data-rfq');
-        if (el.disabled) return;
-        const pair = el.closest('.pair');
-        const btns = pair ? Array.from(pair.querySelectorAll('button')) as HTMLButtonElement[] : [el];
-        const orig = el.innerHTML;
-        btns.forEach((b) => { b.disabled = true; });          // whole pair locks while one is working
-        el.classList.add('loading'); el.textContent = rfq ? 'Requesting…' : 'Creating…';
-        void (async () => {
-          try {
-            await (rfq ? pRef.current.onRequestQuotes() : pRef.current.onCreatePO());
-            // Success: the host navigates to the new order (which celebrates); leave the button locked.
-          } catch (err) {
-            btns.forEach((b) => { b.disabled = false; });
-            el.classList.remove('loading'); el.innerHTML = orig;
-            say((err as Error)?.message || 'Could not create it — try again');
-          }
-        })();
-        return;
+      // The two next actions: Request quotes opens the supplier flow; Create PO the light confirm.
+      if (el.hasAttribute('data-rfq')) { openQuotes(); return; }
+      if (el.hasAttribute('data-po')) { openPO(); return; }
+      if (el.hasAttribute('data-makepo')) { void makePO(); return; }
+      // The quote panel's own buttons (only while it is the open panel).
+      if (Q && P && P.kind === 'quotes') {
+        if (el.dataset.pick) { qPick(el.dataset.pick); return; }
+        if (el.dataset.unpick) { Q.picked = Q.picked.filter((x) => x !== el.dataset.unpick); Q.lastHi = null; buzz(3); paintQ(true); return; }
+        if (el.dataset.adding) { Q.adding = el.dataset.adding; paintQ(true); const t = $('#qtel') as HTMLInputElement | null; t && t.focus(); return; }
+        if (el.hasAttribute('data-addsup')) { const tel = ($('#qtel') as HTMLInputElement | null)?.value || ''; const nm = Q.adding; qAdded[nm] = tel.trim(); if (!Q.picked.includes(nm)) Q.picked.push(nm); Q.adding = ''; Q.q = ''; buzz(6); paintQ(true); say(nm + ' added'); return; }
+        if (el.hasAttribute('data-qnext')) { if (!Q.picked.length) return; Q.step = 2; buzz(6); paintQ(); return; }
+        if (el.hasAttribute('data-qback')) { Q.step = 1; paintQ(); return; }
+        if (el.dataset.by) { Q.by = el.dataset.by; paintQ(true); return; }
+        if (el.hasAttribute('data-qsend')) { Q.note = ($('#qnote') as HTMLInputElement | null)?.value || Q.note; void qSend(); return; }
       }
       if (el.hasAttribute('data-close')) { if (P && P.kind === 'item') { commitItem(); syncAll(); paintMain(); paintDock(); } closePanel(); return; }
       if (el.dataset.todo === 'project' || el.dataset.todo === 'payee') { openPick(el.dataset.todo); return; }
       if (el.dataset.item) { openItem(+el.dataset.item); return; }
       if (el.hasAttribute('data-additem')) { const it = IT('', 1); S.items.push(it); paintMain(); paintHero(); openItem(it.id); P!.edit = 'name'; paintItem(); return; }
-      if (el.hasAttribute('data-review')) {
-        // Don't proceed on a raw name the reader guessed — nudge to save it as a party or pick one.
-        if (!payeeOk()) { buzz([20, 40, 20]); openPick('payee', S.payee); say('Save this supplier as a party, or pick one from the list'); return; }
-        if (!projOk()) { buzz([20, 40, 20]); openPick('project'); say('Pick the site from the list'); return; }
-        openReview(); return;
-      }
-      if (el.hasAttribute('data-save')) { void save(); return; }
       if (!P) return;
       if (P.kind !== 'item') {
         if (el.dataset.pick) { setPick(P.kind, el.dataset.pick); return; }
@@ -460,16 +519,29 @@ export default function PurchaseRequestMobile(p: PurchaseRequestMobileProps) {
         if (nxt) { lit = it.id; turnTo(nxt, 1); } else { closePanel(); lit = it.id; paintMain(); paintDock(); say('All ' + S.items.length + ' items checked'); }
         return;
       }
-      if (el.hasAttribute('data-remove')) { const i = S.items.indexOf(it); S.items.splice(i, 1); closePanel(); paint(); say('Item removed', () => { S.items.splice(i, 0, it); paint(); }); }
+      if (el.hasAttribute('data-remove')) { const i = S.items.indexOf(it); S.items.splice(i, 1); closePanel(); paint(); scheduleSave(); say('Item removed', () => { S.items.splice(i, 0, it); paint(); scheduleSave(); }); }
     };
     const onInput = (e: Event) => {
       const t = e.target as HTMLInputElement;
       if (P && P.kind === 'item' && t.dataset && t.dataset.f) { commitItem(); syncRow(P.it as Row); if (t.tagName === 'TEXTAREA') { t.style.height = 'auto'; t.style.height = t.scrollHeight + 'px'; } }
       if (P && P.kind === 'payee' && t.id === 'pq') { P.q = t.value; const y = panel.scrollTop; paintPick(); panel.scrollTop = y; const f = $('#pq') as HTMLInputElement; f.focus({ preventScroll: true }); f.setSelectionRange(f.value.length, f.value.length); }
+      if (Q && P && P.kind === 'quotes') {
+        if (t.id === 'qq') { Q.q = t.value; Q.hi = 0; Q.adding = ''; Q.lastHi = null; const y = panel.scrollTop; paintQ(true); panel.scrollTop = y; const f = $('#qq') as HTMLInputElement; f.focus({ preventScroll: true }); f.setSelectionRange(f.value.length, f.value.length); }
+        else if (t.id === 'qnote') { Q.note = t.value; }
+      }
     };
     const onChange = (e: Event) => { const t = e.target as HTMLSelectElement; if (P && P.kind === 'item' && t.dataset.f === 'unit') { (P.it as Row).unit = t.value; syncRow(P.it as Row); } };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') { if (($('#viewer') as HTMLElement).classList.contains('on')) ($('#viewer') as HTMLElement).classList.remove('on'); else if (panel.classList.contains('on')) closePanel(); return; }
+      // Quote step 1: type-ahead — Enter ticks the top match (or opens add), arrows move, Backspace unpicks.
+      if (Q && P && P.kind === 'quotes' && Q.step === 1 && (e.target as HTMLElement).id === 'qq') {
+        const list = qList(), k = Q.q.trim();
+        if (e.key === 'Enter') { e.preventDefault(); if (k && list[Q.hi]) qPick(list[Q.hi].name); else if (k) { Q.adding = k; paintQ(true); const tel = $('#qtel') as HTMLInputElement | null; tel && tel.focus(); } else if (Q.picked.length) { Q.step = 2; paintQ(); } return; }
+        if (e.key === 'ArrowDown' && k) { e.preventDefault(); Q.hi = Math.min(list.length - 1, Q.hi + 1); paintQ(true); ($('#qq') as HTMLInputElement).focus({ preventScroll: true }); return; }
+        if (e.key === 'ArrowUp' && k) { e.preventDefault(); Q.hi = Math.max(0, Q.hi - 1); paintQ(true); ($('#qq') as HTMLInputElement).focus({ preventScroll: true }); return; }
+        if (e.key === 'Backspace' && !k && Q.picked.length) { e.preventDefault(); if (Q.lastHi === Q.picked[Q.picked.length - 1]) { Q.picked.pop(); Q.lastHi = null; buzz(3); } else Q.lastHi = Q.picked[Q.picked.length - 1]; paintQ(true); ($('#qq') as HTMLInputElement).focus({ preventScroll: true }); return; }
+        return;
+      }
       if (e.key !== 'Enter' || !P) return;
       const t = e.target as HTMLInputElement;
       if (P.kind === 'item' && t.dataset && t.dataset.f) { e.preventDefault(); const all = [...panel.querySelectorAll('#pBody .inp[data-f]')] as HTMLInputElement[], j = all.indexOf(t); if (j >= 0 && j < all.length - 1) all[j + 1].focus(); else { commitItem(); P.edit = ''; paintItem(); syncAll(); } }
@@ -493,6 +565,7 @@ export default function PurchaseRequestMobile(p: PurchaseRequestMobileProps) {
 
     return () => {
       dead = true;
+      if (saveT) { clearTimeout(saveT); void doSave(); }   // land the last edit if the screen closes mid-debounce
       document.removeEventListener('click', onClick);
       document.removeEventListener('input', onInput);
       document.removeEventListener('change', onChange);

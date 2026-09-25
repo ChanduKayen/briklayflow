@@ -8,7 +8,7 @@ import { useCallback, useEffect, useMemo, useState, useTransition } from 'react'
 import { poPayState } from '../../lib/poLifecycle';
 import { useSearch, useSearchScope } from '../search/searchScope';
 import PartyFilterChip from '../search/PartyFilterChip';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../../lib/supabase';
 import DragSheet from '../DragSheet';
@@ -236,6 +236,8 @@ const POLX_CSS = `
 .polx .m-list{flex:1;overflow-y:auto;padding:2px 14px 108px}
 .polx .m-pcard{background:var(--paper);border:1px solid var(--line);border-radius:18px;padding:14px 15px;margin-bottom:10px;transition:transform .12s,background .12s;width:100%;text-align:left;display:block}
 .polx .m-pcard:active{transform:scale(.985);background:#F4F0EB}
+.polx .m-pcard.pofresh{animation:polxFresh 2s ease-out}
+@keyframes polxFresh{0%,22%{background:#E7F0E6;border-color:#CFE0CE}100%{background:var(--paper);border-color:var(--line)}}
 .polx .m-pcard .r1{display:flex;align-items:baseline;gap:8px}
 .polx .m-pcard .v{font-weight:600;font-size:15.5px;color:var(--walnut);flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .polx .m-pcard .amt{font-family:var(--mono);font-size:15px;color:var(--walnut);flex-shrink:0}
@@ -588,6 +590,17 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
     return () => clearTimeout(t);
   }, [searchParams, setSp]);
 
+  // A PO just made from a request lands here (from the phone PR screen) with its id in location.state —
+  // highlight that row briefly and glide it into view, instead of opening the PO.
+  const location = useLocation();
+  const [freshPoId, setFreshPoId] = useState<string | undefined>((location.state as { freshPoId?: string } | null)?.freshPoId);
+  useEffect(() => {
+    if (!freshPoId) return;
+    const t1 = setTimeout(() => document.querySelector(`[data-search-row="${freshPoId}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 160);
+    const t2 = setTimeout(() => setFreshPoId(undefined), 2400);
+    return () => { clearTimeout(t1); clearTimeout(t2); };
+  }, [freshPoId]);
+
   const qc = useQueryClient();
   // Pull the list down on a phone to read the orders again.
   const { wrapRef: pullRef, view: pullView } = usePullToRefresh({
@@ -804,7 +817,7 @@ export default function POListSheet({ projectId }: { projectId?: string }) {
             const p = row.po;
             const c = cardOf(p);
             return (
-              <button key={p.id} data-search-row={p.id} className={`m-pcard ${c.tone}`} onClick={() => openPO(p.id)}>
+              <button key={p.id} data-search-row={p.id} className={`m-pcard ${c.tone}${p.id === freshPoId ? ' pofresh' : ''}`} onClick={() => openPO(p.id)}>
                 <div className="r1"><span className="v">{p.vendor}</span>{c.amtNode}</div>
                 <div className="r2">
                   <span className="po">{p.id}</span>
