@@ -402,6 +402,23 @@ body.pqr-kb .mnav{opacity:0;pointer-events:none;transition:opacity .2s}
 .pqr .newsup .tel input{flex:1;min-width:0;height:100%;border:0;background:none;outline:none;padding:0 12px 0 8px;font-family:var(--mono);font-size:16px;color:rgb(var(--cream))}
 .pqr .newsup .tel:focus-within{box-shadow:inset 0 0 0 1.5px var(--clay-hi)}
 .pqr .newsup p{margin:6px 2px 0;font-size:12.5px;color:rgba(var(--cream),.5)}
+/* picked suppliers that still need a mobile number — filled in the last step, ticked on entry */
+.pqr .needrow{display:flex;align-items:center;gap:12px;min-height:62px;box-shadow:0 1px 0 0 rgba(var(--cream),.08)}
+.pqr .needrow .av{flex:none;width:34px;height:34px;border-radius:17px;background:rgba(var(--cream),.09);display:grid;place-items:center;font-size:12px;font-weight:700;color:rgba(var(--cream),.85)}
+.pqr .needrow .nm{flex:1;min-width:0;display:flex;flex-direction:column;gap:5px}
+.pqr .needrow .nm b{font-size:14.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pqr .needrow .tel{display:flex;align-items:center;height:38px;border-radius:10px;background:rgba(var(--cream),.08);padding-left:10px}
+.pqr .needrow .tel span{font-family:var(--mono);font-size:13px;color:rgba(var(--cream),.5)}
+.pqr .needrow .tel input{flex:1;min-width:0;height:100%;border:0;background:none;outline:none;padding:0 8px;font-family:var(--mono);font-size:15px;color:rgb(var(--cream))}
+.pqr .needrow .tel input::placeholder{color:rgba(var(--cream),.3);font-style:italic;font-size:13.5px}
+.pqr .needrow .tel:focus-within{box-shadow:inset 0 0 0 1.5px var(--clay-hi)}
+.pqr .needrow .pickc{flex:none;width:38px;height:38px;border:0;border-radius:10px;background:rgba(var(--cream),.08);color:rgba(var(--cream),.8);display:grid;place-items:center;cursor:pointer;transition:background .18s}
+.pqr .needrow .pickc:active{background:rgba(var(--cream),.16)}
+.pqr .needrow .pickc svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.pqr .needrow .tk{flex:none;width:24px;height:24px;border-radius:12px;box-shadow:inset 0 0 0 1.5px rgba(var(--cream),.25);display:grid;place-items:center;transition:background-color .25s,box-shadow .25s,transform .3s var(--ease)}
+.pqr .needrow .tk svg{width:13px;height:13px;fill:none;stroke:#fff;stroke-width:3;stroke-linecap:round;stroke-linejoin:round;opacity:0;transition:opacity .2s}
+.pqr .needrow.ok .tk{background:var(--sage);box-shadow:none;transform:scale(1.08)}
+.pqr .needrow.ok .tk svg{opacity:1}
 .pqr .qfoot{position:sticky;bottom:calc(-1 * (var(--nav-h) + 14px));z-index:2;margin:10px -16px -14px;padding:10px 16px calc(var(--nav-h) + 14px);background:linear-gradient(rgba(21,16,12,0),var(--night) 14px)}
 .pqr.kb .qfoot,.pqr .app.kb .qfoot{bottom:-12px;padding-bottom:12px}
 .pqr .qfoot .big{width:100%;height:52px;border:0;border-radius:16px;background:var(--clay);color:#fff;font-size:16px;font-weight:600;transition:opacity .25s,background-color .35s}

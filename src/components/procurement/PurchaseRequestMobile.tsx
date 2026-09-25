@@ -417,8 +417,24 @@ export default function PurchaseRequestMobile(p: PurchaseRequestMobileProps) {
     type QState = { step: 1 | 2 | 3; picked: string[]; q: string; hi: number; lastHi: string | null; adding: string; note: string; by: string; sent: boolean };
     let Q: QState | null = null;
     const qAdded: Record<string, string> = {};   // suppliers added in the flow: name -> phone
+    const qNums: Record<string, string> = {};     // numbers filled in the flow for an on-file vendor with none
+    const digits = (p: string) => (p || '').replace(/\D/g, '');
+    const validPhone = (p: string) => digits(p).length >= 10;
+    const contactPickAvail = typeof (navigator as unknown as { contacts?: { select?: unknown } }).contacts?.select === 'function';
     const supList = () => pRef.current.suppliers || [];
     const supByName = (name: string) => supList().find((x) => x.name === name);
+    const phoneOf = (name: string) => supByName(name)?.phone || qNums[name] || qAdded[name] || '';
+    const needNums = () => Q!.picked.filter((n) => !validPhone(phoneOf(n)));
+    const PICKC = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.2"/><path d="M5 20a7 7 0 0 1 14 0"/></svg>';
+    async function pickContact(name: string) {
+      try {
+        const nav = navigator as unknown as { contacts?: { select?: (props: string[], opts: { multiple: boolean }) => Promise<Array<{ tel?: string[] }>> } };
+        if (!nav.contacts?.select) return;
+        const res = await nav.contacts.select(['tel'], { multiple: false });
+        const tel = res?.[0]?.tel?.[0];
+        if (tel) { qNums[name] = String(tel); buzz(6); paintQ(true); }
+      } catch (e) { /* the user dismissed the picker */ }
+    }
     const sugg = () => supList().filter((x) => x.suggested);
     function qList() {
       const k = (Q!.q || '').trim().toLowerCase();
@@ -451,10 +467,14 @@ export default function PurchaseRequestMobile(p: PurchaseRequestMobileProps) {
           '<div class="onlink"><span class="mini"><i></i><i></i><i></i><u></u></span><p><b>On the link:</b> your ' + n + ' items with sizes and specs, a box for each rate, and one tap to send it back. Their quote lands on this request.</p></div>' +
           '<div class="qrow"><span class="l">Note</span><input id="qnote" type="text" autocomplete="off" enterkeyhint="done" placeholder="Delivery to site, GST…" value="' + esc(Q!.note) + '"></div>' +
           '<div class="qrow"><span class="l">Reply by</span><div class="chips">' + ['Tomorrow', '2 days', 'This week'].map((b) => '<button type="button" class="chip" data-by="' + b + '" aria-pressed="' + (b === Q!.by) + '">' + b + '</button>').join('') + '</div></div>' +
-          '<div class="qfoot"><button type="button" class="big" data-qsend>Send to ' + Q!.picked.length + (Q!.picked.length === 1 ? ' supplier' : ' suppliers') + '</button></div>';
+          (needNums().length
+            ? '<p class="qsec">A mobile number to reach these on WhatsApp</p>' +
+              needNums().map((nm) => '<div class="needrow" data-needrow="' + esc(nm) + '"><span class="av">' + initials(nm) + '</span><div class="nm"><b>' + esc(nm) + '</b><div class="tel"><span>+91</span><input type="tel" inputmode="numeric" maxlength="13" data-needtel="' + esc(nm) + '" value="' + esc(phoneOf(nm)) + '" placeholder="98480 12321" aria-label="Mobile number for ' + esc(nm) + '"></div></div>' + (contactPickAvail ? '<button type="button" class="pickc" data-pickc="' + esc(nm) + '" aria-label="Pick from contacts">' + PICKC + '</button>' : '') + '<span class="tk">' + TICK + '</span></div>').join('')
+            : '') +
+          '<div class="qfoot"><button type="button" class="big" data-qsend' + (needNums().length ? ' disabled' : '') + '>' + (needNums().length ? 'Add ' + needNums().length + ' number' + (needNums().length === 1 ? '' : 's') + ' to send' : 'Send to ' + Q!.picked.length + (Q!.picked.length === 1 ? ' supplier' : ' suppliers')) + '</button></div>';
       } else {
         ($('#pBody') as HTMLElement).innerHTML = '<div class="p-head"><div class="t"><h2>' + (Q!.sent ? 'Quotes requested' : 'Sending…') + '</h2><span>' + (Q!.sent ? 'Their rates will land on this request.' : 'Reaching each supplier on WhatsApp') + '</span></div>' + X + '</div>' +
-          '<div class="qsent">' + Q!.picked.map((pn, i) => '<div class="sentl" data-sent="' + i + '"><span class="tk">' + TICK + '</span><span class="m"><b>' + esc(pn) + '</b><span>' + esc(supByName(pn)?.phone || qAdded[pn] || 'new number') + '</span></span></div>').join('') + '</div>' +
+          '<div class="qsent">' + Q!.picked.map((pn, i) => '<div class="sentl" data-sent="' + i + '"><span class="tk">' + TICK + '</span><span class="m"><b>' + esc(pn) + '</b><span>' + esc(phoneOf(pn) || 'new number') + '</span></span></div>').join('') + '</div>' +
           '<div class="qfoot"><button type="button" class="big' + (Q!.sent ? ' ok' : ' busy') + '" data-close' + (Q!.sent ? '' : ' disabled') + '>' + (Q!.sent ? 'Done · ' + Q!.picked.length + (Q!.picked.length === 1 ? ' request sent' : ' requests sent') : 'Sending…') + '</button></div>';
       }
       // The sent/summary step gracefully expands to a full page (not a short card).
@@ -470,8 +490,9 @@ export default function PurchaseRequestMobile(p: PurchaseRequestMobileProps) {
       if (wasTyping) { const f = $('#qq') as HTMLInputElement | null; f && f.focus({ preventScroll: true }); }
     }
     async function qSend() {
+      if (needNums().length) { buzz([20, 40, 20]); say('Add a mobile number for each supplier first'); return; }
       Q!.step = 3; paintQ(); (document.activeElement as HTMLElement | null)?.blur();
-      const recipients = Q!.picked.map((name) => { const s = supByName(name); return { id: s?.id, name, phone: s?.phone || qAdded[name] || '' }; });
+      const recipients = Q!.picked.map((name) => { const s = supByName(name); return { id: s?.id, name, phone: phoneOf(name) }; });
       try {
         await pRef.current.onSendQuotes({ recipients, note: Q!.note, replyBy: Q!.by });
       } catch (err) {
@@ -513,6 +534,7 @@ export default function PurchaseRequestMobile(p: PurchaseRequestMobileProps) {
         if (el.hasAttribute('data-qnext')) { if (!Q.picked.length) return; Q.step = 2; buzz(6); paintQ(); return; }
         if (el.hasAttribute('data-qback')) { Q.step = 1; paintQ(); return; }
         if (el.dataset.by) { Q.by = el.dataset.by; paintQ(true); return; }
+        if (el.dataset.pickc) { void pickContact(el.dataset.pickc); return; }
         if (el.hasAttribute('data-qsend')) { Q.note = ($('#qnote') as HTMLInputElement | null)?.value || Q.note; void qSend(); return; }
       }
       if (el.hasAttribute('data-close')) { if (P && P.kind === 'item') { commitItem(); syncAll(); paintMain(); paintDock(); } closePanel(); return; }
@@ -545,6 +567,15 @@ export default function PurchaseRequestMobile(p: PurchaseRequestMobileProps) {
       if (Q && P && P.kind === 'quotes') {
         if (t.id === 'qq') { Q.q = t.value; Q.hi = 0; Q.adding = ''; Q.lastHi = null; const y = panel.scrollTop; paintQ(true); panel.scrollTop = y; const f = $('#qq') as HTMLInputElement; f.focus({ preventScroll: true }); f.setSelectionRange(f.value.length, f.value.length); }
         else if (t.id === 'qnote') { Q.note = t.value; }
+        else if (t.dataset.needtel) {
+          // Live: keep the keyboard up (no repaint), tick the row when the number is valid, and gate Send.
+          const nm = t.dataset.needtel; qNums[nm] = t.value;
+          const row = t.closest('.needrow'); const ok = validPhone(t.value);
+          if (row) { const was = row.classList.contains('ok'); row.classList.toggle('ok', ok); if (ok && !was) buzz(6); }
+          const need = needNums().length;
+          const send = panel.querySelector('[data-qsend]') as HTMLButtonElement | null;
+          if (send) { send.disabled = need > 0; send.textContent = need ? 'Add ' + need + ' number' + (need === 1 ? '' : 's') + ' to send' : 'Send to ' + Q.picked.length + (Q.picked.length === 1 ? ' supplier' : ' suppliers'); }
+        }
       }
     };
     const onChange = (e: Event) => { const t = e.target as HTMLSelectElement; if (P && P.kind === 'item' && t.dataset.f === 'unit') { (P.it as Row).unit = t.value; syncRow(P.it as Row); } };
