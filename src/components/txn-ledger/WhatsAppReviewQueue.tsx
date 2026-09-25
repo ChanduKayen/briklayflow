@@ -325,12 +325,10 @@ export default function WhatsAppReviewQueue() {
 
             {open &&
               <div className="war-more">
+                {/* no second image — the row's thumbnail (above, still visible) is the one copy; tap it for full size */}
                 <div className="war-story">
-                  <EntryPaper entry={e} amount={d.amount} big onOpen={setLightbox} />
-                  <div>
-                    <p className="said">“{said(e)}”</p>
-                    <div className="meta">{e.sender_name || 'WhatsApp'} · {whenLabel(e.created_at)} · via WhatsApp · Nº {ref(e)}</div>
-                  </div>
+                  <p className="said">“{said(e)}”</p>
+                  <div className="meta">{e.sender_name || 'WhatsApp'} · {whenLabel(e.created_at)} · via WhatsApp · Nº {ref(e)}{e.raw_image_url ? ' · tap the photo to enlarge' : ''}</div>
                 </div>
 
                 {splitId === e.id
@@ -625,7 +623,7 @@ const CSS = `
 .war .war-btn.dots:hover,.war .war-btn.split:hover{filter:brightness(1.05)}
 /* expanded */
 .war .war-more{display:grid;grid-template-columns:1fr 480px;gap:36px;padding:2px 8px 22px;align-items:start}
-.war .war-story{display:grid;grid-template-columns:112px 1fr;gap:24px;align-items:start}
+.war .war-story{min-width:0}
 .war .war-story .said{font-family:var(--serif);font-style:italic;font-size:16.5px;line-height:1.5;color:var(--ink);margin:0}
 .war .war-story .meta{margin-top:6px;font-size:12.5px;color:var(--ink-3);font-family:'DM Mono',monospace}
 .war .war-form{border-left:1px dashed var(--line-2);padding-left:32px}
