@@ -355,6 +355,8 @@ body.pqr-kb .mnav{opacity:0;pointer-events:none;transition:opacity .2s}
 .pqr .opt .m{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
 .pqr .opt b{font-size:15.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pqr .opt span{font-size:12.5px;color:rgba(var(--cream),.5)}
+.pqr .opt.del b{color:#F0A58A}
+.pqr .opt.del .av{background:rgba(212,99,62,.16);color:#F0A58A;font-size:15px}
 .pqr .opt .r{flex:none;width:9px;height:9px;border-radius:50%;box-shadow:inset 0 0 0 1.5px rgba(var(--cream),.35)}
 .pqr .opt[aria-pressed="true"] .r{background:var(--clay-hi);box-shadow:none}
 .pqr .opt.add{color:var(--clay-hi)}.pqr .opt.add .av{background:rgba(212,99,62,.16);color:var(--clay-hi)}

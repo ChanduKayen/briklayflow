@@ -68,6 +68,8 @@ export interface PurchaseRequestMobileProps {
   /** "Add a page" from the request's own menu — a second sheet of the same quote. Return a sentence
    *  and the page says it, for a host that has nowhere to put one yet. */
   onAddPage: () => string | void;
+  /** Delete this draft request (from the "…" menu). The host removes it and leaves the screen. */
+  onDelete: () => void | Promise<void>;
 }
 
 const UNITS = ['Nos', 'Set', 'Sqft', 'Rft', 'Kg', 'Bag'];
@@ -487,10 +489,15 @@ export default function PurchaseRequestMobile(p: PurchaseRequestMobileProps) {
       if (el.hasAttribute('data-back')) { pRef.current.onBack(); return; }
       // The reference's own three, word for word. Two of them are real here: reading the quote again
       // replays the read, and keeping it as a draft is simply leaving — nothing is written until Save.
-      if (el.hasAttribute('data-menu')) { openPanel('<div class="p-head"><div class="t"><h2>This request</h2></div>' + X + '</div><button type="button" class="opt" data-addpage><span class="av">+</span><span class="m"><b>Add a page</b><span>If the quote runs onto another sheet</span></span></button><button type="button" class="opt" data-reread><span class="av">↻</span><span class="m"><b>Read the quote again</b></span></button><button type="button" class="opt" data-draft><span class="av">⌄</span><span class="m"><b>Keep as draft, finish later</b></span></button>'); P = { kind: 'menu' }; return; }
+      if (el.hasAttribute('data-menu')) { openPanel('<div class="p-head"><div class="t"><h2>This request</h2></div>' + X + '</div><button type="button" class="opt" data-addpage><span class="av">+</span><span class="m"><b>Add a page</b><span>If the quote runs onto another sheet</span></span></button><button type="button" class="opt" data-reread><span class="av">↻</span><span class="m"><b>Read the quote again</b></span></button><button type="button" class="opt" data-draft><span class="av">⌄</span><span class="m"><b>Keep as draft, finish later</b></span></button><button type="button" class="opt del" data-deletereq><span class="av">🗑</span><span class="m"><b>Delete this request</b><span>Removes it from your review inbox</span></span></button>'); P = { kind: 'menu' }; return; }
       if (el.hasAttribute('data-addpage')) { closePanel(); const m = pRef.current.onAddPage(); if (m) say(m); return; }
       if (el.hasAttribute('data-reread')) { closePanel(); S.reading = true; shown = 0; paint(); void read(); return; }
       if (el.hasAttribute('data-draft')) { closePanel(); pRef.current.onBack(); return; }
+      if (el.hasAttribute('data-deletereq')) {
+        // A two-tap confirm — delete is irreversible.
+        openPanel('<div class="p-head"><div class="t"><h2>Delete this request?</h2><span>It leaves your review inbox. This can’t be undone.</span></div>' + X + '</div><button type="button" class="opt del" data-delconfirm><span class="av">🗑</span><span class="m"><b>Delete request</b></span></button><button type="button" class="opt" data-close><span class="av">✕</span><span class="m"><b>Keep it</b></span></button>'); P = { kind: 'menu' }; return;
+      }
+      if (el.hasAttribute('data-delconfirm')) { closePanel(); void pRef.current.onDelete(); return; }
       if (el.hasAttribute('data-photo')) { ($('#viewerImg') as HTMLImageElement).src = PHOTO; ($('#viewer') as HTMLElement).classList.add('on'); return; }
       if (el.id === 'viewerClose') { ($('#viewer') as HTMLElement).classList.remove('on'); return; }
       // The two next actions: Request quotes opens the supplier flow; Create PO the light confirm.

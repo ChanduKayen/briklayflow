@@ -157,6 +157,20 @@ export const PO_LIST_DESKTOP_CSS = `
 .pox-peek .ph span{display:block;margin-top:4px;font-size:13.5px;color:rgba(var(--cream),.6)}
 .pox-peek .x{width:40px;height:40px;border:0;border-radius:20px;background:rgba(var(--cream),.08);color:rgb(var(--cream));display:grid;place-items:center;flex:none}
 .pox-peek .x svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round}
+.pox-peek .ph-acts{position:relative;display:flex;align-items:center;gap:8px;flex:none}
+.pox-peek .kebab{width:40px;height:40px;border:0;border-radius:20px;background:rgba(var(--cream),.08);color:rgb(var(--cream));display:grid;place-items:center;cursor:pointer;transition:background .18s}
+.pox-peek .kebab:hover{background:rgba(var(--cream),.15)}
+.pox-peek .kebab svg{width:18px;height:18px;fill:currentColor}
+.pox-peek .kmenu{position:absolute;top:46px;right:0;z-index:8;min-width:200px;padding:6px;border-radius:14px;background:#241a13;border:1px solid rgba(var(--cream),.16);box-shadow:0 22px 44px -18px rgba(0,0,0,.8);display:flex;flex-direction:column;gap:2px;animation:poxPickIn .18s var(--ease) both}
+.pox-peek .kitem{display:flex;align-items:center;gap:10px;width:100%;height:42px;padding:0 12px;border:0;border-radius:10px;background:none;color:rgb(var(--cream));font:inherit;font-size:14.5px;font-weight:600;text-align:left;cursor:pointer}
+.pox-peek .kitem:hover{background:rgba(var(--cream),.08)}
+.pox-peek .kitem svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.pox-peek .kitem.del{color:#F0A58A}
+.pox-peek .kq{display:block;padding:8px 12px 4px;font-size:13px;color:rgba(var(--cream),.65)}
+.pox-peek .kdel{width:100%;height:42px;border:0;border-radius:10px;background:var(--clay);color:#fff;font:inherit;font-size:14.5px;font-weight:600;cursor:pointer}
+.pox-peek .kdel:hover{background:var(--clay-hi)}
+.pox-peek .kcancel{width:100%;height:38px;border:0;border-radius:10px;background:none;color:rgba(var(--cream),.7);font:inherit;font-size:14px;font-weight:600;cursor:pointer}
+.pox-peek .kcancel:hover{background:rgba(var(--cream),.06)}
 .pox-peek .came{display:flex;gap:18px;align-items:center;margin-top:22px;padding:16px;border-radius:18px;background:rgba(var(--cream),.06)}
 .pox-peek .paper{position:relative;width:76px;height:98px;border-radius:6px;background:var(--sheet);overflow:hidden;transform:rotate(-1.5deg);box-shadow:0 14px 28px -14px rgba(0,0,0,.8);flex:none;border:0;padding:0;cursor:zoom-in}
 .pox-peek .paper img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:top}

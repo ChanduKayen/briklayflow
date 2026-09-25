@@ -156,6 +156,15 @@ export default function POListDesktop({ projectId }: { projectId?: string }) {
   // From the review card: the peek plays its own ✓ and closes itself; we run the RPC and settle the list.
   const makeFromPeek = async (prId: string, asRfq: boolean) => { const poId = await promote(prId, asRfq); settleNewPO(poId); };
 
+  // Delete a draft request from the peek's ⋯ menu (items cascade). Close the peek + refresh the inbox.
+  const deletePR = async (prId: string) => {
+    const { error } = await supabase.from('purchase_requests').delete().eq('id', prId);
+    if (error) { say(error.message || 'Could not delete it'); return; }
+    setPeekId(null);
+    qc.invalidateQueries({ queryKey: ['po_list_pending_prs'] });
+    say('Request deleted');
+  };
+
   // ── table rows for the current tab + search ──
   const ql = q.trim().toLowerCase();
   const visiblePOs = useMemo(() => rows.filter((p) => {
@@ -243,7 +252,7 @@ export default function POListDesktop({ projectId }: { projectId?: string }) {
         {peekId && <PeekEditor key={peekId} prId={peekId} orgId={orgId ?? ''} projects={projects} vendors={vendors} canOrder={canOrder}
           onClose={() => setPeekId(null)} onPhoto={(url) => setViewer(url)}
           onSaved={() => { qc.invalidateQueries({ queryKey: ['po_list_pending_prs'] }); qc.invalidateQueries({ queryKey: ['po_list_sheet'] }); }}
-          onCreate={(asRfq) => makeFromPeek(peekId, asRfq)} />}
+          onCreate={(asRfq) => makeFromPeek(peekId, asRfq)} onDelete={() => deletePR(peekId)} />}
       </aside>
 
       <div className={`pox-viewer${viewer ? ' on' : ''}`} role="dialog" aria-modal="true" onClick={() => setViewer(null)}>{viewer && <img src={viewer} alt="The request photo" />}</div>
@@ -343,9 +352,9 @@ const sizeOf = (it: EItem) => (it.w && it.h ? `${it.w} × ${it.h} mm` : '');
 const specOf = (it: EItem) => [sizeOf(it), it.spec, it.brand].filter(Boolean).join(' · ');
 const parseSize = (v: string): { w: string; h: string } => { const m = v.replace(/mm/gi, '').match(/(\d+(?:\.\d+)?)\s*[x×*/]\s*(\d+(?:\.\d+)?)/i); return m ? { w: m[1], h: m[2] } : { w: '', h: '' }; };
 
-function PeekEditor({ prId, orgId, projects, vendors, canOrder, onClose, onPhoto, onSaved, onCreate }: {
+function PeekEditor({ prId, orgId, projects, vendors, canOrder, onClose, onPhoto, onSaved, onCreate, onDelete }: {
   prId: string; orgId: string; projects: Opt[]; vendors: Opt[]; canOrder: boolean;
-  onClose: () => void; onPhoto: (url: string) => void; onSaved: () => void; onCreate: (asRfq: boolean) => Promise<void>;
+  onClose: () => void; onPhoto: (url: string) => void; onSaved: () => void; onCreate: (asRfq: boolean) => Promise<void>; onDelete: () => void;
 }) {
   const pr = useQuery({
     queryKey: ['pox_pr', prId],
@@ -362,6 +371,8 @@ function PeekEditor({ prId, orgId, projects, vendors, canOrder, onClose, onPhoto
   const [msg, setMsg] = useState<string | null>(null);
   const [makingKind, setMakingKind] = useState<null | 'po' | 'rfq'>(null);
   const [madeKind, setMadeKind] = useState<null | 'po' | 'rfq'>(null);   // the ✓ success beat before the card closes
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [confirmDel, setConfirmDel] = useState(false);
   const [said, setSaid] = useState('');
   const [edit, setEdit] = useState(-1);            // which item row is open for editing
   const [brandAll, setBrandAll] = useState(false);
@@ -447,7 +458,17 @@ function PeekEditor({ prId, orgId, projects, vendors, canOrder, onClose, onPhoto
           <input className="title-in" value={title} onChange={(e) => { setTitle(e.target.value); touch(); }} placeholder="Materials request" aria-label="Title" />
           <span><Wa style={{ width: 13, height: 13, fill: '#3DBB6C', verticalAlign: -2, marginRight: 6 }} />From <b style={{ color: 'rgb(250,248,243)' }}>{pr.data?.sender_name || 'WhatsApp'}</b>{whenLabel(pr.data?.created_at) ? ` · ${whenLabel(pr.data?.created_at)}` : ''}</span>
         </div>
-        <button type="button" className="x" aria-label="Close" onClick={onClose}><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18" /></svg></button>
+        <div className="ph-acts">
+          <button type="button" className="kebab" aria-label="More" onClick={() => { setMenuOpen((o) => !o); setConfirmDel(false); }}><svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.6" /><circle cx="12" cy="12" r="1.6" /><circle cx="12" cy="19" r="1.6" /></svg></button>
+          <button type="button" className="x" aria-label="Close" onClick={onClose}><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18" /></svg></button>
+          {menuOpen && (
+            <div className="kmenu" onMouseLeave={() => { setMenuOpen(false); setConfirmDel(false); }}>
+              {confirmDel
+                ? <><span className="kq">Delete this request?</span><button type="button" className="kdel" onClick={() => { setMenuOpen(false); onDelete(); }}>Delete</button><button type="button" className="kcancel" onClick={() => { setMenuOpen(false); setConfirmDel(false); }}>Keep it</button></>
+                : <button type="button" className="kitem del" onClick={() => setConfirmDel(true)}><svg viewBox="0 0 24 24"><path d="M5 7h14M10 7V4.5h4V7M7 7l1 12.5h8L17 7" /></svg>Delete request</button>}
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="came">

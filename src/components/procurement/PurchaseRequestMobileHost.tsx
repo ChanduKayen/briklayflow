@@ -313,6 +313,14 @@ export default function PurchaseRequestMobileHost({ id, session }: { id: string;
       onSave={save}
       onCreatePO={createPO}
       onSendQuotes={sendQuotes}
+      // Delete the draft (items cascade); leave the screen back to the list.
+      onDelete={async () => {
+        const { error } = await supabase.from('purchase_requests').delete().eq('id', pr.id);
+        if (error) return;
+        qc.invalidateQueries({ queryKey: ['po_list_pending_prs'] });
+        qc.invalidateQueries({ queryKey: ['daybook_purchase_requests', orgId] });
+        navigate('/purchase-orders?status=draft');
+      }}
       // Nothing reads a second sheet yet, so the page says so rather than pretending.
       onAddPage={() => 'Send the next sheet on WhatsApp and it lands here'}
     />
