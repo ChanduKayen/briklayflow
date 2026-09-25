@@ -700,9 +700,13 @@ export async function extractProcurementFromImage(
   const ANTHROPIC_KEY = Deno.env.get('ANTHROPIC_API_KEY')
   const OPENAI_KEY    = Deno.env.get('OPENAI_API_KEY')
   try {
+    // STRONG vision, non-negotiable (see EXTRACT_IMAGE_MODEL_* above): a multi-column materials/window
+    // schedule with structured size/spec/brand fields is exactly the read weak -mini/haiku fails — it
+    // returns zero items, and the caller then stages a one-line SUMMARY instead of the extracted list.
+    // Use the same env-tunable sonnet-4 / gpt-4o the transaction + payment-list image extractors use.
     let parsed: any = null
-    if (ANTHROPIC_KEY)   parsed = await extractImageAnthropic(base64, contentType, prompt, ANTHROPIC_KEY, 'claude-haiku-4-5-20251001', 2500)
-    else if (OPENAI_KEY) parsed = await extractImageOpenAI(base64, contentType, prompt, OPENAI_KEY, 'gpt-4o-mini', 2500)
+    if (ANTHROPIC_KEY)   parsed = await extractImageAnthropic(base64, contentType, prompt, ANTHROPIC_KEY, EXTRACT_IMAGE_MODEL_ANTHROPIC, 2500)
+    else if (OPENAI_KEY) parsed = await extractImageOpenAI(base64, contentType, prompt, OPENAI_KEY, EXTRACT_IMAGE_MODEL_OPENAI, 2500)
     return normProcImage(parsed)
   } catch (e) {
     console.error('[extract] extractProcurementFromImage error:', e)
