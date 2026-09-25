@@ -37,6 +37,7 @@ import { applyAttribution, prefetchAttrTargets, payableTagOf } from '../lib/paya
 import { unlinkTxnOrder } from '../lib/trackingApi';
 import { useOrgId } from '../lib/auth/AuthProvider';
 import WalletRail from '../components/wallets/WalletRail';
+import WhatsAppReviewQueue from '../components/txn-ledger/WhatsAppReviewQueue';
 import { loadWallets } from '../lib/walletApi';
 import StakeholderLedgerDrawer from '../components/StakeholderLedgerDrawer';
 import { NewTxnFab } from '../components/NewTxnFab';
@@ -1497,6 +1498,10 @@ export default function Ledger({ session, lockedProject }: { session: Session; l
 
         {/* ── main column: the day-book ── */}
         <div className="min-w-0">
+
+        {/* Waiting from WhatsApp — the Day Book review queue, brought home. Unposted entries sit here as
+            paper; Approve files them down into the ledger below. Self-contained (own data + write path). */}
+        <WhatsAppReviewQueue />
 
         {/* the org's ledger go-live (opening cutover) — a quiet, right-aligned line that stays out of the
             way once set; managers get the "configure" affordance, everyone else just reads the date.
