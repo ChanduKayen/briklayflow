@@ -220,7 +220,7 @@ export default function PurchaseRequestMobile(p: PurchaseRequestMobileProps) {
     type Pan = { kind: string; q?: string; it?: Row; edit?: string; brandAll?: boolean } | null;
     let P: Pan = null, nudged = false;
     function openPanel(html: string) { ($('#pBody') as HTMLElement).innerHTML = html; panel.scrollTop = 0; panel.classList.add('on'); scrim.classList.add('on'); ($('#dock') as HTMLElement).classList.add('away'); if (!quiet) buzz(8); }
-    function closePanel() { panel.classList.remove('on', 'short'); const b = $('#pBody') as HTMLElement; b.style.transform = ''; b.style.opacity = ''; root!.classList.remove('card'); document.body.classList.remove('pqr-card'); b.className = ''; scrim.classList.remove('light'); root!.querySelectorAll('.it.editing').forEach((r) => r.classList.remove('editing')); scrim.classList.remove('on'); ($('#dock') as HTMLElement).classList.remove('away'); (document.activeElement as HTMLElement | null)?.blur(); P = null; navTakeover.release(); }
+    function closePanel() { panel.classList.remove('on', 'short', 'full'); const b = $('#pBody') as HTMLElement; b.style.transform = ''; b.style.opacity = ''; root!.classList.remove('card'); document.body.classList.remove('pqr-card'); b.className = ''; scrim.classList.remove('light'); root!.querySelectorAll('.it.editing').forEach((r) => r.classList.remove('editing')); scrim.classList.remove('on'); ($('#dock') as HTMLElement).classList.remove('away'); (document.activeElement as HTMLElement | null)?.blur(); P = null; navTakeover.release(); }
     scrim.addEventListener('click', closePanel);
     let swallowClick = false;
     (() => {                                                                          /* swipe: the next item rides in beside the current one, on the finger; release finishes the same motion */
@@ -455,6 +455,8 @@ export default function PurchaseRequestMobile(p: PurchaseRequestMobileProps) {
           '<div class="qsent">' + Q!.picked.map((pn, i) => '<div class="sentl" data-sent="' + i + '"><span class="tk">' + TICK + '</span><span class="m"><b>' + esc(pn) + '</b><span>' + esc(supByName(pn)?.phone || qAdded[pn] || 'new number') + '</span></span></div>').join('') + '</div>' +
           '<div class="qfoot"><button type="button" class="big' + (Q!.sent ? ' ok' : ' busy') + '" data-close' + (Q!.sent ? '' : ' disabled') + '>' + (Q!.sent ? 'Done · ' + Q!.picked.length + (Q!.picked.length === 1 ? ' request sent' : ' requests sent') : 'Sending…') + '</button></div>';
       }
+      // The sent/summary step gracefully expands to a full page (not a short card).
+      panel.classList.toggle('full', Q!.step === 3);
       if (keep) panel.scrollTop = y;
     }
     function qPick(name: string) {

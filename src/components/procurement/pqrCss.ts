@@ -294,7 +294,9 @@ body.pqr-kb .mnav{opacity:0;pointer-events:none;transition:opacity .2s}
 @keyframes pqr_stepBack{from{opacity:0;transform:translateX(-22px)}to{opacity:1;transform:none}}
 .pqr .ipips i{transition:background-color .3s,box-shadow .3s}
 .pqr.kb .panel{padding-bottom:16px}
-.pqr .panel.on{transform:none;opacity:1;visibility:visible;transition:transform .5s var(--ease),opacity .3s,visibility 0s,bottom .25s,padding-bottom .25s}
+.pqr .panel.on{transform:none;opacity:1;visibility:visible;transition:transform .5s var(--ease),opacity .3s,visibility 0s,bottom .25s,padding-bottom .25s,min-height .46s var(--ease)}
+/* the RFQ sent/summary step gracefully expands to a full page (min-height grows to full height) */
+.pqr .panel.full{min-height:calc(100% - 24px)}
 .pqr .grab{display:grid;place-items:center;height:24px;margin:-8px -16px 0;padding-top:8px;touch-action:none;cursor:grab}.pqr .grab i{width:44px;height:5px;border-radius:3px;background:rgba(var(--cream),.28)}
 .pqr .panel.short{max-height:84%}
 .pqr .scrim.light{background:rgba(21,16,12,.22)}
