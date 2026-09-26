@@ -276,7 +276,18 @@ function pinTask(rows: TaskRowRef[], slot: StructureSlot | null, geometry: Geome
   }
 
   if (cands.length === 1) return { kind: 'apply', rowId: cands[0].id }
-  if (cands.length > 1) return { kind: 'ask', shortlistIds: cands.map((r) => r.id) }
+  if (cands.length > 1) {
+    // INFERRED FLOOR-SWEEP (2026-09-26). A statement that names a FLOOR but no unit ("3rd floor tiling done")
+    // over per-unit rows is NOT ambiguous — it is simply coarser than the rows and means the whole floor.
+    // Ambiguity ≠ multiplicity: the residual here is, by construction, every unit-row of ONE type on that
+    // floor (we filtered by floor; unit was null), so SWEEP it rather than asking "which flat?". The trade's
+    // granularity is already encoded — a floor-granular trade (slab) leaves exactly 1 row here and never
+    // reaches this branch; only a per-unit trade reported at floor level does, which is exactly the sweep.
+    // A UNIT named but not pinned to one row (e.g. the same unit label on several floors) is a genuine
+    // which-FLOOR ambiguity, not a floor-sweep → keep asking.
+    if (wantFloor && !wantUnit) return { kind: 'apply_all', ids: cands.map((r) => r.id) }
+    return { kind: 'ask', shortlistIds: cands.map((r) => r.id) }
+  }
 
   // 0 rows matched. If the message named a floor/unit, tell a MISSING FLOOR from an UNTRACKED TASK.
   if (wantFloor || wantUnit) {

@@ -50,11 +50,22 @@ suite('siteops resolution v2 — the task pin (type + structure slot)', () => {
     expect(t.some((x) => x.kind === 'object_updated')).toBe(false)
   })
 
-  // Floor named, that floor has 2 units → ask WHICH UNIT, over THAT floor's units only (Third's isn't offered).
-  test('floor named, 2 units on it → which_item ASK over that floor’s units only, no write', () => {
+  // Floor named, that floor has 2 units, NO explicit "all" → INFERRED FLOOR-SWEEP. A statement pitched at the
+  // floor over per-unit rows is coarser than the rows, not ambiguous — it means the whole floor. Sweep both
+  // units; never ask "which flat?" (ambiguity ≠ multiplicity). Same result as an explicit "all + floor".
+  test('floor named, 2 units on it → inferred floor-sweep (both units), no which_item ask', () => {
     const t = executeResolution(base(tUpd()), ctxPin(MIXED_UNITS, { floor: 'Fourth' }))
+    expect(t[0].kind).toBe('object_updated')
+    expect(new Set(collectiveIds(t))).toEqual(new Set(['pr-4a', 'pr-4b']))
+    expect(t.some((x) => x.kind === 'question_asked')).toBe(false)
+  })
+
+  // Boundary: a UNIT named but present on SEVERAL floors (no floor given) is a genuine which-FLOOR ambiguity,
+  // NOT a floor-sweep → still ask. The inferred sweep is strictly floor-named-with-unit-omitted.
+  test('unit named, same label on 2 floors → still a which_item ASK (which floor), no sweep', () => {
+    const t = executeResolution(base(tUpd()), ctxPin(MIXED_UNITS, { unit: 'Unit A' }))
     expect(t[0].kind).toBe('question_asked')
-    expect(new Set(askShortlist(t))).toEqual(new Set(['pr-4a', 'pr-4b']))
+    expect(new Set(askShortlist(t))).toEqual(new Set(['pr-4a', 'pr-3a']))
     expect(t.some((x) => x.kind === 'object_updated')).toBe(false)
   })
 
