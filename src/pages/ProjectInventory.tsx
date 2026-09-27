@@ -14,12 +14,18 @@ import { useOrgId } from '../lib/auth/AuthProvider'
 import { useSnackbar } from '../components/Snackbar'
 
 interface StockRow {
-  item_key: string; item_name: string; unit: string | null
+  item_key: string; inventory_id: string | null; item_name: string; unit: string | null
   on_hand: number; total_in: number; total_out: number; stock_value: number; avg_rate: number | null
   last_movement_at: string | null; last_delivery_at: string | null; last_delivery_qty: number | null
   category: string | null; spec: string | null; brand: string | null
 }
 interface Move { entry_id: string; qty: number; direction: string; kind: string; unit: string | null; unit_rate: number | null; note: string | null; created_at: string; ref_id: string | null }
+interface QLine { bill_id: string; vendor_name: string | null; vendor_category: string | null; bill_no: string | null; bill_date: string | null; line_index: number; raw_name: string; spec: string | null; unit: string | null; qty: number | null; rate: number | null; amount: number | null }
+interface InvItem { inventory_id: string; display_name: string | null; item: string; unit: string | null }
+interface Canonical { item: string; variant: string | null; dimension: string | null; grade: string | null; unit: string | null; category: string | null }
+interface Resol { line_index: number; status: 'mapped' | 'needs_confirm' | 'create_suggested'; inventory_id?: string; confidence: number; source: string; canonical?: Canonical; candidates?: { inventory_id: string; display_name: string | null; confidence: number }[] }
+const canonLabel = (c?: Canonical | null) => c ? [c.item, c.dimension, c.variant, c.grade].filter(Boolean).join(' · ') : ''
+
 
 const inr = (n: number) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN')
 const dstr = (s: string | null) => (s ? new Date(s).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '')
@@ -116,6 +122,25 @@ const CSS = `
 @keyframes stkRing{to{stroke-dashoffset:0}}
 .stkx .pmw.hasopen .pill:not(.open):not(.done){opacity:.3;pointer-events:none}
 .stkx .empty{padding:70px 20px;text-align:center;color:var(--mute)}
+.stkx .queue{display:flex;align-items:center;gap:14px;background:var(--paper);border:1px solid var(--rule);border-radius:10px;padding:14px 18px;margin:18px 0 26px;width:100%;text-align:left;transition:border-color .2s,box-shadow .2s,transform .12s}
+.stkx .queue:hover{border-color:var(--clay);box-shadow:var(--shadow-s)}
+.stkx .queue:active{transform:scale(.995)}
+.stkx .queue .qd{width:9px;height:9px;border-radius:50%;background:var(--clay);flex:none}
+.stkx .queue .qt{flex:1}.stkx .queue .qt b{font-weight:600}.stkx .queue .qt span{color:var(--ink-2);margin-left:10px}
+.stkx .queue .qgo{color:var(--clay);font-weight:500}
+.stkx .rl{border:1px solid var(--rule);border-radius:12px;padding:14px 16px;margin-bottom:12px;transition:opacity .3s}
+.stkx .rl .raw{display:flex;justify-content:space-between;gap:12px;align-items:baseline}
+.stkx .rl .raw b{font-weight:600;font-size:15px}.stkx .rl .raw .q{white-space:nowrap;color:var(--ink-2)}
+.stkx .rl .src{color:var(--mute);font-size:12.5px;margin-top:2px}
+.stkx .rl .match{display:flex;align-items:center;gap:10px;margin:12px 0 10px;padding:10px 12px;border-radius:8px;background:var(--rule-soft);font-size:14px}
+.stkx .rl .match b{font-weight:500}.stkx .rl .match .conf{margin-left:auto;color:var(--mute);font-size:12.5px;white-space:nowrap}
+.stkx .rl .match.unk{background:var(--clay-soft)}
+.stkx .rl .opts{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.stkx .rl .opts button{border:1px solid var(--rule);border-radius:999px;padding:8px 13px;font-size:13px;min-height:36px;transition:border-color .15s,transform .1s}
+.stkx .rl .opts button:hover{border-color:var(--ink)}.stkx .rl .opts button:active{transform:scale(.96)}
+.stkx .rl .opts button.yes{background:var(--ink);color:var(--cream);border-color:var(--ink)}
+.stkx .rl .opts select{border:1px solid var(--rule);border-radius:999px;padding:8px 12px;font:inherit;font-size:13px;background:var(--paper);color:var(--ink);min-height:36px}
+.stkx .rl.busy{opacity:.5;pointer-events:none}
 .stkx .scrim{position:fixed;inset:0;background:rgba(44,28,19,.22);opacity:0;pointer-events:none;transition:opacity .25s;z-index:20}
 .stkx .scrim.on{opacity:1;pointer-events:auto}
 .stkx .peek{position:fixed;top:0;right:0;bottom:0;width:min(540px,100%);background:var(--paper);border-left:1px solid var(--rule);box-shadow:var(--shadow);transform:translateX(104%);transition:transform .32s var(--ease);overflow:auto;z-index:21}
@@ -176,7 +201,7 @@ export default function ProjectInventory({ session: _session }: { session: Sessi
     enabled: !!projectId,
     queryFn: async () => {
       const { data, error } = await supabase.from('v_stock_material')
-        .select('item_key, item_name, unit, on_hand, total_in, total_out, stock_value, avg_rate, last_movement_at, last_delivery_at, last_delivery_qty, category, spec, brand')
+        .select('item_key, inventory_id, item_name, unit, on_hand, total_in, total_out, stock_value, avg_rate, last_movement_at, last_delivery_at, last_delivery_qty, category, spec, brand')
         .eq('project_id', projectId!).order('item_name')
       if (error) throw error
       return (data ?? []) as StockRow[]
@@ -218,14 +243,105 @@ export default function ProjectInventory({ session: _session }: { session: Sessi
     queryKey: ['stock_ledger_item', projectId, peek?.item_key],
     enabled: !!peek && !!projectId,
     queryFn: async () => {
-      const { data } = await supabase.from('stock_ledger')
+      let q = supabase.from('stock_ledger')
         .select('entry_id, qty, direction, kind, unit, unit_rate, note, created_at, ref_id')
-        .eq('project_id', projectId!).eq('unit', peek!.unit ?? '')
-        .ilike('item_name', peek!.item_name)
-        .order('created_at', { ascending: true })
+        .eq('project_id', projectId!)
+      // A mapped material owns its movements by identity; an unmapped one still folds on name+unit.
+      q = peek!.inventory_id
+        ? q.eq('inventory_id', peek!.inventory_id)
+        : q.is('inventory_id', null).eq('unit', peek!.unit ?? '').ilike('item_name', peek!.item_name)
+      const { data } = await q.order('created_at', { ascending: true })
       return (data ?? []) as Move[]
     },
   })
+
+  // Bill lines that still need a material (the resolve queue). Bills feed stock once each line is confirmed.
+  const queueQ = useQuery({
+    queryKey: ['stock_bill_queue', projectId],
+    enabled: !!projectId,
+    queryFn: async () => {
+      const { data } = await supabase.from('v_bill_lines_unresolved')
+        .select('bill_id, vendor_name, vendor_category, bill_no, bill_date, line_index, raw_name, spec, unit, qty, rate, amount')
+        .eq('project_id', projectId!).order('bill_date', { ascending: false })
+      return (data ?? []) as QLine[]
+    },
+  })
+  const [resolveOpen, setResolveOpen] = useState(false)
+  const [resolvedKeys, setResolvedKeys] = useState<Set<string>>(new Set())
+  const [pickLine, setPickLine] = useState<string | null>(null)
+  const [busyLine, setBusyLine] = useState<string | null>(null)
+  const [resolving, setResolving] = useState(false)
+  const [resolutions, setResolutions] = useState<Record<string, Resol>>({})
+  const keyOf = (l: QLine) => `${l.bill_id}:${l.line_index}`
+  const queue = useMemo(() => (queueQ.data ?? []).filter((l) => !resolvedKeys.has(keyOf(l))), [queueQ.data, resolvedKeys])
+  const queueVendors = useMemo(() => [...new Set(queue.map((l) => l.vendor_name).filter(Boolean))] as string[], [queue])
+
+  // The org's inventory materials — for the "another material" picker.
+  const invQ = useQuery({
+    queryKey: ['inventory_items', orgId],
+    enabled: !!orgId && resolveOpen,
+    queryFn: async () => {
+      const { data } = await supabase.from('inventory_items')
+        .select('inventory_id, display_name, item, unit').eq('org_id', orgId).order('item')
+      return (data ?? []) as InvItem[]
+    },
+  })
+
+  const invalidateStock = async () => {
+    await qc.invalidateQueries({ queryKey: ['stock_bill_queue', projectId] })
+    await qc.invalidateQueries({ queryKey: ['project_stock_material', projectId] })
+  }
+
+  // Low-level commit of one line to stock (or expense/skip). Returns ok.
+  const commitRpc = async (l: QLine, opts: { action: 'material' | 'expense' | 'skip'; inventory_id?: string; canonical?: Canonical | null; unit?: string | null }): Promise<boolean> => {
+    const c = opts.canonical
+    const { data, error } = await supabase.rpc('commit_bill_line', {
+      p_org_id: orgId, p_bill_id: l.bill_id, p_line_index: l.line_index, p_action: opts.action,
+      p_inventory_id: opts.inventory_id ?? null,
+      p_raw_name: l.raw_name, p_qty: l.qty, p_rate: l.rate,
+      p_item: c?.item ?? (opts.action === 'material' && !opts.inventory_id ? l.raw_name : null),
+      p_variant: c?.variant ?? null, p_dimension: c?.dimension ?? null, p_grade: c?.grade ?? null,
+      p_category: c?.category ?? null, p_unit: opts.unit ?? c?.unit ?? l.unit ?? null,
+    })
+    if (error || !(data as any)?.ok) { show((data as any)?.error || error?.message || 'Could not save it', { type: 'error' }); return false }
+    return true
+  }
+
+  // Ask the resolver to classify every queued line (grouped by bill); auto-commit the confident ones.
+  const runResolver = async () => {
+    if (resolving || queue.length === 0) return
+    setResolving(true)
+    try {
+      const byBill = new Map<string, QLine[]>()
+      queue.forEach((l) => { const g = byBill.get(l.bill_id) ?? []; g.push(l); byBill.set(l.bill_id, g) })
+      const next: Record<string, Resol> = {}
+      const auto: string[] = []
+      for (const [, lines] of byBill) {
+        const { data, error } = await supabase.functions.invoke('inventory-resolve', {
+          body: { org_id: orgId, vendor_category: lines[0]?.vendor_category ?? null, lines: lines.map((l) => ({ line_index: l.line_index, raw_name: l.raw_name, spec: l.spec, unit: l.unit, qty: l.qty, rate: l.rate })) },
+        })
+        if (error || !(data as any)?.ok) continue
+        for (const r of (((data as any).resolutions ?? []) as Resol[])) {
+          const line = lines.find((l) => l.line_index === r.line_index)
+          if (!line) continue
+          const k = keyOf(line); next[k] = r
+          if (r.status === 'mapped' && r.inventory_id && await commitRpc(line, { action: 'material', inventory_id: r.inventory_id })) auto.push(k)
+        }
+      }
+      setResolutions(next)
+      if (auto.length) setResolvedKeys((s) => { const n = new Set(s); auto.forEach((k) => n.add(k)); return n })
+      await invalidateStock()
+    } catch (e) { show((e as Error).message || 'Could not read the queue', { type: 'error' }) }
+    finally { setResolving(false) }
+  }
+
+  // A user-driven decision from the queue (accept a candidate / create / expense / skip).
+  const resolveLine = async (l: QLine, opts: { action: 'material' | 'expense' | 'skip'; inventory_id?: string; canonical?: Canonical | null; unit?: string | null }) => {
+    const key = keyOf(l); setBusyLine(key)
+    try {
+      if (await commitRpc(l, opts)) { setResolvedKeys((s) => new Set(s).add(key)); setPickLine(null); await invalidateStock() }
+    } finally { setBusyLine(null) }
+  }
 
   const commit = async (r: StockRow, kind: 'in' | 'out', qty: number) => {
     if (!qty || qty <= 0) return
@@ -235,6 +351,7 @@ export default function ProjectInventory({ session: _session }: { session: Sessi
       const { data, error } = await supabase.rpc('record_stock_movement', {
         p_org_id: orgId, p_project_id: projectId, p_item_name: r.item_name, p_unit: r.unit,
         p_qty: qty, p_direction: kind, p_unit_rate: kind === 'in' ? (r.avg_rate ?? null) : null,
+        p_inventory_id: r.inventory_id ?? null,
       })
       if (error || !(data as any)?.ok) throw new Error((data as any)?.error || error?.message || 'Could not record it')
       setPill(null); setDoneKey(key)
@@ -293,6 +410,15 @@ export default function ProjectInventory({ session: _session }: { session: Sessi
                 </div>
               </div>
             </section>
+
+            {queue.length > 0 && (
+              <button className="queue" onClick={() => { setResolveOpen(true); if (!Object.keys(resolutions).length) runResolver() }}>
+                <span className="qd" />
+                <span className="qt"><b>{queue.length} bill {queue.length === 1 ? 'line needs' : 'lines need'} a material</b>
+                  {queueVendors.length > 0 && <span>from {queueVendors.slice(0, 3).join(', ')}{queueVendors.length > 3 ? ` +${queueVendors.length - 3}` : ''}</span>}</span>
+                <span className="qgo">Resolve →</span>
+              </button>
+            )}
 
             <div className="body">
               <nav className="rail" aria-label="Categories">
@@ -356,7 +482,7 @@ export default function ProjectInventory({ session: _session }: { session: Sessi
         )}
       </main>
 
-      <div className={`scrim${peek ? ' on' : ''}`} onClick={() => setPeek(null)} />
+      <div className={`scrim${peek || resolveOpen ? ' on' : ''}`} onClick={() => { setPeek(null); setResolveOpen(false); setPickLine(null) }} />
       <aside className={`peek${peek ? ' on' : ''}`} aria-hidden={!peek}>
         {peek && (() => {
           const step = stepFor(peek.unit)
@@ -390,6 +516,71 @@ export default function ProjectInventory({ session: _session }: { session: Sessi
             </div>
           )
         })()}
+      </aside>
+
+      <aside className={`peek${resolveOpen ? ' on' : ''}`} aria-hidden={!resolveOpen}>
+        {resolveOpen && (
+          <div className="peek-in">
+            <div className="top">
+              <div><div className="kind">Bills → stock</div><h2>What is each line?</h2></div>
+              <button className="x" aria-label="Close" onClick={() => { setResolveOpen(false); setPickLine(null) }}>×</button>
+            </div>
+            <p className="lede" style={{ margin: '10px 0 22px' }}>
+              A bill lists what a vendor charged for. We read each line and match it to a material — confirm the unsure ones. A material enters stock; a consumable is just an expense.
+            </p>
+            {resolving && <div className="empty" style={{ padding: '18px 10px' }}>Reading the lines…</div>}
+            {queue.length === 0 ? (
+              <div className="empty" style={{ padding: '40px 10px' }}>{resolving ? '' : 'Every bill line is resolved. Nothing waiting.'}</div>
+            ) : queue.map((l) => {
+              const k = keyOf(l)
+              const step = stepFor(l.unit)
+              const r = resolutions[k]
+              const busy = busyLine === k
+              const picking = pickLine === k
+              const cands = r?.candidates ?? []
+              const clabel = canonLabel(r?.canonical)
+              return (
+                <div className={`rl${busy ? ' busy' : ''}`} key={k}>
+                  <div className="raw">
+                    <b>{l.raw_name}</b>
+                    {l.qty != null && <span className="q num">{qfmt(l.qty, step)}{l.unit ? ` ${l.unit}` : ''}</span>}
+                  </div>
+                  <div className="src">{[l.vendor_name, l.bill_no ? `Bill ${l.bill_no}` : null, dstr(l.bill_date)].filter(Boolean).join(' · ')}</div>
+
+                  {!r ? (
+                    <div className="match unk"><span>{resolving ? 'Reading…' : 'Not read yet'}</span></div>
+                  ) : cands.length > 0 ? (
+                    <div className="match"><span>Best guess <b>{cands[0].display_name}</b></span><span className="conf">{cands[0].confidence}%</span></div>
+                  ) : clabel ? (
+                    <div className="match unk"><span>New material — <b>{clabel}</b></span></div>
+                  ) : (
+                    <div className="match unk"><span>No match in this site's stock</span></div>
+                  )}
+
+                  {picking ? (
+                    <div className="opts">
+                      <select autoFocus defaultValue="" onChange={(e) => { const m = (invQ.data ?? []).find((x) => x.inventory_id === e.target.value); if (m) resolveLine(l, { action: 'material', inventory_id: m.inventory_id, unit: m.unit }) }}>
+                        <option value="" disabled>Pick a material…</option>
+                        {(invQ.data ?? []).map((m) => <option key={m.inventory_id} value={m.inventory_id}>{m.display_name || m.item}{m.unit ? ` (${m.unit})` : ''}</option>)}
+                      </select>
+                      <button onClick={() => setPickLine(null)}>Cancel</button>
+                    </div>
+                  ) : (
+                    <div className="opts">
+                      {cands.slice(0, 2).map((c) => (
+                        <button key={c.inventory_id} className="yes" onClick={() => resolveLine(l, { action: 'material', inventory_id: c.inventory_id })}>Use {c.display_name}</button>
+                      ))}
+                      {clabel && <button className={cands.length ? '' : 'yes'} onClick={() => resolveLine(l, { action: 'material', canonical: r!.canonical })}>Create “{clabel}”</button>}
+                      <button onClick={() => setPickLine(k)}>Another material…</button>
+                      <button onClick={() => resolveLine(l, { action: 'expense' })}>Expense it</button>
+                      <button onClick={() => resolveLine(l, { action: 'skip' })}>Skip</button>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        )}
       </aside>
     </div>
   )
