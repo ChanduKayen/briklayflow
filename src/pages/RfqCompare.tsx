@@ -14,14 +14,30 @@ import { sendPoToVendor, normalizeWhatsApp } from '../lib/poVendorSend';
 import { useUserProfile } from '../App';
 import { useSnackbar } from '../components/Snackbar';
 import RequestQuotesModal from '../components/po-new-ui/RequestQuotesModal';
+import NegotiateFlow, { type NegItem, type NegBest } from '../components/po-new-ui/NegotiateFlow';
 
 interface RfqItem { line: number; item_name: string; spec?: string; qty?: number | string; unit?: string }
-interface Recipient { recipient_id: string; stakeholder_id: string | null; vendor_name: string | null; vendor_phone: string | null; status: string; source: string | null; sent_at: string | null; quoted_at: string | null; quoted_total: number | null; transport_included: boolean | null; gst_included: boolean | null; valid_days: number | null; vendor_note: string | null }
+interface Recipient { recipient_id: string; stakeholder_id: string | null; vendor_name: string | null; vendor_phone: string | null; status: string; source: string | null; sent_at: string | null; quoted_at: string | null; quoted_total: number | null; transport_included: boolean | null; gst_included: boolean | null; valid_days: number | null; vendor_note: string | null; revise_requested_at: string | null; negotiation_round: number | null; source_urls: string[] | null }
 interface QuoteRow { recipient_id: string; line: number; unit_rate: number | null; supplied: boolean; variant_note: string | null }
 
 const fmt = (n: number) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN');
 const dstr = (s: string | null | undefined) => (s ? new Date(s).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '');
 const daysAgo = (s: string | null | undefined) => (s ? Math.max(0, Math.round((Date.now() - new Date(s).getTime()) / 86400000)) : 0);
+const norm = (s: string | null | undefined) => (s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+const readFileB64 = (file: File) => new Promise<string>((res, rej) => {
+  const r = new FileReader(); r.onerror = () => rej(new Error('read failed'));
+  r.onload = () => { const s = (r.result as string) || ''; res(s.includes(',') ? s.split(',')[1] : ''); };
+  r.readAsDataURL(file);
+});
+
+// The reviewable draft of a quote read from a photo/PDF — one row per REQUESTED line (the model aligned them),
+// plus the extra lines the vendor added and the offer's terms. The buyer edits this before it is saved.
+type QLine = { line: number; item_name: string; unit: string; qty: number; rate: string; supplied: boolean; variant: string };
+type ExtraLine = { item: string; rate: number | null; unit: string | null; amount: number | null };
+interface PhotoDraft {
+  vendorName: string; transport: boolean; gst: boolean; validDays: string; vendorNote: string;
+  lines: QLine[]; extras: ExtraLine[]; replaceId: string | null; replaceName: string | null;
+}
 
 const CSS = `
 .qcx{--cream:#F6F2EA;--paper:#FFFDF9;--paper-2:#FBF8F2;--ink:#2F2622;--ink-2:#6E635B;--ink-3:#A39A91;--line:#E4DCD0;--line-2:#EFE9DF;--terra:#C4613A;--terra-deep:#A94E2B;--terra-tint:#F8E7DE;--sage:#5F7F5B;--sage-tint:#E7EFE4;--gold:#B8862E;--gold-tint:#F7EEDA;--r:8px;--ease:cubic-bezier(.2,.7,.2,1);--shadow:0 1px 2px rgba(47,38,34,.04),0 8px 24px -18px rgba(47,38,34,.25);
@@ -101,6 +117,10 @@ const CSS = `
 .qcx .vhead .st.ok{color:var(--sage)}
 .qcx .vhead .best-tag{display:inline-block;font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--sage);background:var(--sage-tint);padding:2px 7px;border-radius:999px;margin-top:5px}
 .qcx .vhead .src{display:inline-block;font-size:10.5px;font-weight:600;letter-spacing:.05em;color:var(--gold);background:var(--gold-tint);padding:2px 7px;border-radius:999px;margin-top:5px}
+.qcx .vhead .sentq{margin-top:6px}
+.qcx .vhead .sentq .lbl{display:block;font-size:10.5px;font-weight:600;letter-spacing:.04em;color:var(--gold)}
+.qcx .vhead .sentq-a{display:inline-block;margin:3px 8px 0 0;font-size:11.5px;font-weight:500;color:var(--terra);text-decoration:underline;text-underline-offset:2px}
+.qcx .vhead .sentq-a:hover{color:var(--terra-deep)}
 .qcx .vhead .nudge{margin-top:6px;height:26px;padding:0 9px;font-size:12px;border:1px solid var(--line);background:var(--paper);border-radius:6px;color:var(--ink-2);cursor:pointer;font-weight:500}
 .qcx .vhead .nudge:hover{background:var(--gold-tint);color:var(--gold);border-color:transparent}
 .qcx .vhead .nudge:disabled{opacity:.55;cursor:default}
@@ -114,6 +134,11 @@ const CSS = `
 .qcx .cell .var{display:block;font-size:11.5px;color:var(--gold);font-weight:500;white-space:normal;max-width:180px;margin-top:3px}
 .qcx .cell .var::before{content:"◆ "}
 .qcx .cell.na{color:var(--ink-3)}
+.qcx td.impute{background:repeating-linear-gradient(135deg,transparent,transparent 6px,rgba(184,134,46,.06) 6px,rgba(184,134,46,.06) 12px)}
+.qcx td.impute .rate{color:var(--ink-3);font-style:italic;font-weight:400}
+.qcx td.impute .lt{color:var(--ink-3)}
+.qcx .cell .est{display:block;font-size:10.5px;color:var(--gold);margin-top:2px;font-style:italic;white-space:normal;max-width:170px}
+.qcx tfoot .eff{display:block;font-size:11px;color:var(--gold);margin-top:3px;white-space:normal;max-width:190px;line-height:1.45}
 .qcx .await{color:var(--ink-3);font-style:italic}
 .qcx tfoot td{background:var(--paper-2);border-top:2px solid var(--line)}
 .qcx tfoot .tot{font:600 17px var(--mono);color:var(--ink)}
@@ -140,6 +165,63 @@ const CSS = `
 .qcx .card p{margin:0 0 14px;font-size:13.5px;color:var(--ink-2)}
 .qcx .card input{width:100%;height:40px;border:1px solid var(--line);border-radius:8px;padding:0 12px;outline:none;margin-bottom:14px}
 .qcx .card .row{display:flex;gap:8px;justify-content:flex-end}
+.qcx .card textarea{width:100%;border:1px solid var(--line);border-radius:8px;padding:10px 12px;outline:none;margin-bottom:8px;font:inherit;font-size:14px;line-height:1.5;color:var(--ink);resize:vertical;min-height:90px}
+.qcx .card textarea:focus{border-color:var(--terra)}
+.qcx .negctx{display:flex;flex-wrap:wrap;gap:4px 8px;font-size:13px;color:var(--ink-2);margin:-4px 0 14px}
+.qcx .negctx b{color:var(--ink);font-weight:600;font-family:var(--mono)}
+.qcx .neglbl{display:block;font-size:12px;font-weight:600;color:var(--ink-2);margin-bottom:6px}
+.qcx .neghint{margin:0 0 14px;font-size:12px;color:var(--ink-3);line-height:1.5}
+.qcx .acts2{display:flex;flex-direction:column;gap:6px;align-items:flex-start}
+.qcx .negotiate{margin-top:0;height:28px;padding:0 10px;border-radius:7px;border:1px solid var(--line);background:var(--paper);color:var(--ink-2);font-size:12.5px;font-weight:500;cursor:pointer;transition:background .15s,color .15s,border-color .15s}
+.qcx .negotiate:hover{background:var(--gold-tint);color:var(--gold);border-color:transparent}
+.qcx .negotiate:disabled{opacity:.5;cursor:default}
+.qcx .vhead .revpill{display:inline-block;font-size:10.5px;font-weight:700;letter-spacing:.05em;color:var(--gold);background:var(--gold-tint);padding:2px 7px;border-radius:999px;margin-top:5px}
+/* review-a-photo-quote sheet */
+.qcx .pqcard{background:var(--paper);border:1px solid var(--line);border-radius:14px;box-shadow:0 24px 60px -20px rgba(47,38,34,.5);max-width:600px;width:100%;max-height:90vh;display:flex;flex-direction:column}
+.qcx .pqhd{display:flex;align-items:center;justify-content:space-between;padding:18px 20px 10px;flex:none}
+.qcx .pqhd h3{margin:0;font:600 18px var(--serif)}
+.qcx .pqx{width:30px;height:30px;border:0;background:none;color:var(--ink-3);border-radius:8px;cursor:pointer;font-size:13px}
+.qcx .pqx:hover{background:var(--paper-2);color:var(--ink)}
+.qcx .pqbody{flex:1;overflow-y:auto;padding:2px 20px 8px}
+.qcx .pqfld{display:block;margin-bottom:12px}
+.qcx .pqfld>span{display:block;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);margin-bottom:5px}
+.qcx .pqfld input{width:100%;height:40px;border:1px solid var(--line);border-radius:9px;background:var(--paper);padding:0 12px;font:inherit;color:var(--ink);outline:none}
+.qcx .pqfld input:focus{border-color:var(--terra)}
+.qcx .pqcov{font-size:13.5px;color:var(--ink-2);background:var(--paper-2);border:1px solid var(--line-2);border-radius:9px;padding:10px 12px;margin-bottom:12px}
+.qcx .pqcov b{color:var(--ink);font-weight:700}
+.qcx .pqcov .pqcheck{display:block;font-size:12px;color:var(--gold);margin-top:3px}
+.qcx .pqlines{display:flex;flex-direction:column;gap:6px;margin-bottom:14px}
+.qcx .pqrow{display:grid;grid-template-columns:1fr auto 34px;gap:10px;align-items:center;padding:8px 10px;border:1px solid var(--line-2);border-radius:10px;background:var(--paper)}
+.qcx .pqrow.off{opacity:.55;background:var(--paper-2)}
+.qcx .pqmain{min-width:0}
+.qcx .pqmain b{display:block;font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.qcx .pqmain small{color:var(--ink-3);font-size:12px}
+.qcx .pqvar{display:block;width:100%;margin-top:5px;height:26px;border:1px solid var(--gold-tint);border-radius:6px;background:var(--gold-tint);color:var(--gold);font-size:12px;padding:0 8px;outline:none}
+.qcx .pqvar::placeholder{color:#C9A968}
+.qcx .pqvar:focus{border-color:var(--gold)}
+.qcx .pqrate{display:inline-flex;align-items:center;gap:3px;border:1px solid var(--line);border-radius:8px;background:var(--paper);padding:0 8px;height:36px}
+.qcx .pqrate .cur{color:var(--ink-3);font-size:13px}
+.qcx .pqrate input{width:76px;border:0;background:none;outline:none;font-family:var(--mono);font-size:14px;text-align:right;color:var(--ink)}
+.qcx .pqrate small{color:var(--ink-3);font-size:11px}
+.qcx .pqrate:focus-within{border-color:var(--terra)}
+.qcx .pqsup{width:34px;height:34px;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:var(--ink-3);cursor:pointer;font-size:13px}
+.qcx .pqsup.on{background:var(--sage-tint);border-color:#BFD8BC;color:var(--sage)}
+.qcx .pqextra{background:var(--paper-2);border:1px solid var(--line-2);border-radius:9px;padding:10px 12px;margin-bottom:14px;font-size:13px;color:var(--ink-2)}
+.qcx .pqextra .lbl{display:block;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);margin-bottom:5px}
+.qcx .pqextra div{padding:2px 0}
+.qcx .pqterms{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
+.qcx .pqchip{height:34px;padding:0 13px;border-radius:999px;border:1px solid var(--line);background:var(--paper);color:var(--ink-2);font:inherit;font-size:13px;font-weight:500;cursor:pointer;transition:background .15s,color .15s,border-color .15s}
+.qcx .pqchip.on{background:var(--sage-tint);border-color:#BFD8BC;color:var(--sage)}
+.qcx .pqvalid{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--ink-2)}
+.qcx .pqvalid input{width:52px;height:34px;border:1px solid var(--line);border-radius:8px;text-align:center;font-family:var(--mono);outline:none;color:var(--ink)}
+.qcx .pqvalid input:focus{border-color:var(--terra)}
+.qcx .pqfoot{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 20px;border-top:1px solid var(--line);flex-wrap:wrap;flex:none}
+.qcx .pqrepl{font-size:12.5px;color:var(--ink-2)}
+.qcx .pqrepl b{color:var(--ink);font-weight:600}
+.qcx .pqacts{display:flex;gap:8px;margin-left:auto}
+.qcx .pqsave{background:var(--terra);color:#fff;border-color:var(--terra)}
+.qcx .pqsave:hover{background:var(--terra-deep)}
+.qcx .pqsave:disabled{opacity:.6;cursor:default}
 @media (max-width:900px){.qcx .page{padding:16px 14px 60px}.qcx .head{grid-template-columns:1fr auto}.qcx .amount{text-align:left;grid-column:1}.qcx .figs{grid-template-columns:1fr 1fr}}
 `;
 
@@ -157,9 +239,13 @@ export default function RfqCompare({ session }: { session: Session }) {
   const [showAdd, setShowAdd] = useState(false);
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [orderConfirm, setOrderConfirm] = useState<Recipient | null>(null);
+  const [negotiateFor, setNegotiateFor] = useState<Recipient | null>(null);   // the vendor the negotiate screen is open for
   const [extendOpen, setExtendOpen] = useState(false);
   const [extendDate, setExtendDate] = useState('');
+  const [photoDraft, setPhotoDraft] = useState<PhotoDraft | null>(null);   // review a photo/PDF quote before saving
   const fileRef = useRef<HTMLInputElement>(null);
+  const setDraft = (patch: Partial<PhotoDraft>) => setPhotoDraft((d) => (d ? { ...d, ...patch } : d));
+  const setLine = (i: number, patch: Partial<QLine>) => setPhotoDraft((d) => (d ? { ...d, lines: d.lines.map((l, j) => (j === i ? { ...l, ...patch } : l)) } : d));
 
   const { data, isLoading } = useQuery({
     queryKey: ['rfq_compare', rfqId],
@@ -203,6 +289,15 @@ export default function RfqCompare({ session }: { session: Session }) {
     const rs = replied.map((r) => { const x = q(r.recipient_id, it.line); return x?.supplied && x.unit_rate != null && !x.variant_note ? Number(x.unit_rate) : Infinity; });
     const m = Math.min(...rs); return isFinite(m) ? m : null;
   };
+  // The MARKET AVERAGE rate for a line — the mean of the vendors who did quote it (comparable, non-variant).
+  // A vendor who skipped a line is valued at this, so a quote that only priced the cheap items can't look
+  // artificially best. null when NOBODY priced the line (nothing to average → it stays unpriceable).
+  const avgRate = (it: RfqItem) => {
+    const rs = replied
+      .map((r) => { const x = q(r.recipient_id, it.line); return x?.supplied && x.unit_rate != null && !x.variant_note ? Number(x.unit_rate) : null; })
+      .filter((n): n is number => n != null);
+    return rs.length ? rs.reduce((a, b) => a + b, 0) / rs.length : null;
+  };
 
   const replied = useMemo(() => recips.filter((r) => r.status === 'quoted').sort((a, b) => vendorTot(a.recipient_id) - vendorTot(b.recipient_id)), [recips, quotes]); // eslint-disable-line
   const pending = recips.filter((r) => r.status !== 'quoted');
@@ -211,6 +306,26 @@ export default function RfqCompare({ session }: { session: Session }) {
   const totalsById = useMemo(() => Object.fromEntries(replied.map((r) => [r.recipient_id, vendorTot(r.recipient_id)])), [replied, quotes]); // eslint-disable-line
   const best = useMemo(() => { let id: string | null = null, t = Infinity; replied.forEach((r) => { const v = totalsById[r.recipient_id]; if (v > 0 && v < t) { t = v; id = r.recipient_id; } }); return { id, total: isFinite(t) ? t : 0 }; }, [replied, totalsById]);
   const bestVendor = replied.find((r) => r.recipient_id === best.id);
+
+  // ── EFFECTIVE (like-for-like) price ──────────────────────────────────────────
+  // A vendor's own rate where they quoted, the market average where they didn't — so every quote is priced on
+  // the SAME full basket and the "best all-in" is honest even when someone left items blank. imputed = how many
+  // lines were filled at the average; unpriced = lines no one quoted (can't be estimated).
+  const effOf = (rid: string) => {
+    let total = 0, imputedAmt = 0, imputed = 0, unpriced = 0;
+    items.forEach((it) => {
+      const qty = Number(it.qty) || 0;
+      const own = rateOf(rid, it.line);
+      if (own != null) { total += own * qty; return; }
+      const avg = avgRate(it);
+      if (avg != null) { const c = avg * qty; total += c; imputedAmt += c; imputed++; } else unpriced++;
+    });
+    return { total, imputedAmt, imputed, unpriced };
+  };
+  const effById = useMemo(() => Object.fromEntries(replied.map((r) => [r.recipient_id, effOf(r.recipient_id)])), [replied, quotes, items]); // eslint-disable-line
+  const bestEff = useMemo(() => { let id: string | null = null, t = Infinity; replied.forEach((r) => { const v = effById[r.recipient_id]?.total ?? 0; if (v > 0 && v < t) { t = v; id = r.recipient_id; } }); return { id, total: isFinite(t) ? t : 0 }; }, [replied, effById]);
+  const bestEffVendor = replied.find((r) => r.recipient_id === bestEff.id);
+  const anyImputed = replied.some((r) => (effById[r.recipient_id]?.imputed ?? 0) > 0);
 
   // cheapest mix — each item to its lowest non-variant vendor
   const mix = useMemo(() => {
@@ -227,6 +342,17 @@ export default function RfqCompare({ session }: { session: Session }) {
   // ── computed insights ──────────────────────────────────────────────────────
   const insights = useMemo(() => {
     const out: { icon: 's' | 'g'; body: React.ReactNode; action?: React.ReactNode }[] = [];
+    // Like-for-like: a vendor can look cheapest just by leaving items blank. If pricing the gaps at the market
+    // average changes who's best, say so and point to the genuinely better price.
+    if (bestEffVendor && bestEff.total > 0 && best.id && bestEff.id !== best.id) {
+      const naive = replied.find((r) => r.recipient_id === best.id);
+      const gaps = naive ? effById[naive.recipient_id]?.imputed ?? 0 : 0;
+      out.push({
+        icon: 's',
+        body: <><b>{bestEffVendor.vendor_name} is the better price all-in at {fmt(bestEff.total)}.</b> {naive?.vendor_name} shows a lower total only because they left {gaps} item{gaps === 1 ? '' : 's'} unquoted — priced like-for-like (the missing ones at what the other vendors charge), {bestEffVendor.vendor_name} comes out ahead.</>,
+        action: gaps > 0 && naive ? <button disabled={busy === naive.recipient_id} onClick={() => askAgain(naive)}>Ask {(naive.vendor_name || 'them').split(' ')[0]} to quote the rest</button> : undefined,
+      });
+    }
     if (bestVendor && bestVendor.transport_included === false) {
       const incl = replied.find((r) => r.transport_included === true);
       if (incl) out.push({ icon: 's', body: <><b>{bestVendor.vendor_name} is lowest on the quoted rates, but their transport is billed separately.</b> {incl.vendor_name} includes it — the totals here count quoted rates only, so compare transport before deciding.</> });
@@ -241,7 +367,7 @@ export default function RfqCompare({ session }: { session: Session }) {
       out.push({ icon: 'g', body: <>Splitting each item to its cheapest vendor saves <b>{fmt(best.total - mix.total)}</b> — if you're fine with {n} vendor{n > 1 ? 's' : ''} and {n} delivery schedule{n > 1 ? 's' : ''}.</>, action: <button onClick={splitOrder}>Create {n} split PO{n > 1 ? 's' : ''}</button> });
     }
     return out;
-  }, [bestVendor, replied, quotes, mix, best]); // eslint-disable-line
+  }, [bestVendor, replied, quotes, mix, best, bestEff, bestEffVendor, effById]); // eslint-disable-line
 
   // ── actions ─────────────────────────────────────────────────────────────────
   const buildLineItems = (rid: string, subset: RfqItem[]) => subset.map((it, i) => {
@@ -297,6 +423,44 @@ export default function RfqCompare({ session }: { session: Session }) {
     catch (e: any) { show(e.message || 'Could not re-send', { type: 'error' }); }
     finally { setBusy(null); }
   };
+
+  // A revision was asked for but not yet answered (the buyer's request is newer than the vendor's last quote).
+  const revisePending = (r: Recipient) => !!r.revise_requested_at && (!r.quoted_at || new Date(r.revise_requested_at) > new Date(r.quoted_at));
+
+  // Send the revision request the negotiate screen composed: stores the note (shown on the vendor's quote
+  // page, never naming the competitor) + WhatsApps their link. Returns ok so the screen can advance to "sent".
+  const sendNegotiate = async (note: string): Promise<{ ok: boolean; error?: string }> => {
+    const r = negotiateFor; if (!r) return { ok: false, error: 'No vendor' };
+    const { data: res, error } = await supabase.functions.invoke('send-rfq', { body: { rfqId, negotiateRecipientId: r.recipient_id, note } });
+    if (error || !(res as any)?.ok) return { ok: false, error: (res as any)?.error || error?.message || 'Could not send' };
+    qc.invalidateQueries({ queryKey: ['rfq_compare', rfqId] });
+    show(`Asked ${r.vendor_name} for a better price`);
+    return { ok: true };
+  };
+
+  // Build the negotiate screen's data from the real comparison: this vendor vs the cheapest OTHER vendor,
+  // the lines where this vendor is dearer (to ask down) and the lines where it is already cheapest (to keep).
+  const negData = useMemo(() => {
+    const v = negotiateFor; if (!v) return null;
+    const others = replied.filter((r) => r.recipient_id !== v.recipient_id && (totalsById[r.recipient_id] ?? 0) > 0);
+    const comp = others.slice().sort((a, b) => totalsById[a.recipient_id] - totalsById[b.recipient_id])[0] ?? null;
+    const askItems: NegItem[] = []; const bestItems: NegBest[] = [];
+    items.forEach((it) => {
+      const vr = rateOf(v.recipient_id, it.line); if (vr == null) return;
+      const cr = comp ? rateOf(comp.recipient_id, it.line) : null;
+      const lo = lowRate(it);
+      const label = `${it.qty ?? ''} ${it.unit ?? ''}`.trim();
+      if (cr != null && vr > cr) askItems.push({ line: it.line, name: it.item_name, qtyLabel: label, qty: Number(it.qty) || 0, vendorRate: vr, compRate: cr });
+      else if (lo != null && vr <= lo) bestItems.push({ name: it.item_name, qtyLabel: label, rate: vr });
+    });
+    return {
+      vendorName: v.vendor_name || 'the vendor',
+      vendorTotal: vendorTot(v.recipient_id),
+      competitorName: comp?.vendor_name ?? null,
+      competitorTotal: comp ? totalsById[comp.recipient_id] : null,
+      askItems, bestItems,
+    };
+  }, [negotiateFor, replied, totalsById, items, quotes]); // eslint-disable-line
   const extend = async () => {
     if (!extendDate) return;
     const { error } = await supabase.from('rfqs').update({ quote_by: extendDate }).eq('rfq_id', rfqId);
@@ -308,28 +472,93 @@ export default function RfqCompare({ session }: { session: Session }) {
     if (error) { show('Could not cancel', { type: 'error' }); return; }
     setConfirmCancel(false); show('Enquiry cancelled'); navigate('/purchase-orders');
   };
+  // Read a vendor's quotation photo/PDF AGAINST the enquiry's asked lines (the model aligns each line by
+  // meaning and returns a rate per requested line + the terms + any extra lines), then open a review sheet.
   const onPhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]; if (!file) return; e.target.value = '';
+    const files = Array.from(e.target.files ?? []); if (!files.length) return; e.target.value = '';
     setBusy('photo');
     try {
-      const b64 = await new Promise<string>((res, rej) => { const r = new FileReader(); r.onerror = () => rej(new Error('read failed')); r.onload = () => { const s = (r.result as string) || ''; res(s.includes(',') ? s.split(',')[1] : ''); }; r.readAsDataURL(file); });
-      const { data: ex, error } = await supabase.functions.invoke('reconcile-po-bill', { body: { bill_base64: b64, bill_mime_type: file.type } });
+      // A quote photographed across several pages → read them together as ONE document (up to 8).
+      const bill_files = await Promise.all(files.slice(0, 8).map(async (f) => ({ base64: await readFileB64(f), mime: f.type })));
+      const askItems = items.map((it) => ({ line: it.line, item_name: it.item_name, spec: it.spec || null, unit: it.unit || null, qty: Number(it.qty) || null }));
+      const { data: ex, error } = await supabase.functions.invoke('reconcile-po-bill', { body: { bill_files, rfq_items: askItems } });
       if (error) throw error;
-      const lines = ((ex as any)?.line_items ?? []) as { item?: string; rate?: number }[];
-      if (lines.length === 0) throw new Error('No rates could be read from that image');
-      const norm = (s: string) => (s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-      let total = 0;
-      const p_lines = items.map((it) => {
-        const m = lines.find((l) => norm(l.item || '').includes(norm(it.item_name).split(' ')[0]) || norm(it.item_name).includes(norm(l.item || '').split(' ')[0]));
-        const rate = m?.rate != null ? Number(m.rate) : null;
-        if (rate) total += rate * (Number(it.qty) || 0);
-        return { line: it.line, item_name: it.item_name, unit_rate: rate, supplied: rate != null };
+      const res = ex as any;
+      if (res?.ok === false) throw new Error(res?.error || 'Could not read that quote');
+      const modelLines: any[] = Array.isArray(res?.lines) ? res.lines : [];
+      if (modelLines.length === 0 && !(Array.isArray(res?.extra_lines) && res.extra_lines.length)) throw new Error('No rates could be read from that file');
+      const byLine = new Map<number, any>(modelLines.map((l) => [Number(l.line), l]));
+
+      // Build one review row per REQUESTED line, honoring rate_basis / amount / unit deterministically.
+      const rows: QLine[] = items.map((it) => {
+        const qty = Number(it.qty) || 0;
+        const m = byLine.get(it.line);
+        let rate: number | null = null;
+        let variant = (m?.variant_note ?? '').toString().trim();
+        const hasNumber = !!m && (m.unit_rate != null || m.amount != null);
+        const supplied = !!m && m.supplied !== false && hasNumber;
+        if (supplied) {
+          const amt = m.amount != null ? Number(m.amount) : null;
+          const unit = m.unit_rate != null ? Number(m.unit_rate) : null;
+          if (m.rate_basis === 'lot') {
+            rate = amt != null && qty > 0 ? amt / qty : unit;
+            if (amt != null) variant = [variant, `Lot price ${fmt(amt)}${qty ? ` for ${qty}${it.unit ? ' ' + it.unit : ''}` : ''}`].filter(Boolean).join(' · ');
+          } else {
+            rate = unit != null ? unit : (amt != null && qty > 0 ? amt / qty : null);
+          }
+          if (m.unit && it.unit && norm(m.unit) !== norm(it.unit) && !/per |\/|unit/i.test(variant)) {
+            variant = [variant, `quoted per ${m.unit}`].filter(Boolean).join(' · ');
+          }
+        }
+        const priced = supplied && rate != null && isFinite(rate);
+        return { line: it.line, item_name: it.item_name, unit: it.unit || '', qty, rate: priced ? String(Math.round(rate! * 100) / 100) : '', supplied: priced, variant };
       });
-      const vendorName = (ex as any)?.vendor_name || 'Photo quote';
-      const { data: res, error: e2 } = await supabase.rpc('add_manual_quote', { p_rfq_id: rfqId, p_vendor_name: vendorName, p_stakeholder_id: null, p_lines, p_extras: { quoted_total: total } });
-      if (e2 || !(res as any)?.ok) throw new Error((res as any)?.error || 'Could not save the quote');
-      qc.invalidateQueries({ queryKey: ['rfq_compare', rfqId] }); show(`${vendorName} added from your photo — check the rates`);
+
+      const extras: ExtraLine[] = (Array.isArray(res?.extra_lines) ? res.extra_lines : [])
+        .map((x: any) => ({ item: String(x?.item ?? '').trim(), rate: x?.unit_rate != null ? Number(x.unit_rate) : null, unit: x?.unit ?? null, amount: x?.amount != null ? Number(x.amount) : null }))
+        .filter((x: ExtraLine) => x.item);
+      const vendorName = (res?.vendor_name ?? '').toString().trim() || 'Photo quote';
+      // Re-reading the same vendor's sheet → offer to replace their existing photo quote instead of duplicating.
+      const dup = recips.find((r) => r.source === 'photo' && norm(r.vendor_name) && norm(r.vendor_name) === norm(vendorName));
+
+      setPhotoDraft({
+        vendorName,
+        transport: res?.transport_included === true,
+        gst: res?.gst_included === true,
+        validDays: res?.valid_days != null ? String(res.valid_days) : '',
+        vendorNote: (res?.vendor_note ?? '').toString().trim(),
+        lines: rows, extras, replaceId: dup?.recipient_id ?? null, replaceName: dup?.vendor_name ?? null,
+      });
+      if (rows.every((r) => !r.supplied)) show('Read the sheet, but couldn’t match any of your items — check it below', { type: 'error' });
     } catch (err: any) { show(err.message || 'Could not read that quote', { type: 'error' }); }
+    finally { setBusy(null); }
+  };
+
+  // Commit the reviewed quote — insert a new vendor column, or replace an existing photo quote in place.
+  const savePhotoQuote = async (replace: boolean) => {
+    const d = photoDraft; if (!d) return;
+    setBusy('photo');
+    try {
+      let total = 0;
+      const p_lines = d.lines.map((l) => {
+        const rate = l.supplied && l.rate.trim() ? (Number(l.rate.replace(/[^\d.]/g, '')) || null) : null;
+        if (rate) total += rate * (Number(l.qty) || 0);
+        return { line: l.line, item_name: l.item_name, unit_rate: rate, supplied: rate != null, variant_note: l.variant.trim() || null };
+      });
+      const p_extras = {
+        transport_included: d.transport, gst_included: d.gst,
+        valid_days: d.validDays.trim() ? (Number(d.validDays.replace(/[^\d]/g, '')) || null) : null,
+        vendor_note: d.vendorNote.trim() || null, quoted_total: total,
+      };
+      const args: Record<string, unknown> = { p_rfq_id: rfqId, p_vendor_name: d.vendorName.trim() || 'Photo quote', p_stakeholder_id: null, p_lines, p_extras };
+      if (replace && d.replaceId) args.p_recipient_id = d.replaceId;
+      const { data: res, error } = await supabase.rpc('add_manual_quote', args);
+      if (error || !(res as any)?.ok) throw new Error((res as any)?.error || 'Could not save the quote');
+      const priced = p_lines.filter((l) => l.unit_rate != null).length;
+      show(`${d.vendorName} saved — ${priced} of ${d.lines.length} item${d.lines.length === 1 ? '' : 's'} priced${d.extras.length ? ` · ${d.extras.length} extra on their sheet` : ''}`);
+      setPhotoDraft(null);
+      qc.invalidateQueries({ queryKey: ['rfq_compare', rfqId] });
+    } catch (err: any) { show(err.message || 'Could not save the quote', { type: 'error' }); }
     finally { setBusy(null); }
   };
 
@@ -368,7 +597,7 @@ export default function RfqCompare({ session }: { session: Session }) {
               {closed && <><span className="sep" /><span className="chip gold"><i />{data.rfq.status === 'cancelled' ? 'Cancelled' : 'Ordered · closed'}</span></>}
             </div>
           </div>
-          <div className="amount"><small>Best all-in</small><span className="mono">{best.total ? fmt(best.total) : '—'}</span><div className="dir">{bestVendor ? `${bestVendor.vendor_name}${bestVendor.transport_included ? ' · transport included' : ''}` : 'no quotes yet'}</div></div>
+          <div className="amount"><small>Best all-in</small><span className="mono">{bestEff.total ? fmt(bestEff.total) : '—'}</span><div className="dir">{bestEffVendor ? `${bestEffVendor.vendor_name}${(effById[bestEffVendor.recipient_id]?.imputed ?? 0) > 0 ? ' · missing items estimated' : bestEffVendor.transport_included ? ' · transport included' : ''}` : 'no quotes yet'}</div></div>
           <div className="more" onClick={(e) => e.stopPropagation()}>
             <button className="kebab" onClick={() => setMenuOpen((o) => !o)}><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="19" cy="12" r="1.8" /></svg></button>
             {menuOpen && (
@@ -394,7 +623,7 @@ export default function RfqCompare({ session }: { session: Session }) {
 
         {/* figures */}
         <div className="figs">
-          <div className="sage"><small>Best all-in</small><span className="mono">{best.total ? fmt(best.total) : '—'}</span><div className="sub">{bestVendor ? `${bestVendor.vendor_name}, quoted rates` : '—'}</div></div>
+          <div className="sage"><small>Best all-in</small><span className="mono">{bestEff.total ? fmt(bestEff.total) : '—'}</span><div className="sub">{bestEffVendor ? `${bestEffVendor.vendor_name}${anyImputed ? ' · like-for-like' : ', quoted rates'}` : '—'}</div></div>
           <div className="gold"><small>Cheapest mix</small><span className="mono">{mix.total ? fmt(mix.total) : '—'}</span><div className="sub">best rate per item · {mix.winners.size} vendor{mix.winners.size !== 1 ? 's' : ''}</div></div>
           <div><small>Spread</small><span className="mono">{spread.abs ? `${fmt(spread.abs)} · ${spread.pct}%` : '—'}</span><div className="sub">between the quotes in hand</div></div>
           <div className="terra"><small>Replies</small><span className="mono">{replied.length} of {recips.length}</span><div className="sub">{pending.length ? `${pending.map((p) => p.vendor_name).filter(Boolean).join(', ')} silent` : 'all replied'}</div></div>
@@ -412,8 +641,8 @@ export default function RfqCompare({ session }: { session: Session }) {
           <h2>Quotes · item by item</h2>
           {!closed && (
             <div>
-              <button className="btn" disabled={busy === 'photo'} onClick={() => fileRef.current?.click()}><svg viewBox="0 0 24 24"><path d="M12 16V4m0 0l-4 4m4-4l4 4M4 20h16" /></svg>{busy === 'photo' ? 'Reading…' : 'Add a quote from photo / PDF'}</button>
-              <input ref={fileRef} type="file" accept="image/*,application/pdf" hidden onChange={onPhoto} />
+              <button className="btn" disabled={busy === 'photo'} onClick={() => fileRef.current?.click()}><svg viewBox="0 0 24 24"><path d="M12 16V4m0 0l-4 4m4-4l4 4M4 20h16" /></svg>{busy === 'photo' ? 'Reading…' : 'Add a quote from photos / PDF'}</button>
+              <input ref={fileRef} type="file" accept="image/*,application/pdf" multiple hidden onChange={onPhoto} />
             </div>
           )}
         </div>
@@ -424,16 +653,25 @@ export default function RfqCompare({ session }: { session: Session }) {
               <thead><tr>
                 <th className="colItem">Item</th>
                 {cols.map((r) => {
-                  const isBest = r.recipient_id === best.id;
+                  const isBest = r.recipient_id === bestEff.id;
                   const quoted = r.status === 'quoted';
                   return (
                     <th key={r.recipient_id} className="vcol vhead">
                       <b>{r.vendor_name}</b>
                       {quoted
-                        ? <span className="st ok">Quoted {dstr(r.quoted_at)} · {r.source === 'photo' ? 'from your upload' : 'on the link'}</span>
+                        ? <span className="st ok">Quoted {dstr(r.quoted_at)} · {r.source_urls && r.source_urls.length > 0 ? 'sent on WhatsApp' : r.source === 'photo' ? 'from your upload' : 'on the link'}</span>
                         : <span className="st">No reply · asked {daysAgo(r.sent_at)}d ago</span>}
                       {isBest && <span className="best-tag">Best all-in</span>}
                       {r.source === 'photo' && <span className="src">From photo — check rates</span>}
+                      {r.source_urls && r.source_urls.length > 0 && (
+                        <div className="sentq">
+                          <span className="lbl">Sent on WhatsApp — check rates</span>
+                          {r.source_urls.map((u, i) => (
+                            <a key={i} href={u} target="_blank" rel="noreferrer" className="sentq-a">↗ view{r.source_urls!.length > 1 ? ` p${i + 1}` : ' the quote they sent'}</a>
+                          ))}
+                        </div>
+                      )}
+                      {quoted && revisePending(r) && <span className="revpill">Revision requested</span>}
                       {!quoted && !closed && <div><button className="nudge" disabled={busy === r.recipient_id} onClick={() => askAgain(r)}>↻ {busy === r.recipient_id ? 'Asking…' : 'Ask again'}</button></div>}
                     </th>
                   );
@@ -449,7 +687,19 @@ export default function RfqCompare({ session }: { session: Session }) {
                       {cols.map((r) => {
                         if (r.status !== 'quoted') return <td key={r.recipient_id} className="cell await">awaiting</td>;
                         const x = q(r.recipient_id, it.line);
-                        if (!x || !x.supplied || x.unit_rate == null) return <td key={r.recipient_id} className="cell na">—</td>;
+                        // Didn't quote this line: value it at the market average (the other vendors' rates) so
+                        // this vendor is comparable on the full basket. "—" only when no one priced it.
+                        if (!x || !x.supplied || x.unit_rate == null) {
+                          const avg = avgRate(it);
+                          if (avg == null) return <td key={r.recipient_id} className="cell na">—</td>;
+                          return (
+                            <td key={r.recipient_id} className="cell impute">
+                              <span className="rate">~{fmt(avg)} <small>/{it.unit || 'unit'}</small></span>
+                              <span className="lt">= {fmt(avg * (Number(it.qty) || 0))}</span>
+                              <span className="est">no quote · others' avg</span>
+                            </td>
+                          );
+                        }
                         const rate = Number(x.unit_rate); const isLow = low != null && !x.variant_note && rate === low;
                         return (
                           <td key={r.recipient_id} className={`cell${isLow ? ' low' : ''}`}>
@@ -464,15 +714,24 @@ export default function RfqCompare({ session }: { session: Session }) {
                 })}
               </tbody>
               <tfoot><tr>
-                <td className="colItem" style={{ fontWeight: 600 }}>Total<span className="terms">for quoted items</span></td>
+                <td className="colItem" style={{ fontWeight: 600 }}>All-in<span className="terms">{anyImputed ? 'gaps at market avg' : 'quoted rates'}</span></td>
                 {cols.map((r) => {
                   if (r.status !== 'quoted') return <td key={r.recipient_id}><span className="await">—</span></td>;
-                  const isBest = r.recipient_id === best.id;
+                  const isBest = r.recipient_id === bestEff.id;
+                  const eff = effById[r.recipient_id];
+                  const gaps = eff?.imputed ?? 0;
                   return (
                     <td key={r.recipient_id}>
-                      <span className={`tot${isBest ? ' best' : ''}`}>{fmt(totalsById[r.recipient_id])}</span>
+                      <span className={`tot${isBest ? ' best' : ''}`}>{fmt(eff?.total ?? totalsById[r.recipient_id])}</span>
+                      {gaps > 0 && <span className="eff">incl. {gaps} item{gaps === 1 ? '' : 's'} at market avg · they quoted {fmt(totalsById[r.recipient_id])}</span>}
                       <span className="terms">{r.transport_included ? 'Transport included' : <span className="warn">Transport extra</span>} · {r.gst_included ? 'GST included' : 'GST extra'}{r.valid_days ? ` · valid ${r.valid_days}d` : ''}{r.vendor_note ? ` · ${r.vendor_note}` : ''}</span>
-                      {canConvert && !closed && <div><button className="order" disabled={busy !== null} onClick={() => setOrderConfirm(r)}>{busy === r.recipient_id ? 'Ordering…' : `Order from ${(r.vendor_name || '').split(' ')[0]} →`}</button></div>}
+                      {canConvert && !closed && (
+                        <div className="acts2">
+                          <button className="order" disabled={busy !== null} onClick={() => setOrderConfirm(r)}>{busy === r.recipient_id ? 'Ordering…' : `Order from ${(r.vendor_name || '').split(' ')[0]} →`}</button>
+                          {/* Only vendors who quoted via their link can be sent a revise-link; a photo-added quote has no channel. */}
+                          {r.source !== 'photo' && r.vendor_phone && <button className="negotiate" disabled={busy !== null} onClick={() => setNegotiateFor(r)}>Ask for a better price</button>}
+                        </div>
+                      )}
                     </td>
                   );
                 })}
@@ -484,7 +743,7 @@ export default function RfqCompare({ session }: { session: Session }) {
         <div className="sec"><h2>Activity</h2></div>
         <div className="sheet clip"><ul className="log">
           {[...replied].sort((a, b) => new Date(b.quoted_at || 0).getTime() - new Date(a.quoted_at || 0).getTime()).map((r) => (
-            <li key={r.recipient_id}><span className="mono">{dstr(r.quoted_at)}</span><i /><span><b>{r.vendor_name}</b> {r.source === 'photo' ? 'quote added from a photo' : 'submitted rates on the quote link'}</span></li>
+            <li key={r.recipient_id}><span className="mono">{dstr(r.quoted_at)}</span><i /><span><b>{r.vendor_name}</b> {r.source_urls && r.source_urls.length > 0 ? 'sent their rates on WhatsApp' : r.source === 'photo' ? 'quote added from a photo' : 'submitted rates on the quote link'}</span></li>
           ))}
           <li><span className="mono">{dstr(data.rfq.created_at)}</span><i /><span><b>{data.creator || 'Someone'}</b> sent this enquiry to {recips.length} vendor{recips.length !== 1 ? 's' : ''}{data.rfq.quote_by ? ` · quote by ${dstr(data.rfq.quote_by)}` : ''}</span></li>
         </ul></div>
@@ -504,6 +763,79 @@ export default function RfqCompare({ session }: { session: Session }) {
           <p>We'll raise the purchase order from {orderConfirm.vendor_name}'s quote (<b>{fmt(vendorTot(orderConfirm.recipient_id))}</b>){orderConfirm.vendor_phone ? <> and message it to <b>{orderConfirm.vendor_phone}</b> with the PO PDF</> : ''}. This closes the enquiry.</p>
           <div className="row"><button className="btn" onClick={() => setOrderConfirm(null)}>Cancel</button><button className="btn" style={{ background: 'var(--sage)', color: '#fff', borderColor: 'var(--sage)' }} onClick={() => order(orderConfirm)}>Yes, send on WhatsApp</button></div>
         </div></div>
+      )}
+
+      {negotiateFor && negData && (
+        <NegotiateFlow
+          vendorName={negData.vendorName}
+          vendorTotal={negData.vendorTotal}
+          competitorName={negData.competitorName}
+          competitorTotal={negData.competitorTotal}
+          askItems={negData.askItems}
+          bestItems={negData.bestItems}
+          builderName={profile?.name || 'Your team'}
+          onClose={() => setNegotiateFor(null)}
+          onSend={sendNegotiate}
+        />
+      )}
+
+      {photoDraft && (
+        <div className="scrim" onClick={() => busy !== 'photo' && setPhotoDraft(null)}>
+          <div className="pqcard" onClick={(e) => e.stopPropagation()}>
+            <div className="pqhd">
+              <h3>Review the quote</h3>
+              <button className="pqx" onClick={() => setPhotoDraft(null)} aria-label="Close">✕</button>
+            </div>
+            <div className="pqbody">
+              <label className="pqfld"><span>Vendor</span><input value={photoDraft.vendorName} onChange={(e) => setDraft({ vendorName: e.target.value })} placeholder="Vendor name" /></label>
+              <div className="pqcov">
+                <b>{photoDraft.lines.filter((l) => l.supplied && Number(l.rate) > 0).length}</b> of {photoDraft.lines.length} items priced
+                {photoDraft.extras.length > 0 && <> · <b>{photoDraft.extras.length}</b> extra line{photoDraft.extras.length > 1 ? 's' : ''} on their sheet</>}
+                <span className="pqcheck">Read from the photo — check the rates before saving.</span>
+              </div>
+              <div className="pqlines">
+                {photoDraft.lines.map((l, i) => (
+                  <div className={`pqrow${l.supplied ? '' : ' off'}`} key={l.line}>
+                    <div className="pqmain">
+                      <b>{l.item_name}</b><small>{l.qty} {l.unit}</small>
+                      <input className="pqvar" value={l.variant} onChange={(e) => setLine(i, { variant: e.target.value })} placeholder="+ note if it differs from what was asked" />
+                    </div>
+                    <div className="pqrate">
+                      <span className="cur">₹</span>
+                      <input inputMode="decimal" value={l.rate} placeholder="—" onChange={(e) => setLine(i, { rate: e.target.value, supplied: e.target.value.trim() !== '' })} />
+                      <small>/{l.unit || 'unit'}</small>
+                    </div>
+                    <button className={`pqsup${l.supplied ? ' on' : ''}`} title={l.supplied ? 'Priced — click to mark not supplied' : 'Not supplied — click to include'} onClick={() => setLine(i, { supplied: !l.supplied })}>{l.supplied ? '✓' : '—'}</button>
+                  </div>
+                ))}
+              </div>
+              {photoDraft.extras.length > 0 && (
+                <div className="pqextra">
+                  <span className="lbl">Also on their sheet — not in your enquiry</span>
+                  {photoDraft.extras.map((x, i) => <div key={i}>{x.item}{x.rate != null ? ` — ${fmt(x.rate)}${x.unit ? '/' + x.unit : ''}` : x.amount != null ? ` — ${fmt(x.amount)}` : ''}</div>)}
+                </div>
+              )}
+              <div className="pqterms">
+                <button className={`pqchip${photoDraft.transport ? ' on' : ''}`} onClick={() => setDraft({ transport: !photoDraft.transport })}>Transport {photoDraft.transport ? 'included' : 'extra'}</button>
+                <button className={`pqchip${photoDraft.gst ? ' on' : ''}`} onClick={() => setDraft({ gst: !photoDraft.gst })}>GST {photoDraft.gst ? 'included' : 'extra'}</button>
+                <label className="pqvalid">Valid <input inputMode="numeric" value={photoDraft.validDays} onChange={(e) => setDraft({ validDays: e.target.value })} placeholder="—" /> days</label>
+              </div>
+              <label className="pqfld"><span>Vendor’s note / conditions</span><input value={photoDraft.vendorNote} onChange={(e) => setDraft({ vendorNote: e.target.value })} placeholder="e.g. 50% advance · rates firm 7 days" /></label>
+            </div>
+            <div className="pqfoot">
+              {photoDraft.replaceId ? <span className="pqrepl">Replaces the existing <b>{photoDraft.replaceName}</b> quote</span> : <span />}
+              <div className="pqacts">
+                <button className="btn" onClick={() => setPhotoDraft(null)}>Cancel</button>
+                {photoDraft.replaceId
+                  ? <>
+                      <button className="btn" disabled={busy === 'photo'} onClick={() => savePhotoQuote(false)}>Add as new</button>
+                      <button className="btn pqsave" disabled={busy === 'photo'} onClick={() => savePhotoQuote(true)}>{busy === 'photo' ? 'Saving…' : 'Replace existing'}</button>
+                    </>
+                  : <button className="btn pqsave" disabled={busy === 'photo'} onClick={() => savePhotoQuote(false)}>{busy === 'photo' ? 'Saving…' : 'Save quote'}</button>}
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       {extendOpen && (

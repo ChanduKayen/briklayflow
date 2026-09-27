@@ -1,6 +1,7 @@
 // Multi-page photo batch — the PURE decision core of tryBatchAppend:
-//   · foldItems   — folds a follow-up page into the open request, collapsing FULL-row duplicates so a
-//                   re-processed page adds nothing the second time (idempotency without provenance).
+//   · foldItems   — folds a follow-up page into the open request, KEEPING EVERY ROW (repeats included) so the
+//                   extracted count matches the doc. Idempotency (a page can't be processed twice) is owned by
+//                   the webhook's wamid gate, NOT by collapsing rows — a repeat line is a real second line.
 //   · rawConflict — two RAW references clearly name different things → the page is its own request, not a page.
 // The DB read/write around these lives in tryBatchAppend; here we pin the logic that decides WHAT gets merged.
 
@@ -22,22 +23,25 @@ suite('procurement — multi-page photo batch fold', () => {
     expect(merged.map((m) => m.item_name)).toEqual(['cement', 'sand', 'steel bars', 'bricks'])
   })
 
-  test('a re-processed identical page adds NOTHING (idempotent)', () => {
-    const page1 = [it('cement', { quantity: 200, unit: 'bags' }), it('sand', { quantity: 2, unit: 'brass' })]
-    const { merged, added } = foldItems(page1, page1.map((x) => ({ ...x })))
-    expect(added).toBe(0)
-    expect(merged.length).toBe(2)
-  })
-
-  test('a partial overlap adds only the genuinely new rows', () => {
-    const page1 = [it('cement', { quantity: 200, unit: 'bags' })]
-    const page2 = [it('cement', { quantity: 200, unit: 'bags' }), it('tiles', { quantity: 40, unit: 'boxes' })]
+  test('a REPEATED line is kept — the sheet lists it twice on purpose (count must match the doc)', () => {
+    // Two identical rows on one page (the same fitting for two toilets). Dropping one would undercount
+    // the order — exactly the bug this fold now refuses to reintroduce.
+    const page1 = [it('angle valve', { quantity: 2, unit: 'nos' })]
+    const page2 = [it('angle valve', { quantity: 2, unit: 'nos' }), it('angle valve', { quantity: 2, unit: 'nos' })]
     const { merged, added } = foldItems(page1, page2)
-    expect(added).toBe(1)
-    expect(merged.map((m) => m.item_name)).toEqual(['cement', 'tiles'])
+    expect(added).toBe(2)
+    expect(merged.length).toBe(3)   // all three angle-valve lines survive
   })
 
-  test('same item, DIFFERENT quantity is a distinct row (never collapsed)', () => {
+  test('repeats WITHIN one page survive the fold', () => {
+    const page1 = [it('cement', { quantity: 200, unit: 'bags' })]
+    const page2 = [it('tiles', { quantity: 40, unit: 'boxes' }), it('tiles', { quantity: 40, unit: 'boxes' })]
+    const { merged, added } = foldItems(page1, page2)
+    expect(added).toBe(2)
+    expect(merged.map((m) => m.item_name)).toEqual(['cement', 'tiles', 'tiles'])
+  })
+
+  test('same item, DIFFERENT quantity is a distinct row (also kept)', () => {
     const page1 = [it('cement', { quantity: 200, unit: 'bags' })]
     const page2 = [it('cement', { quantity: 50, unit: 'bags' })]
     const { merged, added } = foldItems(page1, page2)

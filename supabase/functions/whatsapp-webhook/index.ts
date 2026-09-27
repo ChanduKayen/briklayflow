@@ -12,8 +12,10 @@ import {
 import { send, sendNow, keepTyping } from './_format.ts'
 import { normalize, deriveDispatchMedia } from './_normalize.ts'
 import { waitForInflightPhoto } from './_media_race.ts'
-import { coalesceBurst } from './_burst.ts'
+import { coalesceBurst, recordPhoto, hasEarlierPhoto, hasNewerPhoto, finalizePhotoBatch, PHOTO_QUIET_MS } from './_burst.ts'
+import { sendProcConfirmationById } from './_agents/procurement.ts'
 import { dispatch } from './_dispatch.ts'
+import { phoneCandidates, handleVendorQuote, type VendorQuoteInbound } from './_rfq_inbound.ts'
 import { handleReaction } from './_agents/siteops.ts'   // STEP 5: reactions-as-confirm / retract
 import { runDemo } from './_agents/demo.ts'
 import * as M from './_messages.ts'
@@ -150,6 +152,13 @@ serve(async (req) => {
           console.error('[wa-webhook] prospect handling error:', err),
         ),
       )
+    } else if (inbound.kind === 'vendor_quote') {
+      // A vendor's quote reply — read it against the enquiry and record it, in the background.
+      EdgeRuntime.waitUntil(
+        handleVendorQuote(supabase, inbound as VendorQuoteInbound).catch((err) =>
+          console.error('[wa-webhook] vendor quote handling error:', err),
+        ),
+      )
     } else if (inbound.kind === 'paused') {
       // Durable reply via the outbox (enqueued before the 200).
       await send(supabase, inbound.from, M.mAccessPaused('en'))
@@ -173,6 +182,7 @@ type Inbound =
   | { kind: 'ignore' }
   | { kind: 'duplicate' }
   | { kind: 'prospect'; from: string; text: string; wamid: string }   // unknown number → greet + nudge
+  | ({ kind: 'vendor_quote' } & VendorQuoteInbound)     // unknown number that IS an RFQ recipient → read their quote
   | { kind: 'paused'; from: string }                    // registered but switched off (not an invite)
   | { kind: 'no_org'; from: string }
   | {
@@ -267,7 +277,30 @@ async function recordInbound(
     }
   }
 
-  if (!registered) return { kind: 'prospect', from, text, wamid: messageId }
+  if (!registered) {
+    // A vendor replying to an RFQ we sent — their number is a recipient on an OPEN enquiry. Route their
+    // message (usually a photo of their rates) INTO that enquiry rather than the prospect greeter.
+    const cands = phoneCandidates(from)
+    if (cands.length) {
+      const rc: any = (await supabase.from('rfq_recipients')
+        .select('recipient_id, rfq_id, org_id, token, vendor_name, stakeholder_id, rfqs!inner(status, items)')
+        .in('vendor_phone', cands)
+        .eq('rfqs.status', 'open')
+        .order('sent_at', { ascending: false })
+        .limit(1).maybeSingle()).data
+      if (rc?.token) {
+        return {
+          kind: 'vendor_quote', from, wamid: messageId, message,
+          recipient: {
+            recipient_id: rc.recipient_id as string, rfq_id: rc.rfq_id as string, org_id: rc.org_id as string,
+            token: rc.token as string, vendor_name: (rc.vendor_name as string) ?? null,
+            stakeholder_id: (rc.stakeholder_id as string) ?? null, items: ((rc as any).rfqs?.items ?? []) as any[],
+          },
+        }
+      }
+    }
+    return { kind: 'prospect', from, text, wamid: messageId }
+  }
 
   if (!registered.is_active) {
     if (registered.invite_status === 'invited') {
@@ -419,14 +452,23 @@ async function processJob(
   // beating it by four seconds.
   const mediaKind: 'voice' | 'image' | null =
     message?.type === 'audio' ? 'voice' : message?.type === 'image' ? 'image' : null
-  if (mediaKind && registered) {
-    // No transcript yet, so no detected language — use the SENDER'S OWN preference (wa_registered_numbers.
-    // preferred_language), defaulting to English. The regional WA_STT_LANGUAGE prior is NOT used here: it
-    // made every ack Telugu for an English-speaking owner (the "andhidhi chusthunna" not-elegant bug). A
-    // Telugu-speaking foreman whose preference is set still gets Telugu.
-    const pref = (registered?.preferred_language ?? '').toString().trim()
-    const lang = (pref === 'te' || pref === 'hi' ? pref : 'en') as 'en' | 'te' | 'hi'
-    void sendNow(supabase, from, M.mMediaAck(lang, mediaKind))
+  // No transcript yet, so no detected language — use the SENDER'S OWN preference (wa_registered_numbers.
+  // preferred_language), defaulting to English. The regional WA_STT_LANGUAGE prior is NOT used here: it
+  // made every ack Telugu for an English-speaking owner (the "andhidhi chusthunna" not-elegant bug). A
+  // Telugu-speaking foreman whose preference is set still gets Telugu.
+  const pref = (registered?.preferred_language ?? '').toString().trim()
+  const ackLang = (pref === 'te' || pref === 'hi' ? pref : 'en') as 'en' | 'te' | 'hi'
+  // A PHOTO burst (a materials list photographed across pages) arrives as several image POSTs. Record each
+  // in the photo-batch buffer and ack ONLY for the FIRST — three "Got your photo…" acks for one upload read
+  // as a broken product. The confirmation is likewise consolidated (one card per request) by the finalizer
+  // after the burst settles (see below). Voice keeps its immediate, per-note ack.
+  let photoSeq: number | null = null
+  if (mediaKind === 'image' && registered) {
+    photoSeq = await recordPhoto(supabase, { orgId, sender: from, wamid: messageId })
+    const firstOfBurst = photoSeq == null || !(await hasEarlierPhoto(supabase, from, photoSeq))
+    if (firstOfBurst) void sendNow(supabase, from, M.mMediaAck(ackLang, 'image'))
+  } else if (mediaKind === 'voice' && registered) {
+    void sendNow(supabase, from, M.mMediaAck(ackLang, 'voice'))
   }
 
   // TYPING, FOR AS LONG AS WE ARE THINKING. WhatsApp expires a typing indicator after 25s, and a SiteOps
@@ -553,7 +595,7 @@ async function processJob(
     // siteops branch attaches it without re-uploading (clause 1: evidence findable). Payment path ignores
     // storagePath (unchanged). PURE + pinned — see deriveDispatchMedia (clause1_media_thread.test.ts).
     const { image: dispatchImage, audio: dispatchAudio } = deriveDispatchMedia(norm)
-    await dispatch({ supabase, from, senderName, registered, wamid: messageId, orgId, interactiveId, quotedWamid, flowResponse, image: dispatchImage, audio: dispatchAudio, firstTouch, dormant }, norm.text)
+    await dispatch({ supabase, from, senderName, registered, wamid: messageId, orgId, interactiveId, quotedWamid, flowResponse, image: dispatchImage, audio: dispatchAudio, firstTouch, dormant, photoBatched: photoSeq != null }, norm.text)
     if (jobId) await markJob(supabase, jobId, 'WRITTEN')
   } catch (e) {
     console.error(`[wa-webhook] processing error: wamid=${messageId} from=${from} msg=${(e as Error)?.message ?? String(e)}`)
@@ -575,6 +617,25 @@ async function processJob(
   } finally {
     stopTyping()
     await releaseSenderLock(supabase, from, lockKey)
+  }
+
+  // ── PHOTO-BATCH FINALIZER — ONE confirmation for the whole burst ─────────────────────────────────────────
+  // The procurement agent staged/folded this photo's items SILENTLY and tagged its row with the request it
+  // landed in. Now that the lock is released (so we hold nothing while we wait), the LAST photo of the burst
+  // confirms: if a newer photo is still unconsumed, a later job will finalize — this one is done. Otherwise
+  // wait a short quiet window for a straggler, then CLAIM the whole set and send ONE card per distinct request
+  // (a single list → one "Materials requested"; a rare two-vendor batch → a card each). A non-procurement
+  // photo (a payment proof) tags no request, so it drops out of the cards but still lets the burst finalize.
+  if (mediaKind === 'image' && photoSeq != null) {
+    if (!(await hasNewerPhoto(supabase, from, photoSeq))) {
+      await new Promise((r) => setTimeout(r, PHOTO_QUIET_MS))
+      if (!(await hasNewerPhoto(supabase, from, photoSeq))) {
+        const prIds = await finalizePhotoBatch(supabase, from)
+        for (const prId of prIds) {
+          await sendProcConfirmationById(supabase, { orgId, from, wamid: messageId, lang: ackLang, prId })
+        }
+      }
+    }
   }
 }
 

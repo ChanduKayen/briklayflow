@@ -8,7 +8,7 @@
 // project scoring): seeded with what was read, never silently locked to a soft match, always re-pickable.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useQuery, useMutation } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import { useUserProfile } from '../App';
@@ -19,12 +19,13 @@ import { scoreProjectName } from '../lib/projectSearch';
 import { NewPartyRow } from '../components/ResolvePopup';
 import { useIsMobile } from '../lib/useIsMobile';
 import PurchaseRequestMobileHost from '../components/procurement/PurchaseRequestMobileHost';
+import RequestQuotesModal, { type RfqLineItem } from '../components/po-new-ui/RequestQuotesModal';
 
 interface PRItem { item_name: string; quantity: string; unit: string; note: string }
 interface PRRow {
   id: string; status: string; title: string | null; image_url: string | null;
   site_id: string | null; site_raw: string | null; vendor_id: string | null; vendor_raw: string | null;
-  sender_name: string | null; sender_number: string | null; created_at: string; converted_po_id: string | null;
+  sender_name: string | null; sender_number: string | null; created_at: string; converted_po_id: string | null; rfq_id: string | null;
   projects: { name: string } | null; stakeholders: { name: string } | null;
   purchase_request_items: { item_index: number; item_name: string; quantity: number | null; unit: string | null; note: string | null }[];
 }
@@ -106,6 +107,7 @@ export default function PurchaseRequestDetail({ session }: { session: Session })
   const isPhone = useIsMobile();
   const navigate = useNavigate();
   const orgId = useOrgId();
+  const qc = useQueryClient();
   const { data: profile } = useUserProfile(session.user.id);
   const canAct = profile?.role === 'management' || profile?.role === 'principal' || profile?.role === 'accountant';
 
@@ -115,7 +117,7 @@ export default function PurchaseRequestDetail({ session }: { session: Session })
     queryFn: async () => {
       const { data, error } = await supabase
         .from('purchase_requests')
-        .select('id, status, title, image_url, site_id, site_raw, vendor_id, vendor_raw, sender_name, sender_number, created_at, converted_po_id, projects(name), stakeholders(name), purchase_request_items(item_index, item_name, quantity, unit, note)')
+        .select('id, status, title, image_url, site_id, site_raw, vendor_id, vendor_raw, sender_name, sender_number, created_at, converted_po_id, rfq_id, projects(name), stakeholders(name), purchase_request_items(item_index, item_name, quantity, unit, note)')
         .eq('id', id).single();
       if (error) throw error;
       return data as unknown as PRRow;
@@ -143,8 +145,10 @@ export default function PurchaseRequestDetail({ session }: { session: Session })
   const [dirty, setDirty] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [confirmDel, setConfirmDel] = useState(false);
-  const [act, setAct] = useState<null | 'po' | 'rfq'>(null);   // which create button is working
+  const [act, setAct] = useState<null | 'po'>(null);           // the create button is working
   const [created, setCreated] = useState(false);               // brief ✓ beat before we leave
+  const [quotesOpen, setQuotesOpen] = useState(false);         // the Request-quotes modal is open
+  const [sentRfqId, setSentRfqId] = useState<string | null>(null);   // set once quotes go out → land on the enquiry
 
   useEffect(() => {
     if (!pr) return;
@@ -158,7 +162,10 @@ export default function PurchaseRequestDetail({ session }: { session: Session })
     setDirty(false);
   }, [pr]);
 
-  const alreadyPo = !!pr?.converted_po_id;
+  const alreadyPo = !!pr?.converted_po_id || pr?.status === 'placed' || pr?.status === 'fulfilled';
+  // Went out for quotes (an RFQ enquiry) — no longer an editable draft, mirrors the phone's converted notice.
+  const alreadyRfq = !alreadyPo && (pr?.status === 'quoted' || !!pr?.rfq_id);
+  const locked = alreadyPo || alreadyRfq;   // a promoted / quoted request is read-only (never orderable twice)
   const touch = () => setDirty(true);
   const setItem = (i: number, patch: Partial<PRItem>) => { setItems((p) => p.map((it, j) => (j === i ? { ...it, ...patch } : it))); touch(); };
   const addItem = () => { setItems((p) => [...p, { item_name: '', quantity: '', unit: '', note: '' }]); touch(); };
@@ -204,28 +211,60 @@ export default function PurchaseRequestDetail({ session }: { session: Session })
     onError: (e) => setMsg((e as Error)?.message || 'Could not save'),
   });
 
-  // Promote to a real PO (items copied by the RPC). asRfq → mark the resulting PO a quotation.
+  // Promote to a real PO (items copied by the RPC). "Request quotes" no longer routes through here — it
+  // opens the real vendor-selection + send-RFQ modal below (parity with the phone), never a stub PO.
   const create = useMutation({
-    mutationFn: async (asRfq: boolean) => {
+    mutationFn: async () => {
       if (dirty) await save.mutateAsync();
       const { data, error } = await supabase.rpc('promote_purchase_request_to_po', { p_pr_id: id, p_approver_id: session.user.id });
       const r = data as { success?: boolean; error?: string; po_id?: string } | null;
       if (error || !r?.success || !r.po_id) throw new Error(r?.error || error?.message || 'Could not create it');
-      if (asRfq) await supabase.from('purchase_orders').update({ status: 'RFQ' }).eq('po_id', r.po_id);
       return r.po_id;
     },
-    onMutate: (asRfq) => { setMsg(null); setAct(asRfq ? 'rfq' : 'po'); },
-    onSuccess: (poId, asRfq) => {
+    onMutate: () => { setMsg(null); setAct('po'); },
+    onSuccess: (poId) => {
       // Hold a ✓ beat on the button, THEN leave the LIST behind the new order so Back returns there
       // (not to this now-converted request). replace drops the request; the push adds the order.
       setCreated(true);
       setTimeout(() => {
         navigate('/purchase-orders?status=draft', { replace: true });
-        navigate(`/purchase-orders/${poId}`, { state: { justCreated: true, createdKind: asRfq ? 'rfq' : 'po' } });
+        navigate(`/purchase-orders/${poId}`, { state: { justCreated: true, createdKind: 'po' } });
       }, 650);
     },
     onError: (e) => { setAct(null); setMsg((e as Error)?.message || 'Could not create it'); },
   });
+
+  // Open the vendor-selection modal — save any in-progress edits first so the enquiry (and the record) carry
+  // the items exactly as shown. Refuses an empty request (there's nothing to quote).
+  const openQuotes = async () => {
+    if (!cleanItems.length) { setMsg('Add at least one item before requesting quotes'); return; }
+    try { if (dirty) await save.mutateAsync(); } catch { return; }   // save surfaces its own error
+    setQuotesOpen(true);
+  };
+
+  // Quotes have gone out → move the request out of the review inbox, linked to its enquiry — the SAME write
+  // the phone does. Landing on the enquiry happens when the modal's "Done" closes it (markQuoted just records).
+  const markQuoted = async (rfqId: string) => {
+    setSentRfqId(rfqId);
+    await supabase.from('purchase_requests').update({ status: 'quoted', rfq_id: rfqId }).eq('id', id);
+    qc.invalidateQueries({ queryKey: ['purchase_request', id] });
+    qc.invalidateQueries({ queryKey: ['po_list_pending_prs'] });
+    qc.invalidateQueries({ queryKey: ['daybook_purchase_requests', orgId] });
+  };
+
+  // The vendor trade to default the modal's filter to — the picked vendor's category, if one is resolved.
+  const vendorCategory = useMemo(
+    () => (vendors as { stakeholder_id: string; category: string | null }[]).find((v) => v.stakeholder_id === vendorId)?.category ?? null,
+    [vendors, vendorId],
+  );
+  // The request's items, in the shape the RFQ modal + send-rfq expect (note is the spec/detail column).
+  const rfqItems: RfqLineItem[] = useMemo(() => cleanItems.map((it, i) => ({
+    line: i + 1,
+    item_name: it.item_name.trim(),
+    unit: it.unit.trim() || undefined,
+    qty: it.quantity.trim() ? (Number(it.quantity.replace(/[^\d.]/g, '')) || undefined) : undefined,
+    spec: it.note.trim() || undefined,
+  })), [cleanItems]);
 
   // Discard a draft request (items cascade). Only a not-yet-promoted draft can be deleted.
   const del = useMutation({
@@ -272,7 +311,7 @@ export default function PurchaseRequestDetail({ session }: { session: Session })
           <div className="hl">
             <input className="h1" value={title} onChange={(e) => { setTitle(e.target.value); touch(); }} placeholder="Materials request" aria-label="Title" />
             <div className="meta">
-              <span className={`tag ${alreadyPo ? 'ok' : 'draft'}`}>{alreadyPo ? 'Promoted' : 'Draft request'}</span>
+              <span className={`tag ${alreadyPo ? 'ok' : alreadyRfq ? 'quoted' : 'draft'}`}>{alreadyPo ? 'Promoted' : alreadyRfq ? 'Quotes requested' : 'Draft request'}</span>
               {fromWa && <span className="wa"><WhatsAppGlyph size={13} color="#1FA855" /> from WhatsApp{pr.sender_name ? ` · ${pr.sender_name}` : ''}</span>}
               <span>· {dateStr}</span>
             </div>
@@ -284,7 +323,7 @@ export default function PurchaseRequestDetail({ session }: { session: Session })
             <div className="card facts">
               <Resolve
                 label="Vendor" text={vendorText} id={vendorId}
-                placeholder="Not set — search a vendor" disabled={alreadyPo}
+                placeholder="Not set — search a vendor" disabled={locked}
                 rank={rankVendor}
                 createKind="Vendor"
                 onCreated={(nid, nname) => { setVendorId(nid); setVendorText(nname); touch(); }}
@@ -295,7 +334,7 @@ export default function PurchaseRequestDetail({ session }: { session: Session })
               />
               <Resolve
                 label="Site" text={siteText} id={siteId}
-                placeholder="Choose a site" disabled={alreadyPo}
+                placeholder="Choose a site" disabled={locked}
                 rank={rankSite}
                 onText={(v) => { setSiteText(v); setSiteId(''); touch(); }}
                 onPick={(r) => { setSiteId(r.id); setSiteText(r.name); touch(); }}
@@ -310,37 +349,44 @@ export default function PurchaseRequestDetail({ session }: { session: Session })
                 <div className="ih"><span>Item</span><span className="q">Qty</span><span className="u">Unit</span><span className="n">Spec / detail</span><span className="x" /></div>
                 {items.map((it, i) => (
                   <div className="irow" key={i}>
-                    <input value={it.item_name} onChange={(e) => setItem(i, { item_name: e.target.value })} placeholder="Material" disabled={alreadyPo} />
-                    <input className="q" value={it.quantity} onChange={(e) => setItem(i, { quantity: e.target.value })} inputMode="decimal" placeholder="—" disabled={alreadyPo} />
-                    <input className="u" value={it.unit} onChange={(e) => setItem(i, { unit: e.target.value })} placeholder="unit" disabled={alreadyPo} />
-                    <input className="n" value={it.note} onChange={(e) => setItem(i, { note: e.target.value })} placeholder="size · glass · system · finish…" disabled={alreadyPo} />
-                    {!alreadyPo && <button className="rm" title="Remove" onClick={() => delItem(i)}>✕</button>}
+                    <input value={it.item_name} onChange={(e) => setItem(i, { item_name: e.target.value })} placeholder="Material" disabled={locked} />
+                    <input className="q" value={it.quantity} onChange={(e) => setItem(i, { quantity: e.target.value })} inputMode="decimal" placeholder="—" disabled={locked} />
+                    <input className="u" value={it.unit} onChange={(e) => setItem(i, { unit: e.target.value })} placeholder="unit" disabled={locked} />
+                    <input className="n" value={it.note} onChange={(e) => setItem(i, { note: e.target.value })} placeholder="size · glass · system · finish…" disabled={locked} />
+                    {!locked && <button className="rm" title="Remove" onClick={() => delItem(i)}>✕</button>}
                   </div>
                 ))}
               </div>
-              {!alreadyPo && <button className="addrow" onClick={addItem}>+ Add item</button>}
+              {!locked && <button className="addrow" onClick={addItem}>+ Add item</button>}
             </div>
 
-            {!alreadyPo && (
+            {!locked && (
               <div className="actions">
                 {/* Anyone on the request can save their edits — a supervisor raises and edits requests. */}
                 <button className="ghost" disabled={!dirty || busy} onClick={() => save.mutate()}>{save.isPending ? 'Saving…' : 'Save'}</button>
                 <span className="sp" />
                 {/* Placing the order is the office's call — management / principal / accountant only. */}
                 {canAct && <>
-                  <button className={`prim2${created && act === 'rfq' ? ' ok' : ''}`} disabled={busy} onClick={() => create.mutate(true)}>
-                    {created && act === 'rfq' ? '✓ Requested' : act === 'rfq' ? <><span className="spin" />Requesting…</> : 'Request quotes'}
-                  </button>
-                  <button className={`prim${created && act === 'po' ? ' ok' : ''}`} disabled={busy} onClick={() => create.mutate(false)}>
+                  <button className="prim2" disabled={busy} onClick={openQuotes}>Request quotes</button>
+                  <button className={`prim${created && act === 'po' ? ' ok' : ''}`} disabled={busy} onClick={() => create.mutate()}>
                     {created && act === 'po' ? '✓ Created' : act === 'po' ? <><span className="spin" />Creating…</> : 'Create purchase order'}
                   </button>
                 </>}
               </div>
             )}
             {alreadyPo && <div className="actions"><button className="prim" onClick={() => navigate(`/purchase-orders/${pr.converted_po_id}`)}>Open purchase order {pr.converted_po_id}</button></div>}
+            {alreadyRfq && (
+              <div className="rfqnote">
+                <div className="rfqnote-t">
+                  <b>Quotes requested</b>
+                  <span>This request went out to suppliers. Their rates land on the enquiry as they reply.</span>
+                </div>
+                <button className="prim" onClick={() => navigate(pr.rfq_id ? `/rfq/${pr.rfq_id}` : '/purchase-orders?status=draft')}>Open the quote request →</button>
+              </div>
+            )}
             {msg && <p className="msg">{msg}</p>}
 
-            {!alreadyPo && canAct && (
+            {!locked && canAct && (
               <div className="danger">
                 {!confirmDel
                   ? <button className="del" onClick={() => setConfirmDel(true)}>Delete request</button>
@@ -360,6 +406,24 @@ export default function PurchaseRequestDetail({ session }: { session: Session })
           </div>
         </div>
       </div>
+
+      {/* The real vendor-selection + send-RFQ modal (the same one the New PO screen uses) — desktop parity
+          with the phone's quote flow. On a clean send it links the request to its enquiry; closing "Done"
+          then lands on the compare page where replies arrive. */}
+      {quotesOpen && (
+        <RequestQuotesModal
+          orgId={orgId}
+          projectId={siteId || null}
+          deliveryLocation={siteText.trim() || null}
+          tradeCategory={vendorCategory}
+          items={rfqItems}
+          onClose={() => {
+            setQuotesOpen(false);
+            if (sentRfqId) navigate(`/rfq/${sentRfqId}`);
+          }}
+          onSent={(rfqId) => { void markQuoted(rfqId); }}
+        />
+      )}
     </div>
   );
 }
@@ -382,6 +446,7 @@ const CSS = `
 .prx .tag{font:500 12.5px/1 var(--mono);letter-spacing:.04em;padding:6px 9px;border-radius:6px;border:1px solid var(--line);background:var(--paper)}
 .prx .tag.draft{color:#8A5A0B;background:var(--gold-tint);border-color:#EBD9B4}
 .prx .tag.ok{color:var(--sage);background:var(--sage-tint);border-color:#CFE0C9}
+.prx .tag.quoted{color:var(--terra-deep);background:#F8E7DE;border-color:#E7C4B4}
 .prx .wa{display:inline-flex;align-items:center;gap:6px}
 .prx .grid{display:grid;grid-template-columns:1fr 320px;gap:18px}
 .prx .card{background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:14px}
@@ -431,6 +496,12 @@ const CSS = `
 .prx .actions .spin{display:inline-block;width:14px;height:14px;margin-right:8px;border-radius:50%;border:2px solid currentColor;border-right-color:transparent;vertical-align:-2px;animation:prxSpin .7s linear infinite}
 @keyframes prxSpin{to{transform:rotate(360deg)}}
 .prx .msg{margin:10px 0 0;font-size:13px;color:var(--sage)}
+.prx .rfqnote{display:flex;align-items:center;gap:16px;margin-top:6px;padding:14px 16px;border:1px solid #E7C4B4;background:#FBEEE8;border-radius:12px}
+.prx .rfqnote-t{flex:1;min-width:0}
+.prx .rfqnote-t b{display:block;font-size:14.5px;font-weight:600;color:var(--terra-deep)}
+.prx .rfqnote-t span{display:block;font-size:13px;color:var(--ink-2);margin-top:3px}
+.prx .rfqnote .prim{flex-shrink:0;height:44px;padding:0 18px;border-radius:10px;border:1px solid var(--terra);background:var(--terra);color:#fff;font:inherit;font-weight:600;cursor:pointer}
+.prx .rfqnote .prim:hover{background:var(--terra-deep)}
 .prx .danger{margin-top:20px;padding-top:14px;border-top:1px dashed var(--line)}
 .prx .del{background:none;border:0;color:var(--ink-3);font:inherit;font-size:13px;cursor:pointer;padding:4px 0}
 .prx .del:hover{color:var(--terra)}

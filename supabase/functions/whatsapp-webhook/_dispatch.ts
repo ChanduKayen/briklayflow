@@ -50,6 +50,8 @@ export type DispatchCtx = {
   audio?: { storagePath: string; mime: string }   // VOICE note's already-stored audio (rough-entry-media) → siteops records it findable (T7 clause 1)
   firstTouch?: boolean   // Sprint 6: member's first-ever contact -> orient / welcome
   dormant?: boolean      // Sprint 6: returning after a long gap -> welcome-back prefix
+  photoBatched?: boolean // true when this photo entered the batch buffer → procurement stages silently and the
+                         // batch finalizer sends one confirmation; false (buffer down) → confirm inline.
 }
 
 /** Join a first-contact welcome with any interrupt ack into one prefix (or undefined). */
@@ -298,6 +300,21 @@ export async function dispatch(ctx: DispatchCtx, text: string): Promise<void> {
   // structural fact, and the dispatcher already said so — it just said so five seconds too late.
   // (isInteractiveReply is declared above, right after the router view, so the caption-hold can read it.)
   const structuralAnswer = !!(view.open && isInteractiveReply)
+  // A photo/PDF whose PIXELS describeImage already classified (image.kind) routes on WHAT IT IS, not on the
+  // thin one-line text the router would guess from — so pin the agent deterministically and SKIP the router
+  // call. It is safe to skip precisely because the router's DECISION for such an image is forced to NEW_INTENT
+  // anyway (a materials list / a bill / a site photo is a new observation, never the answer to a pick — the
+  // old post-router pin below did exactly this), and the reply language comes from detectLanguage. Only a
+  // genuine interactive/structural answer is exempt, and kind 'OTHER' stays UNPINNED → the router still reads
+  // it (a captioned OTHER photo may carry real intent). PAYMENT_PROOF covers bills/invoices/receipts too —
+  // the TRANSACTION agent owns the whole money document and decides bill-vs-paid itself.
+  const pinnedAgent: RouterDecision['intent_agent'] | null =
+    (!structuralAnswer && !isInteractiveReply && ctx.image)
+      ? (ctx.image.kind === 'PURCHASE_REQUEST' ? 'PROCUREMENT'
+        : ctx.image.kind === 'PAYMENT_PROOF' ? 'TRANSACTION'
+        : ctx.image.kind === 'SITE_UPDATE' ? 'SITEOPS'
+        : null)
+      : null
   const d = structuralAnswer
     ? {
       decision: 'ANSWERS_PENDING' as const,
@@ -306,11 +323,20 @@ export async function dispatch(ctx: DispatchCtx, text: string): Promise<void> {
       reply_language: detectLanguage(text),
       reasoning: 'structural: an interactive reply answers the question that sent it (router not consulted)',
     }
+    : pinnedAgent
+    ? {
+      decision: 'NEW_INTENT' as const,
+      intent_agent: pinnedAgent,
+      confidence: 1,
+      reply_language: detectLanguage(text),
+      reasoning: `pinned: image is ${ctx.image!.kind} → ${pinnedAgent} (router not consulted)`,
+    }
     : await routeMessage({ text, pending, history })
   if (structuralAnswer) console.log('[router] SKIPPED — interactive reply to an open question (structural)')
+  else if (pinnedAgent) console.log(`[router] SKIPPED — image kind ${ctx.image!.kind} pins ${pinnedAgent}`)
   const lang = d.reply_language
   // The uniform agent context (carries language + the tapped interactive id + any Flow payload).
-  const actx: TxnCtx = { supabase, from, senderName: ctx.senderName, orgId, wamid, lang, interactiveId: ctx.interactiveId, flowResponse: ctx.flowResponse ?? null, image: ctx.image, audio: ctx.audio }
+  const actx: TxnCtx = { supabase, from, senderName: ctx.senderName, orgId, wamid, lang, interactiveId: ctx.interactiveId, flowResponse: ctx.flowResponse ?? null, image: ctx.image, audio: ctx.audio, photoBatched: ctx.photoBatched }
 
   // ── Dismiss tap on a RE-SURFACED pending question (agent-agnostic) ───────────
   // The credibility flow re-shows an interrupted question with a Dismiss button (`pending_dismiss`). A TAP is
@@ -362,15 +388,9 @@ export async function dispatch(ctx: DispatchCtx, text: string): Promise<void> {
     decision = 'NEW_INTENT'; intentAgent = 'SITEOPS'
   }
 
-  // A PHOTO OF A MATERIALS LIST IS A PURCHASE REQUEST — always. describeImage classified the pixels
-  // (kind), so we route on WHAT THE IMAGE IS, not on the thin one-line text the router guesses from: an
-  // indent flattened to "X required, qty N" reads exactly like a planned site snag, and the text router
-  // sent it to SiteOps (logged as Problems) one run and Procurement the next. This pins it. Only a genuine
-  // interactive answer (a button/list/Flow reply to an open question) is exempt — that IS an answer, never
-  // a fresh order. A pending question is not dropped: NEW_INTENT lets the credibility flow stash + re-surface it.
-  if (ctx.image?.kind === 'PURCHASE_REQUEST' && !isInteractiveReply && !structuralAnswer) {
-    decision = 'NEW_INTENT'; intentAgent = 'PROCUREMENT'
-  }
+  // (The image-kind pin — PURCHASE_REQUEST→PROCUREMENT, PAYMENT_PROOF→TRANSACTION, SITE_UPDATE→SITEOPS — moved
+  //  UP, before the router call, so a classified photo/PDF skips the router entirely. See `pinnedAgent` above.
+  //  A pending question is not dropped: NEW_INTENT lets the credibility flow stash + re-surface it.)
 
   // ── STEP 2: a TEXT arriving while a siteops_photo ENRICHMENT WINDOW is open. Steer it, reusing existing
   //    machinery rather than a new interaction:

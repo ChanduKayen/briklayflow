@@ -11,15 +11,17 @@ import type { TxnCtx } from './transaction.ts'
 import type { ConvoRow } from '../_conversation.ts'
 import { openConversation, closeConversation, abandonConversation } from '../_conversation.ts'
 import { matchPayee, matchProject } from '../_match.ts'
-import { gateProcurement, extractProcurements, extractProcContext, titleWithCount, type ProcRequest, type ProcItem } from '../_proc_extract.ts'
+import { gateProcurement, extractProcurements, extractProcContext, titleWithCount, titleFor, type ProcRequest, type ProcItem } from '../_proc_extract.ts'
 import { extractProcurementFromImage } from '../_extract.ts'
 import { APP_ORIGIN } from '../_links.ts'
 import { signedMediaUrl, storeMedia } from '../_normalize.ts'
 import { recentInboundText } from './transaction.ts'   // reunite a photo with the site/vendor typed just before it
+import { setPhotoPr } from '../_burst.ts'               // tag this photo's row with the request it landed in
 import {
-  mProcMultiGuard, buildSourcingPrompt, buildVendorList, mProcComplete, mProcBatchAppended,
+  mProcMultiGuard, buildSourcingPrompt, buildVendorList, mProcComplete,
   buildSelectVendorFlow, buildPickVendorsFlow, type FlowVendor,
 } from '../_messages.ts'
+import type { Lang } from '../_messages.ts'
 
 export type ProcCtx = TxnCtx
 
@@ -168,30 +170,23 @@ const PROC_BATCH_MS = Number(Deno.env.get('WA_PROC_BATCH_MS') ?? '90000')   // "
 
 type ProcHead = { vendor_raw: string | null; site_raw: string | null; title: string | null }
 
-/** A loose key for exact-duplicate collapse — makes a re-processed page idempotent (append the same page
- *  twice → one copy) without needing per-item provenance. Only a FULL row match collapses. */
-export function itemKey(it: ProcItem): string {
-  return [it.item_name, it.quantity, it.unit, it.width_mm, it.height_mm, it.spec, it.brand, it.note]
-    .map((v) => (v == null ? '' : String(v).trim().toLowerCase())).join('|')
-}
-
-/** Fold an incoming page into the request's existing items, collapsing FULL-row duplicates so a page
- *  processed twice adds nothing the second time. Pure — the DB read/write lives in tryBatchAppend. */
+/** Fold an incoming page into the request's existing items — KEEP EVERY ROW, including repeats.
+ *  A materials sheet lists a repeated line ON PURPOSE (the same fitting for two toilets, two runs of the
+ *  same pipe); collapsing "identical" rows drops real quantity, so the request no longer matches the paper.
+ *  We do NOT dedup here: the extracted count must equal the count on the doc. Idempotency against a page
+ *  being processed twice is owned UPSTREAM — the webhook's wamid gate (wa_inbound_dedup + the processing_job
+ *  unique key) makes the same message unrepeatable, so a duplicate row here is always a genuine second line,
+ *  never a re-read of the same page. Pure — the DB read/write lives in tryBatchAppend. */
 export function foldItems(existing: ProcItem[], incoming: ProcItem[]): { merged: ProcItem[]; added: number } {
-  const merged: ProcItem[] = []
-  const seen = new Set<string>()
-  for (const it of [...existing, ...incoming]) {
-    const k = itemKey(it)
-    if (seen.has(k)) continue
-    seen.add(k)
-    merged.push(it)
-  }
-  return { merged, added: merged.length - existing.length }
+  return { merged: [...existing, ...incoming], added: incoming.length }
 }
 
-/** True when this photo was folded into an already-open request (page 2+ of a list). False → stage fresh. */
-async function tryBatchAppend(ctx: ProcCtx, newItems: ProcItem[], head: ProcHead): Promise<boolean> {
-  const { supabase, from, orgId, wamid, lang } = ctx
+/** Fold this photo into an already-open request (page 2+ of one list) and return that request's id. Returns
+ *  null when there's nothing to fold into (no recent draft, or a page that names a DIFFERENT vendor/site — a
+ *  separate request) → the caller stages a fresh one. Sends NOTHING: the batch finalizer confirms once the
+ *  whole burst has settled. */
+async function foldIntoOpenRequest(ctx: ProcCtx, newItems: ProcItem[], head: ProcHead): Promise<string | null> {
+  const { supabase, from, orgId, wamid } = ctx
   try {
     const since = new Date(Date.now() - PROC_BATCH_MS).toISOString()
     const { data: recent } = await supabase.from('purchase_requests')
@@ -199,9 +194,9 @@ async function tryBatchAppend(ctx: ProcCtx, newItems: ProcItem[], head: ProcHead
       .eq('org_id', orgId).eq('sender_number', from).eq('status', 'draft')
       .gte('created_at', since)
       .order('created_at', { ascending: false }).limit(1).maybeSingle()
-    if (!recent || !recent.id) return false
-    if (recent.wa_message_id && recent.wa_message_id === wamid) return false   // this very message's own PR — not a new page
-    if (!recent.image_url) return false   // only fold a photo INTO another photo's request — never into a text order
+    if (!recent || !recent.id) return null
+    if (recent.wa_message_id && recent.wa_message_id === wamid) return null   // this very message's own PR — not a new page
+    if (!recent.image_url) return null   // only fold a photo INTO another photo's request — never into a text order
 
     // COMPATIBILITY — a page that names a DIFFERENT vendor or site is a separate request, never a merge.
     const projects = await loadProjects(ctx)
@@ -212,17 +207,17 @@ async function tryBatchAppend(ctx: ProcCtx, newItems: ProcItem[], head: ProcHead
       || rawConflict(head.vendor_raw, recent.vendor_raw)
     const siteConflict = (newSite?.band === 'auto' && recent.site_id && newSite.id !== recent.site_id)
       || rawConflict(head.site_raw, recent.site_raw)
-    if (vendorConflict || siteConflict) return false
+    if (vendorConflict || siteConflict) return null
 
-    // MERGE — existing items + this page, exact-duplicate rows collapsed → atomic replace.
+    // MERGE — existing items + EVERY row of this page (repeats kept: the extracted count must match the
+    //         doc). The set is replaced atomically, so we re-send the union, not just the delta.
     const { data: existing } = await supabase.from('purchase_request_items')
       .select('item_name, quantity, unit, width_mm, height_mm, spec, brand, note')
       .eq('purchase_request_id', recent.id).order('item_index')
-    const { merged, added } = foldItems((existing ?? []) as ProcItem[], newItems)
-    if (added <= 0) return true   // nothing new (a re-processed identical page) — already folded in, stay quiet-idempotent
+    const { merged } = foldItems((existing ?? []) as ProcItem[], newItems)
 
     const { data: res, error } = await supabase.rpc('set_purchase_request_items', { p_pr_id: recent.id, p_items: merged })
-    if (error || !(res as { success?: boolean } | null)?.success) return false   // couldn't merge → let it stage fresh
+    if (error || !(res as { success?: boolean } | null)?.success) return null   // couldn't merge → let it stage fresh
 
     // Fill a header gap this page supplies (page 1 lacked the vendor/site/title; a later page names it).
     const patch: Record<string, unknown> = {}
@@ -231,11 +226,10 @@ async function tryBatchAppend(ctx: ProcCtx, newItems: ProcItem[], head: ProcHead
     if (!recent.title && head.title) patch.title = head.title
     if (Object.keys(patch).length) await supabase.from('purchase_requests').update(patch).eq('id', recent.id)
 
-    await send(supabase, from, mProcBatchAppended(lang, { added, total: merged.length, title: (recent.title ?? head.title) ?? null, prId: recent.id }), { org_id: orgId, wamid })
-    return true
+    return recent.id as string
   } catch (e) {
-    console.error('[proc] batch append failed (staging fresh):', (e as Error)?.message ?? e)
-    return false
+    console.error('[proc] batch fold failed (staging fresh):', (e as Error)?.message ?? e)
+    return null
   }
 }
 
@@ -278,15 +272,30 @@ export async function runProcurementMessage(
     //    runs the 1st has already staged its PR. If a fresh draft PR from THIS sender is still open
     //    within the batch window and this page doesn't CONTRADICT it (no different vendor/site), fold
     //    this page's items into that request instead of splitting one list across two PRs. A page
-    //    that names a different vendor or site is its own request → falls through to a fresh stage. ──
-    if (read.items.length && await tryBatchAppend(ctx, items, read)) return
-
-    const req: ProcRequest = {
-      vendor_raw: read.vendor_raw, sourcing_intent: null,
-      site_raw: read.site_raw, items, title: read.title,
-    }
+    //    that names a different vendor or site is its own request → falls through to a fresh stage.
+    //
+    //    We STAGE/FOLD SILENTLY and tag this photo's row with the request it landed in. The confirmation
+    //    is NOT sent here — the batch finalizer (index.ts, after the burst settles) sends ONE card per
+    //    request, so a 3-page list reads as one "Materials requested", not three fragments. ──
     const imageUrl = await procImageUrl(ctx)
-    await handleSingle(ctx, req, imageUrl)
+    const batched = ctx.photoBatched === true   // false when the photo-batch buffer is down (e.g. migration not run yet)
+    let prId = read.items.length ? await foldIntoOpenRequest(ctx, items, read) : null
+    const folded = !!prId
+    if (!prId) {
+      const req: ProcRequest = {
+        vendor_raw: read.vendor_raw, sourcing_intent: null,
+        site_raw: read.site_raw, items, title: read.title,
+      }
+      // Silent when the burst will be finalized elsewhere; inline card otherwise so a request is never withheld.
+      prId = await handleSingle(ctx, req, imageUrl, { silent: batched })
+    }
+    if (!prId) return
+    if (batched) {
+      await setPhotoPr(ctx.supabase, ctx.wamid, prId)   // the finalizer (index.ts) confirms once the burst settles
+    } else if (folded) {
+      // Buffer down AND this page folded into an open request (handleSingle didn't run) → confirm inline now.
+      await sendProcConfirmationById(ctx.supabase, { orgId: ctx.orgId, from: ctx.from, wamid: ctx.wamid, lang: ctx.lang, prId })
+    }
     return
   }
 
@@ -318,15 +327,21 @@ export async function runProcurementMessage(
 
 /** Single-request: match vendor + site (accept what's given), stage a DRAFT, confirm with the
  *  transaction-style card + a link. No sourcing prompt, no "ready for approval" — it stays a draft
- *  the office reviews and turns into a PO or a quote request from the card. */
-async function handleSingle(ctx: ProcCtx, req: ProcRequest | null, imageUrl: string | null = null): Promise<void> {
+ *  the office reviews and turns into a PO or a quote request from the card.
+ *
+ *  Returns the staged PR id (null if nothing was staged). `silent` stages WITHOUT the card or the enrich
+ *  window — the photo-batch path uses it so the finalizer confirms once for the whole burst (and arms the
+ *  enrich window then, off the final merged request). */
+async function handleSingle(
+  ctx: ProcCtx, req: ProcRequest | null, imageUrl: string | null = null, opts: { silent?: boolean } = {},
+): Promise<string | null> {
   const { supabase, from, orgId, wamid, lang } = ctx
   const meta = { org_id: orgId, wamid }
-  if (!req) return                                                   // nothing parseable; leave it
+  if (!req) return null                                              // nothing parseable; leave it
   // A request with NO items is context, not an order (a caption like "glass panel materials", or a
   // "Chakradhar site" line). Never stage a 0-item ghost PR — the photo path carries its own items and
   // reunites such text as context. This kills the duplicate "0 items read" request in the inbox.
-  if (!req.items || req.items.length === 0) return
+  if (!req.items || req.items.length === 0) return null
 
   const vendors = await loadVendors(ctx)
   const projects = await loadProjects(ctx)
@@ -339,7 +354,9 @@ async function handleSingle(ctx: ProcCtx, req: ProcRequest | null, imageUrl: str
   const siteDisplay = siteId ? siteM.name : req.site_raw
 
   const prId = await stageRequest(ctx, req, 0, vendorId, siteId, null, imageUrl)
-  if (!prId) return
+  if (!prId) return null
+
+  if (opts.silent) return prId   // batch path: the finalizer sends the card + arms enrich off the merged PR
 
   await send(supabase, from, mProcComplete(lang, {
     title: req.title ?? titleWithCount(req),
@@ -357,6 +374,72 @@ async function handleSingle(ctx: ProcCtx, req: ProcRequest | null, imageUrl: str
   const hasVendor = !!(vendorId || req.vendor_raw)
   const hasSite = !!(siteId || req.site_raw)
   if (!hasVendor || !hasSite) await armEnrichWindow(ctx, prId)
+  return prId
+}
+
+/** Send the ONE consolidated confirmation for a request a photo burst staged, reading the FULL merged
+ *  request (all pages' items, the title/vendor/site as they settled). Called by the batch finalizer in
+ *  index.ts once the burst is quiet — so a multi-page list is one "Materials requested", not three. Also
+ *  arms the enrich window off the final gaps, so a trailing "Chakradhar site, pattabhi traders" still lands. */
+export async function sendProcConfirmationById(
+  supabase: ProcCtx['supabase'],
+  p: { orgId: string; from: string; wamid: string; lang: Lang; prId: string },
+): Promise<void> {
+  const { orgId, from, wamid, lang, prId } = p
+  try {
+    const { data: pr } = await supabase.from('purchase_requests')
+      .select('id, title, vendor_id, vendor_raw, site_id, site_raw')
+      .eq('id', prId).maybeSingle()
+    if (!pr) return
+    const { data: itemRows } = await supabase.from('purchase_request_items')
+      .select('item_name').eq('purchase_request_id', prId).order('item_index')
+    const items = (itemRows ?? []) as { item_name: string }[]
+    if (items.length === 0) return   // a request with no items has no confirmation to send
+
+    // Resolve display names off the IDs the pages matched (raw text when unmatched — a gap the card names).
+    let vendorName: string | null = pr.vendor_raw ?? null
+    if (pr.vendor_id) {
+      const { data: v } = await supabase.from('stakeholders').select('name').eq('stakeholder_id', pr.vendor_id).maybeSingle()
+      vendorName = (v?.name as string) ?? pr.vendor_raw ?? null
+    }
+    let siteName: string | null = pr.site_raw ?? null
+    if (pr.site_id) {
+      const { data: s } = await supabase.from('projects').select('name').eq('project_id', pr.site_id).maybeSingle()
+      siteName = (s?.name as string) ?? pr.site_raw ?? null
+    }
+
+    const names = items.map((i) => i.item_name)
+    const n = names.length
+    const pItems = items as unknown as ProcItem[]
+    // Mirror titleWithCount: a given title stands alone; else 1–2 items read as their names, 3+ as "header · N items".
+    const title = (pr.title as string)
+      ?? (n <= 2 ? names.join(', ') : `${titleFor(pItems) ?? `${n} items`} · ${n} items`)
+    await send(supabase, from, mProcComplete(lang, {
+      title,
+      site: siteName,
+      vendor: vendorName,
+      vendorMatched: !!pr.vendor_id,
+      siteMissing: !pr.site_id && !pr.site_raw,
+      itemsLine: items.map((i) => i.item_name).slice(0, 6).join(', '),
+      prId,
+    }), { org_id: orgId, wamid })
+
+    // Under-specified? Leave the same short lingering window handleSingle would, off the FINAL request — so a
+    // "Chakradhar site, pattabhi traders" typed after the photos is still claimed and fills the gaps.
+    const hasVendor = !!(pr.vendor_id || pr.vendor_raw)
+    const hasSite = !!(pr.site_id || pr.site_raw)
+    if (!hasVendor || !hasSite) {
+      await openConversation(supabase, {
+        orgId, sender: from, owningAgent: 'PROCUREMENT',
+        pendingQuestion: 'PROC_ENRICH', stagedEntryId: prId, lastMessageId: wamid,
+      })
+      await closeConversation(supabase, {
+        orgId, sender: from, lastActionSummary: 'PR staged — open for site/vendor', stagedEntryId: prId, lastMessageId: wamid,
+      })
+    }
+  } catch (e) {
+    console.error('[proc] batch confirmation failed:', (e as Error)?.message ?? e)
+  }
 }
 
 /** Leave a closed (lingering) PROCUREMENT conversation carrying the staged PR id, so the dispatcher hands a

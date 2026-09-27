@@ -9,6 +9,7 @@
 const WA_ACCESS_TOKEN  = Deno.env.get('WA_ACCESS_TOKEN')!
 const ANTHROPIC_KEY    = Deno.env.get('ANTHROPIC_API_KEY')
 import { transcribeAudio, canTranscribe } from '../_shared/transcribe.ts'
+import { openAIMediaPart, anthropicMediaPart, anthropicMediaHeaders, isPdf, isVisionReadable } from '../_shared/visionDoc.ts'
 
 const OPENAI_KEY       = Deno.env.get('OPENAI_API_KEY')
 
@@ -110,6 +111,45 @@ export async function normalize(
       console.error('[normalize] image handling failed:', e)
       return { ...base, text: caption || '', source_type: 'image',
                attachments: [{ media_id: mediaId, mime: 'image/jpeg' }] }
+    }
+  }
+
+  // ── document (a PDF, or an image sent as a file) -> read like a photo ────────
+  // WhatsApp delivers a PDF as `type: 'document'`. A PDF (or an image sent as a file) is a VISUAL document,
+  // so it rides the SAME `image` envelope the whole chain already threads — the extractors read PDFs natively
+  // (openAIMediaPart). A non-readable file (docx/xlsx/zip) can't be read → 'unsupported', a graceful reply.
+  if (type === 'document') {
+    const mediaId  = message.document?.id as string
+    const declared = (message.document?.mime_type ?? 'application/pdf') as string
+    const caption  = (message.document?.caption ?? '') as string
+    const filename = (message.document?.filename ?? '') as string
+    if (!isVisionReadable(declared)) {
+      return { ...base, text: [caption, filename].filter(Boolean).join(' ').trim(), source_type: 'unsupported',
+               attachments: mediaId ? [{ media_id: mediaId, mime: declared }] : [] }
+    }
+    try {
+      const { bytes, mime } = await downloadMedia(mediaId)
+      const realMime = isVisionReadable(mime) ? mime : declared   // Meta sometimes reports octet-stream for a PDF
+      const b64 = toBase64(bytes)
+      // Persisting the file is provenance only — a storage/MIME rejection must NEVER drop the document, the
+      // same rule the voice path follows for the transcript. Extraction reads the in-memory bytes regardless.
+      let storage_path: string | undefined
+      try { storage_path = await storeMedia(supabase, bytes, realMime, ctx.from) }
+      catch (e) { console.warn('[normalize] document store skipped (extraction kept):', (e as Error)?.message ?? e) }
+      const hint = [caption, filename].filter(Boolean).join(' — ')
+      const { line: description, kind } = await describeImage(b64, realMime, hint)
+      const text = [caption, description].filter(Boolean).join(' -- ').trim()
+      return {
+        ...base,
+        text: text || 'Document received',
+        source_type: 'image',
+        attachments: [{ media_id: mediaId, mime: realMime, ...(storage_path ? { storage_path } : {}) }],
+        image: { base64: b64, mime: realMime, caption: caption || filename, description, kind },
+      }
+    } catch (e) {
+      console.error('[normalize] document handling failed:', e)
+      return { ...base, text: [caption, filename].filter(Boolean).join(' ').trim(), source_type: 'unsupported',
+               attachments: mediaId ? [{ media_id: mediaId, mime: declared }] : [] }
     }
   }
 
@@ -233,7 +273,12 @@ async function describeImage(base64: string, mime: string, caption: string): Pro
     '  PAYMENT_PROOF — a bill / invoice / receipt / UPI-bank screenshot showing an amount and payee/vendor, or a "paid" stamp — evidence about money.\n' +
     '  SITE_UPDATE — a photo of actual site work or conditions (progress, a defect/snag, people working). NOT a document that lists items to buy.\n' +
     '  OTHER — anything else.\n' +
-    'line: ONE concise plain-text line — for PAYMENT_PROOF the amount + payee/vendor; for PURCHASE_REQUEST the key items; else a brief description. Do NOT decide or post a transaction.\n' +
+    'line: a RICH but compact plain-text description of what this image actually is and its key facts — enough that someone who cannot see it knows what it holds. Keep it to ONE line (no line breaks), factual, no opinions or decisions. Tailor it to the kind:\n' +
+    '  · PAYMENT_PROOF — the document type (tax invoice / bill / receipt / UPI or bank screenshot), the vendor/payee, the total amount, whether it reads paid or unpaid, and the invoice-no / UTR if visible. e.g. "Tax invoice from Sri Balaji Traders, total ₹73,750, 4 items, unpaid, inv #A-112".\n' +
+    '  · PURCHASE_REQUEST — that it is a materials indent/list, printed or handwritten, and its main items WITH quantities. e.g. "Handwritten materials indent — cement 50 bags, sand 2 units, TMT 16mm 10 nos, binding wire 20kg (5 items)".\n' +
+    '  · SITE_UPDATE — what the photo shows: the area/element (floor, slab, wall), the work state (in progress / done / a defect or blockage), and anything notable. e.g. "Second-floor slab shuttering in progress, reinforcement laid, no pour yet".\n' +
+    '  · OTHER — a plain factual description of what it is.\n' +
+    'Do NOT decide or post a transaction; only describe.\n' +
     (caption ? `User caption: "${caption}".` : '')
 
   const ctrl = new AbortController()
@@ -243,14 +288,16 @@ async function describeImage(base64: string, mime: string, caption: string): Pro
     // 401/429/400 returned '' with no trace (the caller then fell back to "Image received"). Anthropic
     // first; an Anthropic miss FALLS THROUGH to OpenAI (was an early return, so it never did).
     let out = ''
-    if (ANTHROPIC_KEY) {
+    // A PDF is classified reliably by gpt-4o (file part), so it SKIPS the haiku image path and goes straight
+    // to OpenAI below. An image keeps the Anthropic-haiku-first order, unchanged.
+    if (ANTHROPIC_KEY && !isPdf(mime)) {
       const res = await fetch('https://api.anthropic.com/v1/messages', {
         signal: ctrl.signal, method: 'POST',
-        headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+        headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json', ...anthropicMediaHeaders(mime) },
         body: JSON.stringify({
-          model: 'claude-haiku-4-5-20251001', max_tokens: 400,
+          model: 'claude-haiku-4-5-20251001', max_tokens: 500,
           messages: [{ role: 'user', content: [
-            { type: 'image', source: { type: 'base64', media_type: mime, data: base64 } },
+            anthropicMediaPart(base64, mime),
             { type: 'text', text: prompt },
           ] }],
         }),
@@ -263,9 +310,9 @@ async function describeImage(base64: string, mime: string, caption: string): Pro
         signal: ctrl.signal, method: 'POST',
         headers: { Authorization: `Bearer ${OPENAI_KEY}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: 'gpt-4o-mini', max_tokens: 400,
+          model: isPdf(mime) ? 'gpt-4o' : 'gpt-4o-mini', max_tokens: 500,
           messages: [{ role: 'user', content: [
-            { type: 'image_url', image_url: { url: `data:${mime};base64,${base64}`, detail: 'high' } },
+            openAIMediaPart(base64, mime),
             { type: 'text', text: prompt },
           ] }],
         }),

@@ -74,3 +74,70 @@ export async function coalesceBurst(
   if (!combined) return { proceed: false }                  // a racing sibling drained it first
   return { proceed: true, text: combined }
 }
+
+// ── PHOTO batch (debounce a burst of images the same way text bubbles are debounced) ──────────────────────
+// WhatsApp sends several photos taken together as separate POSTs. Unlike text, we CANNOT combine their
+// content (each image needs its own vision read), so we don't drain — every photo stages its own items. What
+// we coalesce is the NOISE: the "Got your photo…" ack (once, not per photo) and the confirmation card (one per
+// request, sent by the LAST photo of the burst). A photo's row is tagged with the request it landed in (pr_id)
+// so a two-vendor batch still gets a card each.
+
+/** How long the last photo waits for a straggler before it decides the burst is done and speaks. */
+export const PHOTO_QUIET_MS  = Number(Deno.env.get('WA_PHOTO_QUIET_MS')  ?? '4000')
+/** Only photos within this window count as the same burst (matches the proc fold window). */
+export const PHOTO_WINDOW_MS = Number(Deno.env.get('WA_PHOTO_WINDOW_MS') ?? '90000')
+
+const photoSince = () => new Date(Date.now() - PHOTO_WINDOW_MS).toISOString()
+
+/** Record this photo; returns its burst sequence id (bigint identity), or null if the buffer is unavailable. */
+export async function recordPhoto(
+  supabase: any, p: { orgId: string; sender: string; wamid: string },
+): Promise<number | null> {
+  const { data, error } = await supabase.from('wa_photo_batch')
+    .insert({ org_id: p.orgId, sender: p.sender, wamid: p.wamid })
+    .select('id').single()
+  if (error) { console.error('[photo] record failed:', error.message); return null }
+  return (data?.id as number) ?? null
+}
+
+/** Tag a photo's row with the request its items landed in, so the finalizer confirms once per request. */
+export async function setPhotoPr(supabase: any, wamid: string, prId: string): Promise<void> {
+  const { error } = await supabase.from('wa_photo_batch').update({ pr_id: prId }).eq('wamid', wamid)
+  if (error) console.error('[photo] setPr failed (non-fatal):', error.message)
+}
+
+/** True when an EARLIER unconsumed photo from this sender exists in the window — i.e. THIS is not the first
+ *  photo of the burst, so it must NOT ack (the first one already did). */
+export async function hasEarlierPhoto(supabase: any, sender: string, seq: number): Promise<boolean> {
+  const { data, error } = await supabase.from('wa_photo_batch')
+    .select('id').eq('sender', sender).is('consumed_at', null).lt('id', seq).gte('created_at', photoSince()).limit(1)
+  if (error) { console.error('[photo] hasEarlier failed (treating as first):', error.message); return false }
+  return Array.isArray(data) && data.length > 0
+}
+
+/** True when a NEWER unconsumed photo from this sender exists — i.e. THIS photo is not the last of the burst,
+ *  so a later one will finalize and speak. */
+export async function hasNewerPhoto(supabase: any, sender: string, seq: number): Promise<boolean> {
+  const { data, error } = await supabase.from('wa_photo_batch')
+    .select('id').eq('sender', sender).is('consumed_at', null).gt('id', seq).gte('created_at', photoSince()).limit(1)
+  if (error) { console.error('[photo] hasNewer failed (treating as last):', error.message); return false }
+  return Array.isArray(data) && data.length > 0
+}
+
+/** Atomically CLAIM every unconsumed photo for this sender (set consumed_at) and return the DISTINCT request
+ *  ids they staged, in arrival order. Row locks settle two racing finalizers — each row is claimed once, so a
+ *  request is confirmed exactly once. Empty when a sibling already claimed them. */
+export async function finalizePhotoBatch(supabase: any, sender: string): Promise<string[]> {
+  const { data, error } = await supabase.from('wa_photo_batch')
+    .update({ consumed_at: new Date().toISOString() })
+    .eq('sender', sender).is('consumed_at', null).gte('created_at', photoSince())
+    .select('id, pr_id')
+  if (error) { console.error('[photo] finalize failed:', error.message); return [] }
+  const rows = (Array.isArray(data) ? data : []) as { id: number; pr_id: string | null }[]
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const r of [...rows].sort((a, b) => a.id - b.id)) {
+    if (r.pr_id && !seen.has(r.pr_id)) { seen.add(r.pr_id); out.push(r.pr_id) }
+  }
+  return out
+}

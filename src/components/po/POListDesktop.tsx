@@ -15,6 +15,7 @@ import { searchPayees } from '../../lib/payeeSearch';
 import { scoreProjectName } from '../../lib/projectSearch';
 import { createParty } from '../day-book/fileEntry';
 import SendToVendorModal from '../po-new-ui/SendToVendorModal';
+import RequestQuotesModal, { type RfqLineItem } from '../po-new-ui/RequestQuotesModal';
 import { usePOListData, usePendingPRs, useOpenRfqs, type PORow, type PendingPR, type RfqRow } from './POListSheet';
 import { PO_LIST_DESKTOP_CSS } from './poListDesktopCss';
 
@@ -356,6 +357,8 @@ function PeekEditor({ prId, orgId, projects, vendors, canOrder, onClose, onPhoto
   prId: string; orgId: string; projects: Opt[]; vendors: Opt[]; canOrder: boolean;
   onClose: () => void; onPhoto: (url: string) => void; onSaved: () => void; onCreate: (asRfq: boolean) => Promise<void>; onDelete: () => void;
 }) {
+  const navigate = useNavigate();
+  const qc = useQueryClient();
   const pr = useQuery({
     queryKey: ['pox_pr', prId],
     queryFn: async () => (await supabase.from('purchase_requests')
@@ -377,6 +380,8 @@ function PeekEditor({ prId, orgId, projects, vendors, canOrder, onClose, onPhoto
   const [edit, setEdit] = useState(-1);            // which item row is open for editing
   const [brandAll, setBrandAll] = useState(false);
   const [noteOpen, setNoteOpen] = useState(-1);
+  const [quotesOpen, setQuotesOpen] = useState(false);         // the Request-quotes modal is open
+  const [sentRfqId, setSentRfqId] = useState<string | null>(null);   // set once quotes go out → land on the enquiry
 
   useEffect(() => {
     const d = pr.data; if (!d) return;
@@ -438,7 +443,7 @@ function PeekEditor({ prId, orgId, projects, vendors, canOrder, onClose, onPhoto
   }, [dirty, title, siteId, siteText, vendorId, vendorText, items]);
   useEffect(() => () => { if (flush.current.dirty) void flush.current.run(); }, []);
 
-  // Make PO / Request quotes: run it, then play a subtle ✓ success beat on the button before the card closes.
+  // Make PO: run it, then play a subtle ✓ success beat on the button before the card closes.
   const create = async (asRfq: boolean) => {
     setMsg(null); setMakingKind(asRfq ? 'rfq' : 'po');
     try {
@@ -449,6 +454,31 @@ function PeekEditor({ prId, orgId, projects, vendors, canOrder, onClose, onPhoto
       setTimeout(() => onClose(), 950);
     } catch (e) { setMakingKind(null); setMsg((e as Error).message || 'Could not create it'); }
   };
+
+  // Request quotes: open the real vendor-selection + send-RFQ modal (parity with the phone and the request
+  // page) — never a stub PO. Save any in-progress edits first so the enquiry carries the items as shown.
+  const openQuotes = async () => {
+    if (!clean.length) { setMsg('Add at least one item before requesting quotes'); return; }
+    try { if (dirty) { await persist(); setDirty(false); onSaved(); } } catch (e) { setMsg((e as Error).message || 'Could not save'); return; }
+    setMsg(null); setQuotesOpen(true);
+  };
+  // Quotes have gone out → move the request out of the review inbox, linked to its enquiry (the same write the
+  // phone and the request page do). Landing on the enquiry happens when the modal's "Done" closes it.
+  const markQuoted = async (rfqId: string) => {
+    setSentRfqId(rfqId);
+    await supabase.from('purchase_requests').update({ status: 'quoted', rfq_id: rfqId }).eq('id', prId);
+    qc.invalidateQueries({ queryKey: ['po_list_pending_prs'] });
+    qc.invalidateQueries({ queryKey: ['po_list_sheet'] });
+    onSaved();
+  };
+  // The request's items, in the shape the RFQ modal + send-rfq expect (size · spec · brand fold into the spec).
+  const rfqItems: RfqLineItem[] = clean.map((it, i) => ({
+    line: i + 1,
+    item_name: it.name.trim(),
+    unit: it.unit.trim() || undefined,
+    qty: it.qty.trim() ? (Number(it.qty.replace(/[^\d.]/g, '')) || undefined) : undefined,
+    spec: [it.w && it.h ? `${it.w} × ${it.h} mm` : '', it.spec, it.brand].filter(Boolean).join(' · ') || undefined,
+  }));
 
   const readyToOrder = !!siteId && !!vendorId;
   const missing = (siteId ? 0 : 1) + (vendorId ? 0 : 1);
@@ -527,10 +557,24 @@ function PeekEditor({ prId, orgId, projects, vendors, canOrder, onClose, onPhoto
       {msg && <p className="pmsg">{msg}</p>}
       <div className="pfoot">
         {canOrder ? <>
-          <button type="button" className={`btn${madeKind === 'rfq' ? ' ok' : ''}`} disabled={busy || !readyToOrder} title={readyToOrder ? undefined : 'Set the project and supplier first'} onClick={() => create(true)}>{madeKind === 'rfq' ? <><Tick />Quotes requested</> : makingKind === 'rfq' ? <><span className="spin" />Requesting…</> : 'Request quotes'}</button>
+          {/* Requesting quotes needs items, not a chosen vendor — the modal is where vendors are picked. */}
+          <button type="button" className="btn" disabled={busy || !clean.length} title={clean.length ? undefined : 'Add at least one item first'} onClick={openQuotes}>Request quotes</button>
           <button type="button" className={`btn pri${madeKind === 'po' ? ' ok' : ''}`} disabled={busy || !readyToOrder} title={readyToOrder ? undefined : 'Set the project and supplier first'} onClick={() => create(false)}>{madeKind === 'po' ? <><Tick />PO made</> : makingKind === 'po' ? <><span className="spin" />Creating…</> : 'Make PO'}</button>
         </> : <button type="button" className="btn" disabled title="A supervisor can review but not raise an order">Only a manager can order</button>}
       </div>
+
+      {/* The real vendor-selection + send-RFQ modal — desktop parity with the phone. On a clean send it links
+          the request to its enquiry; closing "Done" then lands on the compare page where replies arrive. */}
+      {quotesOpen && (
+        <RequestQuotesModal
+          orgId={orgId}
+          projectId={siteId || null}
+          deliveryLocation={siteText.trim() || null}
+          items={rfqItems}
+          onClose={() => { setQuotesOpen(false); if (sentRfqId) navigate(`/rfq/${sentRfqId}`); }}
+          onSent={(rfqId) => { void markQuoted(rfqId); }}
+        />
+      )}
     </>
   );
 }

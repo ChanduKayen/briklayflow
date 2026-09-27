@@ -1,10 +1,13 @@
 // send-rfq — request a quotation from vendors.
 //
-// Three modes:
-//   NEW    : { orgId, projectId, deliveryLocation, quoteBy, items, recipients } → create an RFQ +
-//            a recipient per vendor (each a token), WhatsApp the request_for_quotation template.
-//   APPEND : { rfqId, recipients } → add more vendors to an existing RFQ and send to them.
-//   RESEND : { rfqId, resendRecipientId } → re-send to one existing recipient (its token).
+// Modes:
+//   NEW       : { orgId, projectId, deliveryLocation, quoteBy, items, recipients } → create an RFQ +
+//               a recipient per vendor (each a token), WhatsApp the request_for_quotation template.
+//   APPEND    : { rfqId, recipients } → add more vendors to an existing RFQ and send to them.
+//   RESEND    : { rfqId, resendRecipientId } → re-send to one existing recipient (its token).
+//   NEGOTIATE : { rfqId, negotiateRecipientId, note } → ask ONE vendor who already quoted to REVISE.
+//               Stores the builder's note (shown on their quote page) + stamps revise_requested_at, and
+//               WhatsApps their same link. Keeps status='quoted' so their current rates stay comparable.
 //
 // Auth: caller must be an active management/principal member of the RFQ's org.
 //
@@ -47,6 +50,7 @@ serve(async (req) => {
     const body = await req.json() as {
       orgId?: string; projectId?: string; deliveryLocation?: string; quoteBy?: string;
       items?: RfqItem[]; recipients?: Recipient[]; rfqId?: string; resendRecipientId?: string;
+      negotiateRecipientId?: string; note?: string;
     };
 
     // Resolve the RFQ (existing for APPEND/RESEND, or create for NEW) → org, items, delivery.
@@ -64,10 +68,13 @@ serve(async (req) => {
     }
     if (!orgId) return json({ ok: false, error: 'orgId is required' }, 400);
 
+    // Finance can request quotes too — accountant/management/principal, matching add_manual_quote and the
+    // UI gates (the mobile request-quotes button and the PR detail page both allow accountant). Restricting
+    // to management/principal here 403'd accountants who tapped a button the app offered them.
     const { data: mem } = await admin.from('org_memberships').select('role')
       .eq('user_id', user.id).eq('org_id', orgId).eq('status', 'active')
-      .in('role', ['management', 'principal']).maybeSingle();
-    if (!mem) return json({ ok: false, error: 'Forbidden: only management or principal can request quotes' }, 403);
+      .in('role', ['accountant', 'management', 'principal']).maybeSingle();
+    if (!mem) return json({ ok: false, error: 'Forbidden: only accountant, management or principal can request quotes' }, 403);
 
     let builderName = 'Your builder';
     const { data: org } = await admin.from('organizations').select('name').eq('org_id', orgId).maybeSingle();
@@ -78,6 +85,28 @@ serve(async (req) => {
       vendor_name: name, builder_name: builderName, items_summary: summary, delivery_location: address,
       token_path: String(token),   // Meta base https://www.briklay.app/quote/{{1}} → {{1}} = token
     });
+
+    // ── NEGOTIATE: ask one vendor who already quoted to REVISE their price ─────
+    if (body.negotiateRecipientId) {
+      const { data: r } = await admin.from('rfq_recipients')
+        .select('token, vendor_name, vendor_phone, negotiation_round')
+        .eq('recipient_id', body.negotiateRecipientId).maybeSingle();
+      if (!r) return json({ ok: false, error: 'Recipient not found' }, 404);
+      let dest = String(r.vendor_phone ?? '').replace(/[^\d]/g, '').replace(/^0+/, '');
+      if (dest.length === 10) dest = '91' + dest;
+      if (dest.length < 11 || dest.length > 15) return json({ ok: false, error: 'That vendor has no valid number' }, 400);
+      const note = (body.note ?? '').trim();
+      // Record the ask FIRST (so the note is live on their quote page the moment the link lands), keeping
+      // status 'quoted' so their current rates stay in the comparison until they send fresh ones.
+      await admin.from('rfq_recipients').update({
+        negotiation_note: note || null,
+        revise_requested_at: new Date().toISOString(),
+        negotiation_round: (Number(r.negotiation_round) || 0) + 1,
+      }).eq('recipient_id', body.negotiateRecipientId);
+      try { await wa(dest, r.vendor_name ?? 'there', r.token); }
+      catch (e) { return json({ ok: false, error: (e as Error).message }, 500); }
+      return json({ ok: true, negotiated: r.vendor_name });
+    }
 
     // ── RESEND to one existing recipient ──────────────────────────────────────
     if (body.resendRecipientId) {

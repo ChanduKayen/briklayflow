@@ -101,6 +101,7 @@ import './split_reconcile.test';
 import './demo.test';
 import './proc_batch_fold.test';
 import './burst_coalesce.test';
+import './photo_batch.test';
 import { runAll } from './harness';
 
 await runAll();

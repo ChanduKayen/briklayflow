@@ -88,6 +88,10 @@ export type TxnCtx = {
   // (rough-entry-media) we link onto the entry as PROOF.
   image?: { base64: string; mime: string; caption: string; description?: string | null; kind?: ImageKind; storagePath?: string | null }
   audio?: { storagePath: string; mime: string }   // present for a VOICE note -> siteops records it as findable evidence (T7)
+  // True when this photo was accepted into the photo-batch buffer, so procurement stages SILENTLY and the
+  // batch finalizer (index.ts) sends ONE confirmation for the burst. False/absent (buffer down, e.g. the
+  // migration hasn't run yet) → the agent confirms inline so a request is never staged without a reply.
+  photoBatched?: boolean
 }
 
 const fmtNum = (n: number) => '₹' + n.toLocaleString('en-IN')

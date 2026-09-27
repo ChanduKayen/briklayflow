@@ -12,6 +12,7 @@ interface RfqData {
   ok: boolean; ref?: string; status?: string; builder_name?: string; vendor_name?: string;
   delivery_location?: string | null; quote_by?: string | null; items?: RfqItem[];
   already_quoted?: boolean; error?: string;
+  negotiation_note?: string | null; revise_requested?: boolean;
   extras?: { transport_included?: boolean | null; gst_included?: boolean | null; valid_days?: number | null; vendor_note?: string | null };
   existing?: { line: number; unit_rate: number | null; supplied: boolean; variant_note: string | null }[];
 }
@@ -455,6 +456,23 @@ export default function VendorQuote({ token }: { token: string }) {
                 <span>Prepared for <b>{data.vendor_name}</b></span>
               </div>
             </div>
+
+            {/* a live negotiation — the builder asked for a revised price. Show their message and frame the
+                reopen as an edit: their previous rates are already loaded into the rows below. */}
+            {data.revise_requested && (
+              <div style={{ margin: '0 0 14px', border: '1px solid #EBCBB6', background: 'linear-gradient(180deg,#FDF1E7,#FBF8F2)', borderRadius: 14, padding: '14px 16px', boxShadow: '0 1px 2px rgba(47,38,34,.04)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: '#B5472A', marginBottom: data.negotiation_note ? 8 : 4 }}>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
+                  Message from {builder}
+                </div>
+                {data.negotiation_note
+                  ? <p style={{ margin: '0 0 8px', fontSize: 15, lineHeight: 1.5, color: '#2F2622' }}>“{data.negotiation_note}”</p>
+                  : null}
+                <p style={{ margin: 0, fontSize: 13.5, lineHeight: 1.5, color: '#6E635B' }}>
+                  They’ve asked you to <b style={{ color: '#2F2622' }}>revise your price</b>. Your earlier rates are filled in below — update what you can and send again.
+                </p>
+              </div>
+            )}
 
             {/* progress */}
             <div className="prog">

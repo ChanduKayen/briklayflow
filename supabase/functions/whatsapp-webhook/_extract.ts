@@ -5,6 +5,7 @@
 import { callClaude, callOpenAI } from './_classify.ts'
 import { parseSpokenAmount } from './_amount.ts'
 import type { FinDocRead, FinDocLine } from './_financial_doc.ts'
+import { openAIMediaPart, anthropicMediaPart, anthropicMediaHeaders, isPdf } from '../_shared/visionDoc.ts'
 
 export interface ExtractedFields {
   payee_raw: string | null
@@ -296,10 +297,10 @@ Each entry then independently follows these field rules:
 // Chat Completions params; env-tunable.
 const EXTRACT_MODEL_OPENAI = Deno.env.get('WA_EXTRACT_MODEL') ?? 'gpt-4.1'
 
-// Vision model for payment images (UPI screenshots, bills, handwritten notes). Strong
-// vision is non-negotiable here -- amounts/UTRs/handwriting are the weakest link, so we
-// use gpt-4o / claude-sonnet-4, never -mini/haiku. Env-tunable.
-const EXTRACT_IMAGE_MODEL_OPENAI    = Deno.env.get('WA_EXTRACT_IMAGE_MODEL') ?? 'gpt-4o'
+// Vision model for financial documents (bills, invoices, quotations, handwritten notes). Strong vision is
+// non-negotiable here -- amounts/UTRs/handwriting are the weakest link -- so we use gpt-4.1 (the same model
+// the procurement reader below found reads this handwriting best), never gpt-4o-mini/haiku. Env-tunable.
+const EXTRACT_IMAGE_MODEL_OPENAI    = Deno.env.get('WA_EXTRACT_IMAGE_MODEL') ?? 'gpt-4.1'
 const EXTRACT_IMAGE_MODEL_ANTHROPIC = Deno.env.get('WA_EXTRACT_IMAGE_MODEL_ANTHROPIC') ?? 'claude-sonnet-4-20250514'
 
 // Procurement (materials-list) image reads are a HARDER vision task than a single payment: a dense,
@@ -662,11 +663,14 @@ export async function extractPaymentFromImage(
   })
 
   try {
+    // OpenAI first with gpt-4o — a payment proof is usually a typed screenshot, so gpt-4o (not the weak
+    // -mini, not the costlier gpt-4.1 the dense document readers use) fits the job; a PDF proof rides the
+    // same model via its file part. Anthropic (haiku) is only used if a key is configured.
+    if (OPENAI_KEY) {
+      return await extractImageOpenAI(base64, contentType, prompt, OPENAI_KEY, 'gpt-4o', isPdf(contentType) ? 800 : 400)
+    }
     if (ANTHROPIC_KEY) {
       return await extractImageAnthropic(base64, contentType, prompt, ANTHROPIC_KEY, 'claude-haiku-4-5-20251001', 400)
-    }
-    if (OPENAI_KEY) {
-      return await extractImageOpenAI(base64, contentType, prompt, OPENAI_KEY, 'gpt-4o-mini', 400)
     }
   } catch (e) {
     console.error('[extract] extractPaymentFromImage error:', e)
@@ -728,7 +732,8 @@ export async function extractProcurementFromImage(
     // STRONG vision, non-negotiable: a dense handwritten indent is exactly the read weak -mini/haiku fails
     // (zero items → the caller stages a one-line SUMMARY). Try the preferred provider first, then the other
     // as a FALLBACK — so a zero-item read is retried on the second model instead of collapsing to a summary.
-    const order = PROC_IMAGE_PREFER === 'anthropic' ? ['anthropic', 'openai'] : ['openai', 'anthropic']
+    // A PDF is read reliably by gpt-4o (file part) — force OpenAI first for it. Images keep the configured order.
+    const order = isPdf(contentType) ? ['openai', 'anthropic'] : (PROC_IMAGE_PREFER === 'anthropic' ? ['anthropic', 'openai'] : ['openai', 'anthropic'])
     let best: ProcImageRead = { vendor_raw: null, site_raw: null, title: null, items: [] }
     for (const prov of order) {
       let parsed: any = null
@@ -833,6 +838,7 @@ async function extractImageAnthropic(
         'x-api-key': apiKey,
         'anthropic-version': '2023-06-01',
         'content-type': 'application/json',
+        ...anthropicMediaHeaders(contentType),
       },
       body: JSON.stringify({
         model,
@@ -840,7 +846,7 @@ async function extractImageAnthropic(
         messages: [{
           role: 'user',
           content: [
-            { type: 'image', source: { type: 'base64', media_type: contentType, data: base64 } },
+            anthropicMediaPart(base64, contentType),
             { type: 'text', text: prompt },
           ],
         }],
@@ -883,7 +889,7 @@ async function extractImageOpenAI(
         messages: [{
           role: 'user',
           content: [
-            { type: 'image_url', image_url: { url: `data:${contentType};base64,${base64}`, detail: 'high' } },
+            openAIMediaPart(base64, contentType),
             { type: 'text', text: prompt },
           ],
         }],
@@ -918,6 +924,7 @@ async function extractListAnthropic(
         'x-api-key': apiKey,
         'anthropic-version': '2023-06-01',
         'content-type': 'application/json',
+        ...anthropicMediaHeaders(contentType),
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-20250514',
@@ -925,7 +932,7 @@ async function extractListAnthropic(
         messages: [{
           role: 'user',
           content: [
-            { type: 'image', source: { type: 'base64', media_type: contentType, data: base64 } },
+            anthropicMediaPart(base64, contentType),
             { type: 'text', text: prompt },
           ],
         }],
@@ -967,7 +974,7 @@ async function extractListOpenAI(
         messages: [{
           role: 'user',
           content: [
-            { type: 'image_url', image_url: { url: `data:${contentType};base64,${base64}`, detail: 'high' } },
+            openAIMediaPart(base64, contentType),
             { type: 'text', text: prompt },
           ],
         }],

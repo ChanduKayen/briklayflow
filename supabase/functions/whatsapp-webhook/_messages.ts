@@ -770,7 +770,7 @@ export function ackLine(lang: Lang, p: { payee: string | null; amount: number | 
 export function mUnsupported(lang: Lang): OutMessage {
   // Neutral + product-accurate: this handles payments, bills, materials requests and site updates — not
   // just payments. The old payment-only example ("Ramu 5000 cash") misread a procurement/site user.
-  return { kind: 'text', body: pick(lang, { en: "Sorry — I can't read that kind of message yet. Send me text, a photo (a bill or a materials list), or a voice note." }) }
+  return { kind: 'text', body: pick(lang, { en: "Sorry — I can't read that kind of file. Send me text, a photo or PDF (a bill or a materials list), or a voice note." }) }
 }
 
 /** Voice IS supported now -- this is a transcription miss, not "coming soon". */
