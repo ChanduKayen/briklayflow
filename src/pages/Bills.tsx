@@ -10,6 +10,8 @@ import { DocThumb } from '../components/DocThumb';
 import { ImageLightbox } from '../components/ImageLightbox';
 import { openDoc, resolveDocUrl } from '../lib/storage';
 import { useSnackbar } from '../components/Snackbar';
+import BillReceivePanel from '../components/BillReceivePanel';
+import ReceiveDeliveryPanel from '../components/ReceiveDeliveryPanel';
 import NewBillModal, { type BillDraft } from '../components/bills/NewBillModal';
 import { useCursorLamp } from '../components/nav/useCursorLamp';
 import BillsMobile from '../components/bills/BillsMobile';
@@ -885,6 +887,8 @@ function BillDetailView({ id }: { id: string }) {
   const [deleting, setDeleting] = useState(false);
   const [linkOpen, setLinkOpen] = useState(false);
   const [receiving, setReceiving] = useState(false);
+  const [billRcvOpen, setBillRcvOpen] = useState(false);
+  const [poRcv, setPoRcv] = useState<import('../components/ReceiveDeliveryPanel').ReceivePO | null>(null);
 
   // Back goes where you came FROM. Opening a bill from a PO and being returned to the bills register
   // loses the thread you were pulling — you were reading that order, not the register.
@@ -923,23 +927,35 @@ function BillDetailView({ id }: { id: string }) {
   // ones wait in the site's "needs clarification" panel (stock-triage decides).
   const rawId = id.replace(/^(bl|po|cb)~/, '');
   const canReceive = id.startsWith('bl~') && !!b.projectId;
-  const onReceive = async () => {
-    setReceiving(true);
-    try {
-      const { data, error } = await supabase.rpc('receive_bill_into_stock', { p_bill_id: rawId });
-      const r = data as { ok?: boolean; error?: string; already?: boolean; project_id?: string };
-      if (error || !r?.ok) throw new Error(r?.error || error?.message || 'Could not receive into stock');
-      const items = (b.lines ?? []).filter((l) => (Number(l.qty) || 0) > 0).map((l) => ({ item_name: l.name, unit: l.unit, qty: l.qty, rate: l.rate }));
-      if (!r.already && items.length) {
-        await supabase.functions.invoke('stock-triage', { body: { org_id: orgId, project_id: r.project_id ?? b.projectId, source: 'bill', source_ref: rawId, items } });
-      }
-      show(r.already ? 'Already received into stock' : 'Received into stock');
-      qc.invalidateQueries({ queryKey: ['bill', id] });
-      qc.invalidateQueries({ queryKey: ['bills'] });
-      qc.invalidateQueries({ queryKey: ['stock_queue_count'] });
-      qc.invalidateQueries({ queryKey: ['project_stock_material'] });
-    } catch (e) { show((e as Error)?.message || 'Could not receive into stock', { type: 'error' }); }
-    finally { setReceiving(false); }
+  // One object, two doors: a bill with a PO opens the PO receive panel (ordered vs received);
+  // a bill with no PO opens the bill receive panel (billed vs received). Both write a receipt.
+  const openReceive = async () => {
+    if (b.poId) {
+      setReceiving(true);
+      try {
+        const [poRes, liRes] = await Promise.all([
+          supabase.from('purchase_orders').select('project_id, stakeholder_id, stakeholders(name), projects(name)').eq('po_id', b.poId).single(),
+          supabase.from('po_line_items').select('id, item_name, unit, quantity_ordered, unit_rate').eq('po_id', b.poId).order('line_number'),
+        ]);
+        const po: any = poRes.data;
+        if (!po) throw new Error('Linked PO not found');
+        setPoRcv({
+          po_id: b.poId!, project_id: po.project_id, stakeholder_id: po.stakeholder_id,
+          vendor: (po.stakeholders as any)?.name || b.vendor, site: (po.projects as any)?.name ?? b.site,
+          lines: (liRes.data ?? []).map((li: any) => ({ po_line_item_id: String(li.id), item_name: li.item_name, unit: li.unit || 'Nos', quantity_ordered: Number(li.quantity_ordered) || 0, unit_rate: Number(li.unit_rate) || 0 })),
+        });
+      } catch (e) { show((e as Error)?.message || 'Could not open the PO', { type: 'error' }); }
+      finally { setReceiving(false); }
+    } else {
+      setBillRcvOpen(true);
+    }
+  };
+  const afterReceive = () => {
+    qc.invalidateQueries({ queryKey: ['bill', id] });
+    qc.invalidateQueries({ queryKey: ['bills'] });
+    qc.invalidateQueries({ queryKey: ['stock_queue_count'] });
+    qc.invalidateQueries({ queryKey: ['project_stock_material'] });
+    show('📦 Receipt recorded');
   };
 
   return (
@@ -963,8 +979,8 @@ function BillDetailView({ id }: { id: string }) {
               {b.status === 'settled' ? 'Settled' : b.status === 'part' ? `Part-paid — ${inr(remaining)} remaining` : `Unpaid — ${inr(b.amount)} due`}
             </div>
             {canReceive && (
-              <button className="btn-prim" style={{ marginTop: 10, fontSize: '.78rem', padding: '6px 14px' }} disabled={receiving || !!b.stockReceivedAt} onClick={onReceive}>
-                {b.stockReceivedAt ? 'Received into stock ✓' : receiving ? 'Receiving…' : 'Receive stock'}
+              <button className="btn-prim" style={{ marginTop: 10, fontSize: '.78rem', padding: '6px 14px' }} disabled={receiving || !!b.stockReceivedAt} onClick={openReceive}>
+                {b.stockReceivedAt ? 'Received ✓' : receiving ? 'Opening…' : b.poId ? 'Reached site?' : 'Reached site?'}
               </button>
             )}
             <button className="delbill" disabled={deleting} onClick={onDelete}>{deleting ? 'Deleting…' : 'Delete bill'}</button>
@@ -1060,6 +1076,20 @@ function BillDetailView({ id }: { id: string }) {
           onFail={(m) => show(m, { type: 'error' })}
         />
       )}
+      <BillReceivePanel
+        open={billRcvOpen}
+        onClose={() => setBillRcvOpen(false)}
+        orgId={orgId}
+        bill={{ id: rawId, bill_no: b.billNo, vendor: b.vendor, site: b.site, project_id: b.projectId, lines: (b.lines ?? []).map((l) => ({ name: l.name, unit: l.unit, qty: Number(l.qty) || 0, rate: l.rate })) }}
+        onReceived={afterReceive}
+      />
+      <ReceiveDeliveryPanel
+        open={!!poRcv}
+        onClose={() => setPoRcv(null)}
+        orgId={orgId}
+        po={poRcv}
+        onReceived={afterReceive}
+      />
     </div>
   );
 }
