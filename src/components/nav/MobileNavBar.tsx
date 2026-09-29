@@ -48,6 +48,7 @@ const I: Record<string, ReactNode> = {
   work: <><path d="M4 20.5h16" /><path d="M6 20.5V9l6-4.5L18 9v11.5" /><path d="M10 20.5v-6h4v6" /></>,
   problems: <><path d="M12 4 3.5 19h17L12 4Z" /><path d="M12 10v4.5M12 17.2h.01" /></>,
   team: <><circle cx="12" cy="8.5" r="3.2" /><path d="M5.5 19.5a6.5 6.5 0 0 1 13 0" /></>,
+  stock: <><path d="M3.5 8.2 12 4l8.5 4.2v7.6L12 20l-8.5-4.2V8.2Z" /><path d="M3.5 8.2 12 12.4l8.5-4.2M12 12.4V20" /></>,
   tally: <><path d="M4 12a8 8 0 0 1 13.7-5.7L20 8.5" /><path d="M20 4v4.5h-4.5" /><path d="M20 12a8 8 0 0 1-13.7 5.7L4 15.5" /><path d="M4 20v-4.5h4.5" /></>,
   settings: <><path d="M5 7h9M18 7h1M5 12h2M11 12h8M5 17h7M16 17h3" /><circle cx="16" cy="7" r="2" /><circle cx="9" cy="12" r="2" /><circle cx="14" cy="17" r="2" /></>,
   billing: <><rect x="3" y="6.5" width="18" height="11" rx="2.5" /><circle cx="12" cy="12" r="2.4" /><path d="M6.4 12h.01M17.6 12h.01" /></>,
@@ -84,6 +85,7 @@ const MORE: [string, Dest[]][] = [
     { key: 'contracts', label: 'Contracts', to: '/work-orders', icon: I.contracts, at: ['/work-orders'], show: all, count: 'contracts' },
   ]],
   ['Site', [
+    { key: 'stock', label: 'Stock', to: '/inventory', icon: I.stock, at: ['/inventory'], show: all },
     { key: 'attendance', label: 'Attendance', to: '/attendance', icon: I.attendance, at: ['/attendance'], show: all },
     { key: 'work', label: 'Work plan', to: '/desk/all/plan', icon: I.work, at: ['/desk', '/site-desk', '/tasks'], show: all },
     { key: 'problems', label: 'Problems', to: '/desk/all/problems', icon: I.problems, at: [], show: all },
@@ -91,12 +93,14 @@ const MORE: [string, Dest[]][] = [
   ['People', [
     { key: 'parties', label: 'Parties', to: '/stakeholders', icon: I.parties, at: ['/stakeholders'], show: notSupervisor },
     { key: 'clients', label: 'Clients', to: '/stakeholders?tab=client', icon: I.clients, at: [], show: notSupervisor },
-    { key: 'team', label: 'Team', to: '/team', icon: I.team, at: ['/team'], show: admin },
   ]],
 ];
 
 /** The account, at the foot of the panel — not daily work, so not a card in the grid. */
 const FOOT: Dest[] = [
+  // Team moved here from People. Who is on the firm is something you set up once and revisit rarely
+  // — it is account housekeeping, not a place you work, so it sits with the account.
+  { key: 'team', label: 'Team', to: '/team', icon: I.team, at: ['/team'], show: admin },
   { key: 'settings', label: 'Settings', to: '/profile', icon: I.settings, at: ['/profile', '/settings'], show: all },
 ];
 

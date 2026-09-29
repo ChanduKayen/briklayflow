@@ -49,7 +49,7 @@ const ProjectLedger = lazy(() => import('./pages/ProjectLedger'));
 const ProjectHome = lazy(() => import('./pages/ProjectDesk').then((m) => ({ default: m.ProjectHome })));
 const ProjectWorkOrders = lazy(() => import('./pages/ProjectWorkOrders'));
 const ProjectPurchaseOrders = lazy(() => import('./pages/ProjectPurchaseOrders'));
-const ProjectInventory = lazy(() => import('./pages/ProjectInventory'));
+const Inventory = lazy(() => import('./pages/Inventory'));
 const ProjectBOQs = lazy(() => import('./pages/ProjectBOQs'));
 const ProjectInward = lazy(() => import('./pages/ProjectInward'));
 const InwardRegister = lazy(() => import('./pages/InwardRegister'));
@@ -607,7 +607,7 @@ function App() {
           <Route path="/projects/:projectId/issues" element={<ProjectIssues session={session} />} />
           <Route path="/projects/:projectId/work-orders" element={<ProjectWorkOrders session={session} />} />
           <Route path="/projects/:projectId/purchase-orders" element={<ProjectPurchaseOrders session={session} />} />
-          <Route path="/projects/:projectId/inventory" element={<ProjectInventory session={session} />} />
+          <Route path="/projects/:projectId/inventory" element={<Inventory session={session} />} />
           <Route path="/projects/:projectId/boqs" element={<ProjectBOQs session={session} />} />
           <Route path="/projects/:projectId/inward" element={<ProjectInward session={session} />} />
 
@@ -632,6 +632,8 @@ function App() {
           <Route path="/work-orders" element={<WorkOrders session={session} />} />
           <Route path="/work-orders/new" element={<NewWorkOrder session={session} />} />
           <Route path="/work-orders/:woId" element={<WorkOrderDetail session={session} />} />
+          {/* One stock page. Without a :projectId it is every site, with the Site chip to narrow it. */}
+          <Route path="/inventory" element={<Inventory session={session} />} />
           <Route path="/purchase-orders" element={<PurchaseOrders session={session} />} />
           {/* Purchase requests now live inside the PO draft queue. */}
           <Route path="/purchase-requests" element={<Navigate to="/purchase-orders?status=draft" replace />} />

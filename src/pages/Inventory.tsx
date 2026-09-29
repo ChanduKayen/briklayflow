@@ -2,6 +2,20 @@
 // (arrived → used → left), then the action (say "used 10" on the row). Ledger drawer per
 // material; hover-select → merge / edit / delete; low-stock alerts. Design ported from the
 // reference (scoped .stk2), wired to v_stock_material + stock_ledger + the identity RPCs.
+//
+// ONE STOCK PAGE, FILTERED BY SITE — the same move the ledger made when ProjectTransactions was
+// deleted. Stock used to exist only under a project, so a question as ordinary as "where is all my
+// cement?" meant opening every site in turn and adding up by hand. It is the same page either way:
+//
+//   /inventory                       every site, each row carrying the one it sits on, Site chip to narrow
+//   /projects/:id/inventory          the same page with the site fixed — the Site chip simply disappears,
+//                                    because you are already inside the site and offering to filter by a
+//                                    different one is offering to leave without saying so.
+//
+// Stock is kept PER SITE — 120 bags at one site and 40 at another are two different piles, and the
+// view keys on (site, material) for that reason. So a row is a material AT a site, exactly as a
+// transaction is money ON a site, and `rowKey` (site + material) is what the page identifies a row
+// by. Nothing is folded across sites: a total that mixes two yards is a number nobody can act on.
 import { useEffect, useMemo, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { useParams, useNavigate } from 'react-router-dom'
@@ -10,9 +24,13 @@ import { supabase } from '../lib/supabase'
 import { useOrgId } from '../lib/auth/AuthProvider'
 import { useSnackbar } from '../components/Snackbar'
 import BillResolvePanel from '../components/BillResolvePanel'
+import StockMobile from '../components/stock/StockMobile'
+import { useIsMobile } from '../lib/useIsMobile'
 
 interface Mat {
   item_key: string; inventory_id: string | null; item_name: string; unit: string | null
+  /** the site this pile is on, and (site + material) — what a row IS on this page */
+  project_id: string; site: string; rowKey: string
   on_hand: number; total_out: number; used_since: number; avg_rate: number | null
   last_delivery_at: string | null; last_delivery_qty: number | null; last_movement_at: string | null
   category: string | null; alert_qty: number | null; aliases: string[] | null; stock_value: number
@@ -73,6 +91,20 @@ const CSS = `
 .stk2 .chip:hover{border-color:var(--ink-3)}
 .stk2 .chip.on{background:var(--clay-wash);border-color:var(--clay-wash);color:var(--clay)}
 .stk2 .chip em{font-style:normal;font-family:var(--mono);font-size:12.5px;color:var(--ink-3)}.stk2 .chip.on em{color:var(--clay)}
+/* The Site chip leads the filter row, and wears the page's own chip shape — it is the one filter
+   that changes what a row MEANS, so it sits first and, unlike the categories, carries a menu. */
+.stk2 .sitepick{position:relative}
+.stk2 .sitepick .chip svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;margin-right:-4px;opacity:.6}
+.stk2 .sback{position:fixed;inset:0;z-index:18}
+.stk2 .smenu{position:absolute;top:calc(100% + 8px);left:0;z-index:19;min-width:240px;max-height:340px;overflow-y:auto;
+  background:var(--paper);border:1px solid var(--line-2);border-radius:16px;padding:6px;box-shadow:0 22px 48px -24px rgba(43,33,26,.5)}
+.stk2 .smenu button{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;height:38px;padding:0 12px;border:0;border-radius:10px;background:none;font-size:14px;color:var(--ink);text-align:left}
+.stk2 .smenu button:hover{background:var(--wash)}
+.stk2 .smenu button.on{background:var(--clay-wash);color:var(--clay);font-weight:600}
+.stk2 .smenu em{font-style:normal;font-family:var(--mono);font-size:12px;color:var(--ink-3)}
+.stk2 .smenu button.on em{color:var(--clay)}
+/* the site a row's pile is standing on, first thing on its second line */
+.stk2 .nm span b.at{color:var(--ink-2);font-weight:600}
 .stk2 .search{flex:1;min-width:200px;height:50px;border:1px solid var(--line-2);background:var(--paper);border-radius:25px;display:flex;align-items:center;gap:12px;padding:0 20px;color:var(--ink-3);font-size:15px;transition:border-color .18s,box-shadow .18s}
 .stk2 .search:focus-within{border-color:var(--ink-2);box-shadow:0 0 0 4px rgba(43,33,26,.05)}
 .stk2 .search svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round}
@@ -255,8 +287,8 @@ const CSS = `
 .stk2 .nmodal h2{margin:0;font-family:var(--serif);font-weight:600;font-size:24px}
 .stk2 .nmodal .lede{color:var(--ink-3);font-size:13.5px;margin:6px 0 18px}
 .stk2 .nmodal label{display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--ink-3);margin-bottom:14px;letter-spacing:.02em}
-.stk2 .nmodal input{border:1px solid var(--line-2);border-radius:10px;padding:10px 12px;font:inherit;font-size:15px;background:var(--paper);color:var(--ink)}
-.stk2 .nmodal input:focus{outline:none;border-color:var(--clay)}
+.stk2 .nmodal input,.stk2 .nmodal select{border:1px solid var(--line-2);border-radius:10px;padding:10px 12px;font:inherit;font-size:15px;background:var(--paper);color:var(--ink)}
+.stk2 .nmodal input:focus,.stk2 .nmodal select:focus{outline:none;border-color:var(--clay)}
 .stk2 .nmodal .r3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
 .stk2 .nmodal .r2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .stk2 .nmodal .nacts{display:flex;justify-content:flex-end;gap:10px;margin-top:6px}
@@ -278,40 +310,79 @@ const I = {
   trash: <svg viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" /></svg>,
 }
 
-export default function ProjectInventory({ session: _session }: { session: Session }) {
+export default function Inventory({ session: _session }: { session: Session }) {
+  // No :projectId in the path means every site. The route is the only thing that decides it, so the
+  // two doors cannot drift: /inventory and /projects/:id/inventory are this one component.
   const { projectId } = useParams<{ projectId: string }>()
+  const locked = !!projectId
   const navigate = useNavigate()
   const orgId = useOrgId()
   const qc = useQueryClient()
   const { show } = useSnackbar()
+  const isPhone = useIsMobile()
 
   const { data: project } = useQuery({
     queryKey: ['project', projectId],
     queryFn: async () => (await supabase.from('projects').select('name').eq('project_id', projectId!).single()).data,
-    enabled: !!projectId,
+    enabled: locked,
   })
 
-  const { data: mats = [], isLoading } = useQuery({
-    queryKey: ['project_stock_material', projectId],
-    enabled: !!projectId,
+  // The org's sites, so a row can say where its pile is standing and the Site chip has a list.
+  const { data: sites = [] } = useQuery({
+    queryKey: ['stock_sites', orgId],
+    enabled: !!orgId && !locked,
+    queryFn: async () => ((await supabase.from('projects').select('project_id, name').order('name')).data ?? []) as { project_id: string; name: string }[],
+  })
+  const siteName = useMemo(() => {
+    const m: Record<string, string> = {}
+    sites.forEach((p) => { m[p.project_id] = p.name })
+    if (locked && project?.name) m[projectId!] = project.name
+    return m
+  }, [sites, locked, project?.name, projectId])
+
+  const { data: rawMats = [], isLoading } = useQuery({
+    queryKey: ['stock_material', orgId, projectId ?? 'all'],
+    enabled: locked ? !!projectId : !!orgId,
     queryFn: async () => {
-      const { data, error } = await supabase.from('v_stock_material')
-        .select('item_key, inventory_id, item_name, unit, on_hand, total_out, used_since, avg_rate, last_delivery_at, last_delivery_qty, last_movement_at, category, alert_qty, aliases, stock_value')
-        .eq('project_id', projectId!).order('item_name')
+      let q = supabase.from('v_stock_material')
+        .select('project_id, item_key, inventory_id, item_name, unit, on_hand, total_out, used_since, avg_rate, last_delivery_at, last_delivery_qty, last_movement_at, category, alert_qty, aliases, stock_value')
+      q = locked ? q.eq('project_id', projectId!) : q.eq('org_id', orgId)
+      const { data, error } = await q.order('item_name')
       if (error) throw error
-      return (data ?? []) as Mat[]
+      return (data ?? []) as Omit<Mat, 'site' | 'rowKey'>[]
     },
   })
+  // (site + material) is the identity everything on this page hangs off — selection, rename, the
+  // open drawer, the row being edited. item_key alone repeats across sites.
+  const allMats: Mat[] = useMemo(() => rawMats.map((m) => ({
+    ...m, site: siteName[m.project_id] ?? '', rowKey: m.project_id + '|' + m.item_key,
+  })), [rawMats, siteName])
 
+  // The Site chip. Single-pick, like every other chip in this row: one site, or all of them.
+  const [site, setSite] = useState<string>('')          // '' = every site
+  const [siteMenu, setSiteMenu] = useState(false)
+  const mats = useMemo(() => (site ? allMats.filter((m) => m.project_id === site) : allMats), [allMats, site])
+  const siteList = useMemo(() => {
+    const n: Record<string, number> = {}
+    allMats.forEach((m) => { n[m.project_id] = (n[m.project_id] || 0) + 1 })
+    return sites.filter((p) => n[p.project_id]).map((p) => ({ ...p, n: n[p.project_id] }))
+  }, [allMats, sites])
+
+  // The unresolved-arrivals queue is a per-site job (the panel resolves against one site's bills), so
+  // across sites the page counts them but sends you to a site to sort them.
   const queueQ = useQuery({
-    queryKey: ['stock_queue_count', projectId],
-    enabled: !!projectId,
+    queryKey: ['stock_queue_count', orgId, site || projectId || 'all'],
+    enabled: locked ? !!projectId : !!orgId,
     queryFn: async () => {
-      const { count } = await supabase.from('stock_resolution_queue').select('id', { count: 'exact', head: true }).eq('project_id', projectId!)
+      let q = supabase.from('stock_resolution_queue').select('id', { count: 'exact', head: true })
+      const one = projectId || site
+      q = one ? q.eq('project_id', one) : q.eq('org_id', orgId)
+      const { count } = await q
       return count ?? 0
     },
   })
   const queueCount = queueQ.data ?? 0
+  const queueSite = projectId || site || ''
 
   const [cat, setCat] = useState('All')
   const [onlyLow, setOnlyLow] = useState(false)
@@ -330,10 +401,10 @@ export default function ProjectInventory({ session: _session }: { session: Sessi
   const [alertVal, setAlertVal] = useState<string>('')
   const [unitMenu, setUnitMenu] = useState(false)
   const [newOpen, setNewOpen] = useState(false)
-  const [nf, setNf] = useState({ item: '', dimension: '', variant: '', grade: '', category: '', unit: '', qty: '', rate: '' })
+  const [nf, setNf] = useState({ item: '', dimension: '', variant: '', grade: '', category: '', unit: '', qty: '', rate: '', site: '' })
   const [savingNew, setSavingNew] = useState(false)
 
-  const byKey = (k: string) => mats.find((m) => m.item_key === k)
+  const byKey = (k: string) => mats.find((m) => m.rowKey === k)
   const cats = useMemo(() => [...new Set(mats.map((m) => m.category?.trim() || 'Uncategorised'))], [mats])
   const catOf = (m: Mat) => m.category?.trim() || 'Uncategorised'
   const lowList = useMemo(() => mats.filter(isLow), [mats])
@@ -343,10 +414,10 @@ export default function ProjectInventory({ session: _session }: { session: Sessi
 
   // drawer ledger
   const ledger = useQuery({
-    queryKey: ['stock_ledger_item', projectId, open?.item_key],
-    enabled: !!open && !!projectId,
+    queryKey: ['stock_ledger_item', open?.rowKey],
+    enabled: !!open,
     queryFn: async () => {
-      let query = supabase.from('stock_ledger').select('entry_id, direction, kind, qty, unit_rate, note, created_at, ref_type, ref_id').eq('project_id', projectId!)
+      let query = supabase.from('stock_ledger').select('entry_id, direction, kind, qty, unit_rate, note, created_at, ref_type, ref_id').eq('project_id', open!.project_id)
       query = open!.inventory_id ? query.eq('inventory_id', open!.inventory_id) : query.is('inventory_id', null).eq('unit', open!.unit ?? '').ilike('item_name', open!.item_name)
       const { data } = await query.order('created_at', { ascending: false })
       return (data ?? []) as LEntry[]
@@ -354,25 +425,32 @@ export default function ProjectInventory({ session: _session }: { session: Sessi
   })
 
 
+  // The one write behind "used 10" / "arrived 40", wherever it is said from. A movement belongs to
+  // the pile's OWN site, which across sites is not the page's — so it is read off the row, never off
+  // the route. The phone screen records through this too: two surfaces, one write.
+  const recordMove = async (m: Mat, kind: 'in' | 'out', val: number) => {
+    const key = m.rowKey
+    const { data, error } = await supabase.rpc('record_stock_movement', {
+      p_org_id: orgId, p_project_id: m.project_id, p_item_name: m.item_name, p_unit: m.unit,
+      p_qty: val, p_direction: kind, p_unit_rate: kind === 'in' ? (m.avg_rate ?? null) : null, p_inventory_id: m.inventory_id ?? null,
+    })
+    if (error || !(data as any)?.ok) throw new Error((data as any)?.error || error?.message || 'Could not record it')
+    // instant feedback: bump the on-hand in the cache, then reconcile from the server
+    qc.setQueryData<Omit<Mat, 'site' | 'rowKey'>[]>(['stock_material', orgId, projectId ?? 'all'], (old) => (old ?? []).map((x) => x.project_id + '|' + x.item_key === key ? { ...x, on_hand: x.on_hand + (kind === 'in' ? val : -val), total_out: x.total_out + (kind === 'out' ? val : 0), used_since: x.used_since + (kind === 'out' ? val : 0) } : x))
+    show((kind === 'out' ? 'Used ' : 'Arrived: ') + fmt(val) + ' ' + (m.unit ?? '') + ' of ' + m.item_name)
+    await qc.refetchQueries({ queryKey: ['stock_material', orgId, projectId ?? 'all'] })
+    qc.invalidateQueries({ queryKey: ['stock_ledger_item', key] })
+  }
+
   const saveEntry = async () => {
     if (!entry || busyEntry) return
     const m = byKey(entry.id); if (!m) return
     const val = parseFloat(entry.qty); if (!(val > 0)) return
-    const kind = entry.kind, key = m.item_key
     setBusyEntry(true)
     try {
-      const { data, error } = await supabase.rpc('record_stock_movement', {
-        p_org_id: orgId, p_project_id: projectId, p_item_name: m.item_name, p_unit: m.unit,
-        p_qty: val, p_direction: kind, p_unit_rate: kind === 'in' ? (m.avg_rate ?? null) : null, p_inventory_id: m.inventory_id ?? null,
-      })
-      if (error || !(data as any)?.ok) throw new Error((data as any)?.error || error?.message || 'Could not record it')
-      // instant feedback: bump the on-hand in the cache, then reconcile from the server
-      qc.setQueryData<Mat[]>(['project_stock_material', projectId], (old) => (old ?? []).map((x) => x.item_key === key ? { ...x, on_hand: x.on_hand + (kind === 'in' ? val : -val), total_out: x.total_out + (kind === 'out' ? val : 0), used_since: x.used_since + (kind === 'out' ? val : 0) } : x))
-      show((kind === 'out' ? 'Used ' : 'Arrived: ') + fmt(val) + ' ' + (m.unit ?? '') + ' of ' + m.item_name)
-      setFlashId(key); setTimeout(() => setFlashId(null), 1600)
+      await recordMove(m, entry.kind, val)
+      setFlashId(m.rowKey); setTimeout(() => setFlashId(null), 1600)
       setEntry(null)
-      await qc.refetchQueries({ queryKey: ['project_stock_material', projectId] })
-      if (open) qc.invalidateQueries({ queryKey: ['stock_ledger_item', projectId, open.item_key] })
     } catch (e) { console.error('record_stock_movement failed', e); show((e as Error).message || 'Could not record it', { type: 'error' }) }
     finally { setBusyEntry(false) }
   }
@@ -384,7 +462,7 @@ export default function ProjectInventory({ session: _session }: { session: Sessi
     const { data, error } = await supabase.rpc('rename_inventory_item', { p_org_id: orgId, p_inventory_id: m.inventory_id, p_name: v })
     if (error || !(data as any)?.ok) { show((data as any)?.error || error?.message || 'Could not rename', { type: 'error' }); return }
     show('Renamed — bills that say "' + m.item_name + '" will still match')
-    qc.invalidateQueries({ queryKey: ['project_stock_material', projectId] })
+    qc.invalidateQueries({ queryKey: ['stock_material', orgId, projectId ?? 'all'] })
   }
 
   const doMerge = async () => {
@@ -396,7 +474,7 @@ export default function ProjectInventory({ session: _session }: { session: Sessi
       for (const o of others) await supabase.rpc('merge_inventory_items', { p_org_id: orgId, p_from: o.inventory_id, p_into: target.inventory_id })
       show('Merged into ' + target.item_name)
       setSel(new Set()); setPop(null); setMergeInto(null)
-      qc.invalidateQueries({ queryKey: ['project_stock_material', projectId] })
+      qc.invalidateQueries({ queryKey: ['stock_material', orgId, projectId ?? 'all'] })
     } catch (e) { show((e as Error).message || 'Could not merge', { type: 'error' }) }
   }
 
@@ -406,7 +484,7 @@ export default function ProjectInventory({ session: _session }: { session: Sessi
       for (const m of ids) { if (m.inventory_id) await supabase.rpc('delete_inventory_item', { p_org_id: orgId, p_inventory_id: m.inventory_id }) }
       show('Deleted ' + (ids.length === 1 ? ids[0].item_name : ids.length + ' materials'))
       setSel(new Set()); setPop(null)
-      qc.invalidateQueries({ queryKey: ['project_stock_material', projectId] })
+      qc.invalidateQueries({ queryKey: ['stock_material', orgId, projectId ?? 'all'] })
     } catch (e) { show((e as Error).message || 'Could not delete', { type: 'error' }) }
   }
 
@@ -414,7 +492,7 @@ export default function ProjectInventory({ session: _session }: { session: Sessi
     if (!m.inventory_id) return
     const n = parseFloat(v) || 0
     await supabase.rpc('set_material_alert', { p_org_id: orgId, p_inventory_id: m.inventory_id, p_alert: n })
-    qc.invalidateQueries({ queryKey: ['project_stock_material', projectId] })
+    qc.invalidateQueries({ queryKey: ['stock_material', orgId, projectId ?? 'all'] })
     show(n > 0 ? 'You\'ll hear when ' + m.item_name + ' drops below ' + fmt(n) + ' ' + (m.unit ?? '') : 'Alert cleared')
   }
 
@@ -423,15 +501,19 @@ export default function ProjectInventory({ session: _session }: { session: Sessi
     if (!m.inventory_id) return
     await supabase.rpc('set_material_unit', { p_org_id: orgId, p_inventory_id: m.inventory_id, p_unit: u })
     show(m.item_name + ' is now counted in ' + u)
-    qc.invalidateQueries({ queryKey: ['project_stock_material', projectId] })
+    qc.invalidateQueries({ queryKey: ['stock_material', orgId, projectId ?? 'all'] })
     setOpen((o) => (o ? { ...o, unit: u } : o))
   }
 
-  useEffect(() => { if (open) { const fresh = mats.find((m) => m.item_key === open.item_key); if (fresh) setOpen(fresh) } }, [mats]) // eslint-disable-line
-  useEffect(() => { if (open) setAlertVal(open.alert_qty ? String(open.alert_qty) : '') }, [open?.item_key]) // eslint-disable-line
+  useEffect(() => { if (open) { const fresh = mats.find((m) => m.rowKey === open.rowKey); if (fresh) setOpen(fresh) } }, [mats]) // eslint-disable-line
+  useEffect(() => { if (open) setAlertVal(open.alert_qty ? String(open.alert_qty) : '') }, [open?.rowKey]) // eslint-disable-line
 
   const createNew = async () => {
     if (!nf.item.trim()) { show('A material name is required', { type: 'error' }); return }
+    // An opening quantity is a quantity SOMEWHERE. With no site on the page and none chosen, there
+    // is nowhere to put it, so the material is created without one rather than landed on a guess.
+    const openingSite = projectId || site || nf.site
+    if (parseFloat(nf.qty) > 0 && !openingSite) { show('Pick the site the opening quantity is on', { type: 'error' }); return }
     setSavingNew(true)
     try {
       const { data, error } = await supabase.rpc('create_inventory_item', {
@@ -441,11 +523,11 @@ export default function ProjectInventory({ session: _session }: { session: Sessi
       if (error || !data) throw new Error(error?.message || 'Could not create it')
       const qty = parseFloat(nf.qty)
       if (qty > 0) {
-        await supabase.rpc('record_stock_movement', { p_org_id: orgId, p_project_id: projectId, p_item_name: nf.item.trim(), p_unit: nf.unit.trim() || null, p_qty: qty, p_direction: 'in', p_unit_rate: parseFloat(nf.rate) || null, p_inventory_id: data as string })
+        await supabase.rpc('record_stock_movement', { p_org_id: orgId, p_project_id: openingSite, p_item_name: nf.item.trim(), p_unit: nf.unit.trim() || null, p_qty: qty, p_direction: 'in', p_unit_rate: parseFloat(nf.rate) || null, p_inventory_id: data as string })
       }
       show('Added ' + nf.item.trim())
-      setNewOpen(false); setNf({ item: '', dimension: '', variant: '', grade: '', category: '', unit: '', qty: '', rate: '' })
-      await qc.refetchQueries({ queryKey: ['project_stock_material', projectId] })
+      setNewOpen(false); setNf({ item: '', dimension: '', variant: '', grade: '', category: '', unit: '', qty: '', rate: '', site: '' })
+      await qc.refetchQueries({ queryKey: ['stock_material', orgId, projectId ?? 'all'] })
     } catch (e) { show((e as Error).message || 'Could not create it', { type: 'error' }) }
     finally { setSavingNew(false) }
   }
@@ -455,6 +537,67 @@ export default function ProjectInventory({ session: _session }: { session: Sessi
 
   const heroTotal = inr(totalValue)
 
+  // One New-material form, raised by either surface. It is a value rather than inline JSX for
+  // exactly that reason: a second copy is a second place for the two to disagree.
+  const newMaterialModal = (
+      <div className="nmodal">
+        <div className="nback" onClick={() => setNewOpen(false)} />
+        <div className="ncard">
+          <h2>New material</h2>
+          <p className="lede">Start tracking a material. Add an opening quantity if some is already on site.</p>
+          <label>Material<input autoFocus value={nf.item} onChange={(e) => setNf({ ...nf, item: e.target.value })} placeholder="e.g. TMT Bar" /></label>
+          <div className="r3">
+            <label>Dimension<input value={nf.dimension} onChange={(e) => setNf({ ...nf, dimension: e.target.value })} placeholder="12mm" /></label>
+            <label>Variant<input value={nf.variant} onChange={(e) => setNf({ ...nf, variant: e.target.value })} placeholder="—" /></label>
+            <label>Grade<input value={nf.grade} onChange={(e) => setNf({ ...nf, grade: e.target.value })} placeholder="Fe500" /></label>
+          </div>
+          <div className="r2">
+            <label>Category<input list="nm-cats" value={nf.category} onChange={(e) => setNf({ ...nf, category: e.target.value })} placeholder="Steel" /></label>
+            <label>Unit<input list="nm-units" value={nf.unit} onChange={(e) => setNf({ ...nf, unit: e.target.value })} placeholder="bag" /></label>
+          </div>
+          <datalist id="nm-cats">{CATS.map((c) => <option key={c} value={c} />)}</datalist>
+          <datalist id="nm-units">{UNITS.map((u) => <option key={u} value={u} />)}</datalist>
+          <div className="r2">
+            <label>Opening quantity (optional)<input inputMode="decimal" value={nf.qty} onChange={(e) => setNf({ ...nf, qty: e.target.value })} placeholder="0" /></label>
+            <label>Rate / unit (optional)<input inputMode="decimal" value={nf.rate} onChange={(e) => setNf({ ...nf, rate: e.target.value })} placeholder="₹" /></label>
+          </div>
+          {!locked && !site && (
+            <label>Site the opening quantity is on
+              <select value={nf.site} onChange={(e) => setNf({ ...nf, site: e.target.value })}>
+                <option value="">Not on a site yet</option>
+                {sites.map((p) => <option key={p.project_id} value={p.project_id}>{p.name}</option>)}
+              </select>
+            </label>
+          )}
+          <div className="nacts"><button onClick={() => setNewOpen(false)}>Cancel</button><button className="go" disabled={savingNew} onClick={createNew}>{savingNew ? 'Adding…' : 'Add material'}</button></div>
+        </div>
+      </div>
+  )
+
+  // A phone gets its own screen: the same piles, the same one write, cut for a thumb. It sits before
+  // the desktop return so nothing of the table is built for a viewport that cannot show it.
+  if (isPhone) return (
+    <>
+      <StockMobile
+        allMats={allMats} mats={visible} sites={siteList}
+        site={site} onSite={setSite}
+        locked={locked} lockedName={project?.name ?? undefined}
+        queueCount={queueCount} queueSite={queueSite}
+        onSort={() => setResolveOpen(true)}
+        onPickSite={() => show('Pick a site above, then sort the arrivals')}
+        onRaisePo={() => navigate(queueSite ? `/projects/${queueSite}` : '/purchase-orders')}
+        onNew={() => setNewOpen(true)}
+        onMove={recordMove}
+        onAlert={saveAlert}
+        onRefresh={() => qc.refetchQueries({ type: 'active' })}
+        isLoading={isLoading}
+      />
+      {newOpen && newMaterialModal}
+      <BillResolvePanel open={resolveOpen && !!queueSite} onClose={() => setResolveOpen(false)} orgId={orgId} projectId={queueSite}
+        onResolved={() => { qc.invalidateQueries({ queryKey: ['stock_material', orgId, projectId ?? 'all'] }); qc.invalidateQueries({ queryKey: ['stock_queue_count'] }) }} />
+    </>
+  )
+
   return (
     <div className="stk2">
       <style>{CSS}</style>
@@ -463,7 +606,7 @@ export default function ProjectInventory({ session: _session }: { session: Sessi
           <div>
             <h1>Stock</h1>
             <div className="hero">
-              <div className="big"><span>{heroTotal}</span><small>on site · {project?.name ?? 'this site'}</small></div>
+              <div className="big"><span>{heroTotal}</span><small>{locked ? 'on site · ' + (project?.name ?? 'this site') : site ? 'on site · ' + (siteName[site] ?? '') : 'across ' + siteList.length + ' site' + (siteList.length === 1 ? '' : 's')}</small></div>
               <div className="sub">
                 <span><b>{mats.length}</b> materials</span><span className="sep">·</span>
                 <span className={lowList.length ? 'low' : ''}><b>{lowList.length}</b> running low</span><span className="sep">·</span>
@@ -483,20 +626,38 @@ export default function ProjectInventory({ session: _session }: { session: Sessi
               <div className="line">
                 <span className="ic clay"><svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6z" /><path d="M9 12h6M9 16h6" /></svg></span>
                 <span><b>{queueCount} arrival{queueCount === 1 ? '' : 's'}</b> came in without a clear material — we couldn't place {queueCount === 1 ? 'it' : 'them'} for sure</span>
-                <a onClick={() => setResolveOpen(true)}>Sort {queueCount === 1 ? 'it' : 'them'}</a>
+                {queueSite
+                  ? <a onClick={() => setResolveOpen(true)}>Sort {queueCount === 1 ? 'it' : 'them'}</a>
+                  : <a onClick={() => setSiteMenu(true)}>Pick a site to sort {queueCount === 1 ? 'it' : 'them'}</a>}
               </div>
             )}
             {lowList.length > 0 && (
               <div className="line">
                 <span className="ic amber"><svg viewBox="0 0 24 24"><path d="M12 3v11" /><path d="m7 9 5 5 5-5" /><path d="M4 20h16" /></svg></span>
                 <span><b>{lowList.slice(0, 3).map((m) => m.item_name).join(', ')}</b>{lowList.length > 3 ? ` +${lowList.length - 3}` : ''} {lowList.length === 1 ? 'is' : 'are'} running low</span>
-                <a onClick={() => navigate(`/projects/${projectId}`)}>Raise a PO</a>
+                <a onClick={() => navigate(queueSite ? `/projects/${queueSite}` : '/purchase-orders')}>Raise a PO</a>
               </div>
             )}
           </section>
         )}
 
         <div className="filters">
+          {!locked && (
+            <div className="sitepick">
+              <button className={`chip${site ? ' on' : ''}`} onClick={() => setSiteMenu((v) => !v)}>
+                {site ? siteName[site] ?? 'Site' : 'All sites'}<em>{site ? mats.length : siteList.length}</em>{I.ch}
+              </button>
+              {siteMenu && (
+                <>
+                  <div className="sback" onClick={() => setSiteMenu(false)} />
+                  <div className="smenu">
+                    <button className={site ? '' : 'on'} onClick={() => { setSite(''); setSiteMenu(false) }}>All sites<em>{allMats.length}</em></button>
+                    {siteList.map((p) => <button key={p.project_id} className={site === p.project_id ? 'on' : ''} onClick={() => { setSite(p.project_id); setSiteMenu(false) }}>{p.name}<em>{p.n}</em></button>)}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
           <button className={`chip${cat === 'All' ? ' on' : ''}`} onClick={() => setCat('All')}>All<em>{mats.length}</em></button>
           {cats.map((c) => <button key={c} className={`chip${cat === c ? ' on' : ''}`} onClick={() => setCat(c)}>{c}<em>{mats.filter((m) => catOf(m) === c).length}</em></button>)}
           <button className={`chip${onlyLow ? ' on' : ''}`} onClick={() => setOnlyLow((v) => !v)}>Running low<em>{lowList.length}</em></button>
@@ -505,7 +666,7 @@ export default function ProjectInventory({ session: _session }: { session: Sessi
 
         <section className={`ledger${sel.size ? ' has-sel' : ''}`}>
           {isLoading ? <div className="emptyall">Loading stock…</div>
-            : mats.length === 0 ? <div className="emptyall">No stock yet. When goods are received at this site, they appear here.</div>
+            : mats.length === 0 ? <div className="emptyall">No stock yet. When goods are received {locked || site ? 'at this site' : 'on any of your sites'}, they appear here.</div>
             : (cat === 'All' ? cats : [cat]).map((c) => {
               const its = visible.filter((m) => catOf(m) === c)
               if (!its.length) return null
@@ -517,20 +678,20 @@ export default function ProjectInventory({ session: _session }: { session: Sessi
                     {its.map((m) => {
                       const low = isLow(m), lt = lasts(m), s = m.on_hand
                       const li = m.last_delivery_qty ?? 0, us = m.used_since ?? 0
-                      const isRen = renameId === m.item_key
-                      const ent = entry && entry.id === m.item_key && entry.where === 'row' ? entry : null
+                      const isRen = renameId === m.rowKey
+                      const ent = entry && entry.id === m.rowKey && entry.where === 'row' ? entry : null
                       return (
-                        <div className={`tr${low ? ' low' : ''}${sel.has(m.item_key) ? ' sel' : ''}${flashId === m.item_key ? ' flash' : ''}`} key={m.item_key}
+                        <div className={`tr${low ? ' low' : ''}${sel.has(m.rowKey) ? ' sel' : ''}${flashId === m.rowKey ? ' flash' : ''}`} key={m.rowKey}
                           onClick={(e) => { const el = e.target as HTMLElement; if (el.closest('button,input,label,.entry')) return; setOpen(m) }}>
                           <span className="lead">
                             <span className="av">{initials(m.item_name)}</span>
-                            <label className="pick" onClick={(e) => e.stopPropagation()}><input type="checkbox" style={{ position: 'absolute', opacity: 0 }} checked={sel.has(m.item_key)} onChange={() => toggleSel(m.item_key)} /><span className="box">{I.tick}</span></label>
+                            <label className="pick" onClick={(e) => e.stopPropagation()}><input type="checkbox" style={{ position: 'absolute', opacity: 0 }} checked={sel.has(m.rowKey)} onChange={() => toggleSel(m.rowKey)} /><span className="box">{I.tick}</span></label>
                           </span>
                           <div className="nm">
                             {isRen
                               ? <b><input className="rn" autoFocus value={renameVal} onChange={(e) => setRenameVal(e.target.value)} onBlur={() => commitRename(m, true)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commitRename(m, true) } else if (e.key === 'Escape') setRenameId(null) }} /></b>
-                              : <b><span className="txt">{m.item_name}</span>{m.inventory_id && <button className="pen" onClick={(e) => { e.stopPropagation(); setRenameId(m.item_key); setRenameVal(m.item_name) }}>{I.pen}</button>}</b>}
-                            <span>{low && <b className="low">Running low</b>}{low && lt ? ' · ' : ''}{lt ? <b className={lt.kind === 'new' ? 'new' : lt.kind === 'ok' ? 'ok' : ''}>{lt.text}</b> : (!low ? 'Nothing has arrived yet' : '')}{lt && lt.kind !== 'dim' && lt.kind !== 'new' ? ' · ' + lt.sub : ''}</span>
+                              : <b><span className="txt">{m.item_name}</span>{m.inventory_id && <button className="pen" onClick={(e) => { e.stopPropagation(); setRenameId(m.rowKey); setRenameVal(m.item_name) }}>{I.pen}</button>}</b>}
+                            <span>{!locked && !site && m.site ? <><b className="at">{m.site}</b> · </> : null}{low && <b className="low">Running low</b>}{low && lt ? ' · ' : ''}{lt ? <b className={lt.kind === 'new' ? 'new' : lt.kind === 'ok' ? 'ok' : ''}>{lt.text}</b> : (!low ? 'Nothing has arrived yet' : '')}{lt && lt.kind !== 'dim' && lt.kind !== 'new' ? ' · ' + lt.sub : ''}</span>
                           </div>
                           <div className="mini">{li ? <><div className="bar"><i className="u" style={{ width: Math.min(100, us / li * 100) + '%' }} /><i className="l" style={{ width: Math.max(0, (li - us) / li * 100) + '%' }} /></div><small>arrived <b>{fmt(li)}</b> · used <b>{fmt(us)}</b> since {dstr(m.last_delivery_at)}</small></> : <small>—</small>}</div>
                           <div className="st"><b className={low ? 'low' : ''}>{fmt(s)}</b><span>{m.unit}</span><small>{m.last_delivery_at ? 'last ' + dstr(m.last_delivery_at) : ''}</small></div>
@@ -547,8 +708,8 @@ export default function ProjectInventory({ session: _session }: { session: Sessi
                               </div>
                             ) : (
                               <>
-                                <button className="pill out" onClick={() => setEntry({ id: m.item_key, kind: 'out', qty: '', where: 'row' })}>− Used</button>
-                                <button className="pill in" onClick={() => setEntry({ id: m.item_key, kind: 'in', qty: '', where: 'row' })}>+ Arrived</button>
+                                <button className="pill out" onClick={() => setEntry({ id: m.rowKey, kind: 'out', qty: '', where: 'row' })}>− Used</button>
+                                <button className="pill in" onClick={() => setEntry({ id: m.rowKey, kind: 'in', qty: '', where: 'row' })}>+ Arrived</button>
                               </>
                             )}
                           </div>
@@ -572,12 +733,12 @@ export default function ProjectInventory({ session: _session }: { session: Sessi
           <button className="del" onClick={() => setPop(pop === 'delete' ? null : 'delete')}>{I.trash}Delete</button>
           <span className="sep" /><button className="xb" onClick={() => { setSel(new Set()); setPop(null) }}>{I.x}</button>
           {pop === 'merge' && (() => {
-            const ms = [...sel].map(byKey).filter(Boolean) as Mat[]; const into = mergeInto || ms[0]?.item_key
+            const ms = [...sel].map(byKey).filter(Boolean) as Mat[]; const into = mergeInto || ms[0]?.rowKey
             return (
               <div className="pop">
                 <h5>Merge {ms.length} materials into one</h5>
                 <p>Their ledgers combine, stock adds up, and the other names are kept as aliases so future bills still match.</p>
-                <div className="into">{ms.map((m) => <label key={m.item_key} className={m.item_key === into ? 'on' : ''} onClick={() => setMergeInto(m.item_key)}><i />{m.item_name}<small>{fmt(m.on_hand)} {m.unit}</small></label>)}</div>
+                <div className="into">{ms.map((m) => <label key={m.rowKey} className={m.rowKey === into ? 'on' : ''} onClick={() => setMergeInto(m.rowKey)}><i />{m.item_name}<small>{fmt(m.on_hand)} {m.unit}</small></label>)}</div>
                 <div className="pacts"><button onClick={() => setPop(null)}>Cancel</button><button className="go" onClick={doMerge}>Merge into {byKey(into || '')?.item_name}</button></div>
               </div>
             )
@@ -604,7 +765,7 @@ export default function ProjectInventory({ session: _session }: { session: Sessi
           const raw = ledger.data ?? []
           let bal = s; const withBal = raw.map((e) => { const r = { ...e, bal }; bal += e.direction === 'in' ? -e.qty : e.qty; return r } ).filter((e) => dfilter === 'all' || (dfilter === 'in' ? e.direction === 'in' : e.direction === 'out'))
           const days = [...new Set(withBal.map((e) => e.created_at.slice(0, 10)))]
-          const ent = entry && entry.id === m.item_key && entry.where === 'drawer' ? entry : null
+          const ent = entry && entry.id === m.rowKey && entry.where === 'drawer' ? entry : null
           return (
             <>
               <div className="dtop">
@@ -617,7 +778,7 @@ export default function ProjectInventory({ session: _session }: { session: Sessi
                     </div>}
                   </span>
                 </div>
-                <div className="rr"><button className="btn" onClick={() => { setRenameId(m.item_key); setRenameVal(m.item_name); setOpen(null) }}>Edit</button><button className="x" onClick={() => { setOpen(null); setEntry(null); setUnitMenu(false) }}>{I.x}</button></div>
+                <div className="rr"><button className="btn" onClick={() => { setRenameId(m.rowKey); setRenameVal(m.item_name); setOpen(null) }}>Edit</button><button className="x" onClick={() => { setOpen(null); setEntry(null); setUnitMenu(false) }}>{I.x}</button></div>
               </div>
               <div className="body">
                 <div className="dhero"><div className={`big${low ? ' low' : ''}`}>{fmt(s)}<small>{m.unit}{low ? ' · running low' : ' on site'}</small></div>
@@ -635,8 +796,8 @@ export default function ProjectInventory({ session: _session }: { session: Sessi
                       <button className="x" onClick={() => setEntry(null)}>{I.x}</button>
                     </div>
                   ) : (<>
-                    <button className="pill out" onClick={() => setEntry({ id: m.item_key, kind: 'out', qty: '', where: 'drawer' })}>− Used</button>
-                    <button className="pill in" onClick={() => setEntry({ id: m.item_key, kind: 'in', qty: '', where: 'drawer' })}>+ Arrived</button>
+                    <button className="pill out" onClick={() => setEntry({ id: m.rowKey, kind: 'out', qty: '', where: 'drawer' })}>− Used</button>
+                    <button className="pill in" onClick={() => setEntry({ id: m.rowKey, kind: 'in', qty: '', where: 'drawer' })}>+ Arrived</button>
                   </>)}
                   <button className="pill" onClick={() => show('Sent the site a WhatsApp: “How much ' + m.item_name + ' is on site now?” — coming soon')}>{I.wa}Ask for a count</button>
                 </div>
@@ -673,34 +834,9 @@ export default function ProjectInventory({ session: _session }: { session: Sessi
         })()}
       </aside>
 
-      {newOpen && (
-        <div className="nmodal">
-          <div className="nback" onClick={() => setNewOpen(false)} />
-          <div className="ncard">
-            <h2>New material</h2>
-            <p className="lede">Start tracking a material. Add an opening quantity if some is already on site.</p>
-            <label>Material<input autoFocus value={nf.item} onChange={(e) => setNf({ ...nf, item: e.target.value })} placeholder="e.g. TMT Bar" /></label>
-            <div className="r3">
-              <label>Dimension<input value={nf.dimension} onChange={(e) => setNf({ ...nf, dimension: e.target.value })} placeholder="12mm" /></label>
-              <label>Variant<input value={nf.variant} onChange={(e) => setNf({ ...nf, variant: e.target.value })} placeholder="—" /></label>
-              <label>Grade<input value={nf.grade} onChange={(e) => setNf({ ...nf, grade: e.target.value })} placeholder="Fe500" /></label>
-            </div>
-            <div className="r2">
-              <label>Category<input list="nm-cats" value={nf.category} onChange={(e) => setNf({ ...nf, category: e.target.value })} placeholder="Steel" /></label>
-              <label>Unit<input list="nm-units" value={nf.unit} onChange={(e) => setNf({ ...nf, unit: e.target.value })} placeholder="bag" /></label>
-            </div>
-            <datalist id="nm-cats">{CATS.map((c) => <option key={c} value={c} />)}</datalist>
-            <datalist id="nm-units">{UNITS.map((u) => <option key={u} value={u} />)}</datalist>
-            <div className="r2">
-              <label>Opening quantity (optional)<input inputMode="decimal" value={nf.qty} onChange={(e) => setNf({ ...nf, qty: e.target.value })} placeholder="0" /></label>
-              <label>Rate / unit (optional)<input inputMode="decimal" value={nf.rate} onChange={(e) => setNf({ ...nf, rate: e.target.value })} placeholder="₹" /></label>
-            </div>
-            <div className="nacts"><button onClick={() => setNewOpen(false)}>Cancel</button><button className="go" disabled={savingNew} onClick={createNew}>{savingNew ? 'Adding…' : 'Add material'}</button></div>
-          </div>
-        </div>
-      )}
+      {newOpen && newMaterialModal}
 
-      <BillResolvePanel open={resolveOpen} onClose={() => setResolveOpen(false)} orgId={orgId} projectId={projectId!} onResolved={() => { qc.invalidateQueries({ queryKey: ['project_stock_material', projectId] }); qc.invalidateQueries({ queryKey: ['stock_queue_count', projectId] }) }} />
+      <BillResolvePanel open={resolveOpen && !!queueSite} onClose={() => setResolveOpen(false)} orgId={orgId} projectId={queueSite} onResolved={() => { qc.invalidateQueries({ queryKey: ['stock_material', orgId, projectId ?? 'all'] }); qc.invalidateQueries({ queryKey: ['stock_queue_count'] }) }} />
     </div>
   )
 }

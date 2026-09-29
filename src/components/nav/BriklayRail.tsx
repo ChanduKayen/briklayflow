@@ -285,6 +285,9 @@ export function BriklayDesktopNav({ session, collapsible = false, railExpanded =
       label: 'Purchases & work',
       items: ([
         can(role !== 'supervisor' && role !== 'accountant') && { route: '/purchase-orders', label: 'Purchase orders', icon: IconShoppingBag, badge: poUntallied, hasPanel: true },
+        // Stock, across every site — the same page the project's own Inventory opens, with the site
+        // simply not fixed. What was ordered and what is actually in the yard read better together.
+        { route: '/inventory', label: 'Stock', icon: IconBox },
         // Inward register lives in the per-project nav (see projBase/inward below), not the main rail.
         { route: '/work-orders', label: 'Worker contracts', icon: IconClipboardList, badge: woPending },
         { route: '/attendance', label: 'Attendance', icon: IconChecklist },
