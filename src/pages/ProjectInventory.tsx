@@ -20,6 +20,7 @@ interface Mat {
 interface LEntry { entry_id: string; direction: string; kind: string; qty: number; unit_rate: number | null; note: string | null; created_at: string; ref_type: string | null; ref_id: string | null }
 
 const UNITS = ['nos', 'bag', 'kg', 'ltr', 'cft', 'ton', 'MT', 'sqft', 'rft', 'unit', 'trip', 'pair', 'bundle', 'box', 'roll', 'set']
+const CATS = ['Cement', 'Steel', 'Sand', 'Aggregate', 'Brick', 'Block', 'Tile', 'Paint', 'Plumbing', 'Electrical', 'Hardware', 'Plywood', 'Glass', 'Waterproofing', 'Admixture', 'Chemical']
 const inr = (n: number) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN')
 const fmt = (n: number) => Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 1 })
 const initials = (n: string) => n.trim().split(/\s+/).slice(0, 2).map((x) => x[0]).join('').toUpperCase()
@@ -248,6 +249,20 @@ const CSS = `
 .stk2 .fab{position:fixed;right:26px;bottom:26px;width:60px;height:60px;border-radius:30px;background:var(--clay);color:#fff;border:0;display:grid;place-items:center;box-shadow:0 18px 30px -14px rgba(181,71,42,.9);transition:transform .2s var(--spring),background .2s;z-index:40}
 .stk2 .fab:hover{transform:scale(1.05);background:var(--clay-hi)}
 .stk2 .fab svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round}
+.stk2 .nmodal{position:fixed;inset:0;z-index:55;display:grid;place-items:center;padding:20px}
+.stk2 .nmodal .nback{position:absolute;inset:0;background:rgba(43,33,26,.3)}
+.stk2 .nmodal .ncard{position:relative;width:min(520px,100%);background:var(--paper);border:1px solid var(--line);border-radius:20px;box-shadow:0 30px 70px -30px rgba(43,33,26,.6);padding:24px 26px;max-height:90vh;overflow:auto}
+.stk2 .nmodal h2{margin:0;font-family:var(--serif);font-weight:600;font-size:24px}
+.stk2 .nmodal .lede{color:var(--ink-3);font-size:13.5px;margin:6px 0 18px}
+.stk2 .nmodal label{display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--ink-3);margin-bottom:14px;letter-spacing:.02em}
+.stk2 .nmodal input{border:1px solid var(--line-2);border-radius:10px;padding:10px 12px;font:inherit;font-size:15px;background:var(--paper);color:var(--ink)}
+.stk2 .nmodal input:focus{outline:none;border-color:var(--clay)}
+.stk2 .nmodal .r3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+.stk2 .nmodal .r2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.stk2 .nmodal .nacts{display:flex;justify-content:flex-end;gap:10px;margin-top:6px}
+.stk2 .nmodal .nacts button{border:1px solid var(--line-2);border-radius:999px;padding:10px 20px;font-size:14px;font-weight:600;background:var(--paper);color:var(--ink)}
+.stk2 .nmodal .nacts .go{background:var(--clay);border-color:var(--clay);color:#fff}.stk2 .nmodal .nacts .go:disabled{opacity:.5}
+@media (max-width:640px){.stk2 .nmodal .r3{grid-template-columns:1fr}.stk2 .nmodal .r2{grid-template-columns:1fr}}
 @media (max-width:1100px){.stk2 .wrap{padding:20px 16px 100px}.stk2 .tr{grid-template-columns:36px minmax(0,1fr) 150px max-content}.stk2 .tr .mini{display:none}.stk2 .drawer{width:100%}.stk2 .facts{grid-template-columns:1fr 1fr}}
 @media (prefers-reduced-motion:reduce){.stk2 *{transition:none!important;animation:none!important}}
 `
@@ -314,6 +329,9 @@ export default function ProjectInventory({ session: _session }: { session: Sessi
   const [dfilter, setDfilter] = useState<'all' | 'in' | 'out'>('all')
   const [alertVal, setAlertVal] = useState<string>('')
   const [unitMenu, setUnitMenu] = useState(false)
+  const [newOpen, setNewOpen] = useState(false)
+  const [nf, setNf] = useState({ item: '', dimension: '', variant: '', grade: '', category: '', unit: '', qty: '', rate: '' })
+  const [savingNew, setSavingNew] = useState(false)
 
   const byKey = (k: string) => mats.find((m) => m.item_key === k)
   const cats = useMemo(() => [...new Set(mats.map((m) => m.category?.trim() || 'Uncategorised'))], [mats])
@@ -335,23 +353,27 @@ export default function ProjectInventory({ session: _session }: { session: Sessi
     },
   })
 
-  const invalidate = () => { qc.invalidateQueries({ queryKey: ['project_stock_material', projectId] }); if (open) qc.invalidateQueries({ queryKey: ['stock_ledger_item', projectId, open.item_key] }) }
 
   const saveEntry = async () => {
     if (!entry || busyEntry) return
     const m = byKey(entry.id); if (!m) return
     const val = parseFloat(entry.qty); if (!(val > 0)) return
+    const kind = entry.kind, key = m.item_key
     setBusyEntry(true)
     try {
       const { data, error } = await supabase.rpc('record_stock_movement', {
         p_org_id: orgId, p_project_id: projectId, p_item_name: m.item_name, p_unit: m.unit,
-        p_qty: val, p_direction: entry.kind, p_unit_rate: entry.kind === 'in' ? (m.avg_rate ?? null) : null, p_inventory_id: m.inventory_id ?? null,
+        p_qty: val, p_direction: kind, p_unit_rate: kind === 'in' ? (m.avg_rate ?? null) : null, p_inventory_id: m.inventory_id ?? null,
       })
       if (error || !(data as any)?.ok) throw new Error((data as any)?.error || error?.message || 'Could not record it')
-      show((entry.kind === 'out' ? 'Used ' : 'Arrived: ') + fmt(val) + ' ' + (m.unit ?? '') + ' of ' + m.item_name)
-      setFlashId(m.item_key); setTimeout(() => setFlashId(null), 1600)
-      setEntry(null); invalidate()
-    } catch (e) { show((e as Error).message || 'Could not record it', { type: 'error' }) }
+      // instant feedback: bump the on-hand in the cache, then reconcile from the server
+      qc.setQueryData<Mat[]>(['project_stock_material', projectId], (old) => (old ?? []).map((x) => x.item_key === key ? { ...x, on_hand: x.on_hand + (kind === 'in' ? val : -val), total_out: x.total_out + (kind === 'out' ? val : 0), used_since: x.used_since + (kind === 'out' ? val : 0) } : x))
+      show((kind === 'out' ? 'Used ' : 'Arrived: ') + fmt(val) + ' ' + (m.unit ?? '') + ' of ' + m.item_name)
+      setFlashId(key); setTimeout(() => setFlashId(null), 1600)
+      setEntry(null)
+      await qc.refetchQueries({ queryKey: ['project_stock_material', projectId] })
+      if (open) qc.invalidateQueries({ queryKey: ['stock_ledger_item', projectId, open.item_key] })
+    } catch (e) { console.error('record_stock_movement failed', e); show((e as Error).message || 'Could not record it', { type: 'error' }) }
     finally { setBusyEntry(false) }
   }
 
@@ -408,6 +430,26 @@ export default function ProjectInventory({ session: _session }: { session: Sessi
   useEffect(() => { if (open) { const fresh = mats.find((m) => m.item_key === open.item_key); if (fresh) setOpen(fresh) } }, [mats]) // eslint-disable-line
   useEffect(() => { if (open) setAlertVal(open.alert_qty ? String(open.alert_qty) : '') }, [open?.item_key]) // eslint-disable-line
 
+  const createNew = async () => {
+    if (!nf.item.trim()) { show('A material name is required', { type: 'error' }); return }
+    setSavingNew(true)
+    try {
+      const { data, error } = await supabase.rpc('create_inventory_item', {
+        p_org_id: orgId, p_item: nf.item.trim(), p_variant: nf.variant.trim() || null, p_dimension: nf.dimension.trim() || null,
+        p_grade: nf.grade.trim() || null, p_category: nf.category.trim() || null, p_unit: nf.unit.trim() || null, p_first_alias: null, p_sku_id: null,
+      })
+      if (error || !data) throw new Error(error?.message || 'Could not create it')
+      const qty = parseFloat(nf.qty)
+      if (qty > 0) {
+        await supabase.rpc('record_stock_movement', { p_org_id: orgId, p_project_id: projectId, p_item_name: nf.item.trim(), p_unit: nf.unit.trim() || null, p_qty: qty, p_direction: 'in', p_unit_rate: parseFloat(nf.rate) || null, p_inventory_id: data as string })
+      }
+      show('Added ' + nf.item.trim())
+      setNewOpen(false); setNf({ item: '', dimension: '', variant: '', grade: '', category: '', unit: '', qty: '', rate: '' })
+      await qc.refetchQueries({ queryKey: ['project_stock_material', projectId] })
+    } catch (e) { show((e as Error).message || 'Could not create it', { type: 'error' }) }
+    finally { setSavingNew(false) }
+  }
+
   const toggleSel = (k: string) => setSel((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n })
   const stepEntry = (d: number) => setEntry((e) => (e ? { ...e, qty: String(Math.max(0, (parseFloat(e.qty) || 0) + d)) } : e))
 
@@ -431,7 +473,7 @@ export default function ProjectInventory({ session: _session }: { session: Sessi
           </div>
           <div className="acts">
             <button className="btn" onClick={() => show('Sends the site a WhatsApp asking for today\'s count — coming soon')}>{I.wa}Ask for a count</button>
-            <button className="btn pri" onClick={() => show('New-material form — coming soon')}>{I.plus}New material</button>
+            <button className="btn pri" onClick={() => setNewOpen(true)}>{I.plus}New material</button>
           </div>
         </header>
 
@@ -630,6 +672,33 @@ export default function ProjectInventory({ session: _session }: { session: Sessi
           )
         })()}
       </aside>
+
+      {newOpen && (
+        <div className="nmodal">
+          <div className="nback" onClick={() => setNewOpen(false)} />
+          <div className="ncard">
+            <h2>New material</h2>
+            <p className="lede">Start tracking a material. Add an opening quantity if some is already on site.</p>
+            <label>Material<input autoFocus value={nf.item} onChange={(e) => setNf({ ...nf, item: e.target.value })} placeholder="e.g. TMT Bar" /></label>
+            <div className="r3">
+              <label>Dimension<input value={nf.dimension} onChange={(e) => setNf({ ...nf, dimension: e.target.value })} placeholder="12mm" /></label>
+              <label>Variant<input value={nf.variant} onChange={(e) => setNf({ ...nf, variant: e.target.value })} placeholder="—" /></label>
+              <label>Grade<input value={nf.grade} onChange={(e) => setNf({ ...nf, grade: e.target.value })} placeholder="Fe500" /></label>
+            </div>
+            <div className="r2">
+              <label>Category<input list="nm-cats" value={nf.category} onChange={(e) => setNf({ ...nf, category: e.target.value })} placeholder="Steel" /></label>
+              <label>Unit<input list="nm-units" value={nf.unit} onChange={(e) => setNf({ ...nf, unit: e.target.value })} placeholder="bag" /></label>
+            </div>
+            <datalist id="nm-cats">{CATS.map((c) => <option key={c} value={c} />)}</datalist>
+            <datalist id="nm-units">{UNITS.map((u) => <option key={u} value={u} />)}</datalist>
+            <div className="r2">
+              <label>Opening quantity (optional)<input inputMode="decimal" value={nf.qty} onChange={(e) => setNf({ ...nf, qty: e.target.value })} placeholder="0" /></label>
+              <label>Rate / unit (optional)<input inputMode="decimal" value={nf.rate} onChange={(e) => setNf({ ...nf, rate: e.target.value })} placeholder="₹" /></label>
+            </div>
+            <div className="nacts"><button onClick={() => setNewOpen(false)}>Cancel</button><button className="go" disabled={savingNew} onClick={createNew}>{savingNew ? 'Adding…' : 'Add material'}</button></div>
+          </div>
+        </div>
+      )}
 
       <BillResolvePanel open={resolveOpen} onClose={() => setResolveOpen(false)} orgId={orgId} projectId={projectId!} onResolved={() => { qc.invalidateQueries({ queryKey: ['project_stock_material', projectId] }); qc.invalidateQueries({ queryKey: ['stock_queue_count', projectId] }) }} />
     </div>
