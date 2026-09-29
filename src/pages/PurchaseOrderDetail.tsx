@@ -13,7 +13,7 @@ import type { Session } from '@supabase/supabase-js';
 import { useUserProfile } from '../App';
 import { useOrgId } from '../lib/auth/AuthProvider';
 import type { POLineItem } from '../types';
-import ReceiveAtSiteDrawer from '../components/ReceiveAtSiteDrawer';
+import ReceiveDeliveryPanel from '../components/ReceiveDeliveryPanel';
 import SendToVendorModal from '../components/po-new-ui/SendToVendorModal';
 import { RateCheckModal } from '../components/po/RateCheckModal';
 import { useIsMobile } from '../lib/useIsMobile';
@@ -1824,32 +1824,33 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
         />
       )}
 
-      <ReceiveAtSiteDrawer
-        isOpen={showReceiveModal}
+      <ReceiveDeliveryPanel
+        open={showReceiveModal}
         onClose={() => setShowReceiveModal(false)}
-        session={session}
-        poDateIssued={po.date_issued}
+        orgId={po.org_id}
+        receivedBy={session.user.id}
         po={{
           po_id: poId!,
-          org_id: po.org_id,
           project_id: po.project_id,
           stakeholder_id: po.stakeholder_id,
-          stakeholder_name: vendor?.name || 'Vendor',
-          line_items: (lineItems ?? []).map((li: any) => ({
-            id: String(li.id),
+          vendor: vendor?.name || 'Vendor',
+          site: project?.name ?? null,
+          lines: (lineItems ?? []).map((li: any) => ({
+            po_line_item_id: String(li.id),
             item_name: li.item_name,
             unit: li.unit || 'Nos',
             quantity_ordered: Number(li.quantity_ordered) || 0,
             unit_rate: Number(li.unit_rate) || 0,
-            qty_received_so_far: recvByLine[String(li.id)] || 0,
+            received_so_far: recvByLine[String(li.id)] || 0,
           })),
         }}
-        onSuccess={() => {
-          setShowReceiveModal(false);
+        onReceived={() => {
           qc.invalidateQueries({ queryKey: ['po_detail', poId] });
           qc.invalidateQueries({ queryKey: ['po_grn', poId] });
           qc.invalidateQueries({ queryKey: ['po_grn_items', poId] });
           qc.invalidateQueries({ queryKey: ['purchase_orders_enhanced'] });
+          qc.invalidateQueries({ queryKey: ['project_stock_material', po.project_id] });
+          qc.invalidateQueries({ queryKey: ['stock_queue_count', po.project_id] });
           fireCelebration();
           showSnackbar('📦 Receipt recorded');
         }}
