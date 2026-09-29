@@ -3,6 +3,7 @@
 // save. Writes a GRN (create_grn) → stock; doubtful lines fall to the clarify panel via triage.
 // Design ported from the reference (scoped .rcv); mobile-first.
 import { useState } from 'react'
+import { createPortal } from 'react-dom'
 import { supabase } from '../lib/supabase'
 import { useSnackbar } from './Snackbar'
 
@@ -196,7 +197,7 @@ export default function ReceiveDeliveryPanel({ open, onClose, orgId, po, receive
 
   const nWord = nRecv === 0 ? 'Save — nothing came' : nRecv === po.lines.length ? `Receive all ${nRecv} items` : `Receive ${nRecv} of ${po.lines.length} items`
 
-  return (
+  return createPortal(
     <div className="rcv" role="dialog" aria-modal="true">
       <style>{CSS}</style>
       <div className="scrim" onClick={onClose} />
@@ -269,6 +270,7 @@ export default function ReceiveDeliveryPanel({ open, onClose, orgId, po, receive
           </>
         )}
       </aside>
-    </div>
+    </div>,
+    document.body,
   )
 }

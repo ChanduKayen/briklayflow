@@ -4,6 +4,7 @@
 // then triages so clean lines land and doubtful ones fall to the clarify panel.
 // Design ported from the reference confirm panel (scoped .brcv); mobile-first.
 import { useState } from 'react'
+import { createPortal } from 'react-dom'
 import { supabase } from '../lib/supabase'
 import { useSnackbar } from './Snackbar'
 
@@ -116,7 +117,7 @@ export default function BillReceivePanel({ open, onClose, orgId, bill, onReceive
 
   const siteShort = (bill.site || '').split(' ').slice(0, 2).join(' ') || 'the site'
 
-  return (
+  return createPortal(
     <div className="brcv" role="dialog" aria-modal="true">
       <style>{CSS}</style>
       <div className="scrim" onClick={onClose} />
@@ -163,6 +164,7 @@ export default function BillReceivePanel({ open, onClose, orgId, bill, onReceive
           </>
         )}
       </aside>
-    </div>
+    </div>,
+    document.body,
   )
 }
