@@ -1116,6 +1116,9 @@ function BillDetailView({ id }: { id: string }) {
             qc.invalidateQueries({ queryKey: ['party_ledger'] });
             qc.invalidateQueries({ queryKey: ['weekly_payments'] });
             qc.invalidateQueries({ queryKey: ['po_detail'] });
+            qc.invalidateQueries({ queryKey: ['po_list_sheet'] });
+            qc.invalidateQueries({ queryKey: ['po_paid_rollup'] });
+            qc.invalidateQueries({ queryKey: ['purchase_orders_enhanced'] });   // the PO's paid reflects the bill payment
           }}
           onFail={(m) => show(m, { type: 'error' })}
         />

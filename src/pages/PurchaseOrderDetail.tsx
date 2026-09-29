@@ -1850,7 +1850,9 @@ export default function PurchaseOrderDetail({ session }: { session: Session }) {
           qc.invalidateQueries({ queryKey: ['po_grn_items', poId] });
           qc.invalidateQueries({ queryKey: ['purchase_orders_enhanced'] });
           qc.invalidateQueries({ queryKey: ['project_stock_material', po.project_id] });
+          qc.invalidateQueries({ queryKey: ['stock_material'] });
           qc.invalidateQueries({ queryKey: ['stock_queue_count', po.project_id] });
+          qc.invalidateQueries({ queryKey: ['bills'] });   // the bill for this PO now reads "at site"
           fireCelebration();
           showSnackbar('📦 Receipt recorded');
         }}

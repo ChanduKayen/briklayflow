@@ -81,7 +81,7 @@ function invoiceCount(lines: unknown): number {
 }
 
 export async function loadBills(): Promise<BillRow[]> {
-  const [billsR, poR, stkR, projR, cbR] = await Promise.all([
+  const [billsR, poR, stkR, projR, cbR, grnR] = await Promise.all([
     supabase.from('bills').select('id, stakeholder_id, project_id, po_id, bill_no, bill_date, amount, created_at, doc_url, lines, stock_received_at'),
     supabase.from('purchase_orders')
       .select(`po_id, stakeholder_id, project_id, vendor_bill_number, vendor_bill_doc_url, vendor_bill_url, ${BILL_DATE_COLUMNS}, status, approval_status`)
@@ -91,7 +91,11 @@ export async function loadBills(): Promise<BillRow[]> {
     supabase.from('stakeholders').select('stakeholder_id, name'),
     supabase.from('projects').select('project_id, name'),
     supabase.from('consolidated_bills').select('id, stakeholder_id, period_from, period_to, amount, note'),
+    supabase.from('po_grn').select('po_id, receipt_date'),   // a PO with a GRN has reached site
   ]);
+  // GRN is the receipt of record: a PO that has any goods-receipt reflects as "at site" on its bill.
+  const grnByPo: Record<string, string> = {};
+  (grnR.data ?? []).forEach((g: any) => { if (g.po_id && (!grnByPo[g.po_id] || String(g.receipt_date) > String(grnByPo[g.po_id]))) grnByPo[g.po_id] = g.receipt_date ?? 'received'; });
   if (poR.error) throw poR.error;
   const billRows = (billsR.data ?? []) as any[];   // first-class bills (empty if migration not applied)
   // A PO named by a bills row is represented by that bill, not its own PO-bill row — suppress the dup.
@@ -165,7 +169,7 @@ export async function loadBills(): Promise<BillRow[]> {
       ref: b.po_id ? { kind: 'po', poId: b.po_id } : { kind: 'none' },
       docUrl: b.doc_url || null, docCount: invoiceCount(b.lines),
       addedAt: b.created_at ? String(b.created_at) : (b.bill_date || null),
-      stockReceivedAt: b.stock_received_at ?? null,
+      stockReceivedAt: b.stock_received_at ?? (b.po_id ? grnByPo[b.po_id] ?? null : null),
       poId: b.po_id ?? null,
       lines: Array.isArray(b.lines) ? b.lines.map((l: any) => ({ name: l.name ?? l.item ?? '—', spec: l.spec ?? null, unit: l.unit ?? null, qty: num(l.qty), rate: num(l.rate), amount: num(l.amount) || num(l.qty) * num(l.rate) })) : [],
     });
@@ -180,6 +184,8 @@ export async function loadBills(): Promise<BillRow[]> {
       amount, paid, status: statusOf(amount, paid), ref: { kind: 'po', poId: p.po_id },
       docUrl: p.vendor_bill_doc_url || p.vendor_bill_url || null, docCount: 1,
       addedAt: billDateOf(p),
+      stockReceivedAt: grnByPo[p.po_id] ?? null,   // a po~ bill IS the PO's bill — its GRN is its receipt
+      poId: p.po_id,
     });
   }
   const fmtP = (d: string) => new Date(d).toLocaleDateString('en-IN', { month: 'short', year: '2-digit' });

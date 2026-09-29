@@ -263,6 +263,11 @@ export default function BillsMobile() {
     qc.invalidateQueries({ queryKey: ['bills'] });
     qc.invalidateQueries({ queryKey: ['bills_loose'] });
     qc.invalidateQueries({ queryKey: ['bill'] });
+    // A bill payment reflects on the PO's paid; a PO receive reflects as "at site" here.
+    qc.invalidateQueries({ queryKey: ['po_detail'] });
+    qc.invalidateQueries({ queryKey: ['po_list_sheet'] });
+    qc.invalidateQueries({ queryKey: ['po_paid_rollup'] });
+    qc.invalidateQueries({ queryKey: ['purchase_orders_enhanced'] });
   }, [qc]);
 
   // Pull the drawer down from the top and it reads the register again.
