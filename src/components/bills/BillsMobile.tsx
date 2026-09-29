@@ -290,7 +290,7 @@ export default function BillsMobile() {
       <span className="bx">
         <span className="b1"><b>{b.vendor}</b><span className="amt">{inr(b.amount)}</span></span>
         <span className="b2">
-          <span className="meta">{day(b.billDate)} · {short(b.site) || 'no site'}{b.billNo ? '' : <> · <i className="ring" />no number</>}</span>
+          <span className="meta">{day(b.billDate)} · {short(b.site) || 'no site'}{b.billNo ? '' : <> · <i className="ring" />no number</>}{b.id.startsWith('bl~') && b.projectId && b.stockReceivedAt ? <> · <span style={{ color: '#2F5D3A', fontWeight: 600 }}>at site ✓</span></> : null}</span>
           {statusOf(b)}
         </span>
       </span>
