@@ -1,226 +1,267 @@
-// Stock — the site's materials, built to the reference design (scoped .stkx), wired to real stock data.
-//
-// Rows, value, category rail and the per-material ledger come from v_stock_material / stock_ledger. The
-// +Arrived / −Used pills write real movements via record_stock_movement. Categories group by the supplying
-// vendor's category. The snapshot-count flow, the bill-line resolve queue and consumables are in the design
-// but have no backend yet, so the snapshot button is inert (coming soon) and the other two are omitted until
-// their data exists — nothing here shows fabricated numbers.
-import { useEffect, useMemo, useRef, useState } from 'react'
+// Stock — fact first (how much is on site, in a supervisor's words), then the story
+// (arrived → used → left), then the action (say "used 10" on the row). Ledger drawer per
+// material; hover-select → merge / edit / delete; low-stock alerts. Design ported from the
+// reference (scoped .stk2), wired to v_stock_material + stock_ledger + the identity RPCs.
+import { useEffect, useMemo, useState } from 'react'
+import type { Session } from '@supabase/supabase-js'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import type { Session } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
 import { useOrgId } from '../lib/auth/AuthProvider'
 import { useSnackbar } from '../components/Snackbar'
 import BillResolvePanel from '../components/BillResolvePanel'
 
-interface StockRow {
+interface Mat {
   item_key: string; inventory_id: string | null; item_name: string; unit: string | null
-  on_hand: number; total_in: number; total_out: number; stock_value: number; avg_rate: number | null
-  last_movement_at: string | null; last_delivery_at: string | null; last_delivery_qty: number | null
-  category: string | null; spec: string | null; brand: string | null
+  on_hand: number; total_out: number; used_since: number; avg_rate: number | null
+  last_delivery_at: string | null; last_delivery_qty: number | null; last_movement_at: string | null
+  category: string | null; alert_qty: number | null; aliases: string[] | null; stock_value: number
 }
-interface Move { entry_id: string; qty: number; direction: string; kind: string; unit: string | null; unit_rate: number | null; note: string | null; created_at: string; ref_id: string | null }
-interface InvEdit { item: string; variant: string; dimension: string; grade: string; category: string; unit: string; aliases: string[] }
-const INV_UNITS = ['Bags', 'kg', 'MT', 'Nos', 'Mtr', 'Sqft', 'Cft', 'Ltr', 'Unit', 'Trip', 'Tin', 'Bundle', 'Roll', 'Sheet', 'Coil', 'Pair', 'Box', 'Packet', 'Quintal']
-const INV_CATS = ['Cement', 'Steel', 'Sand', 'Aggregate', 'Brick', 'Block', 'Tile', 'Paint', 'Plumbing', 'Electrical', 'Hardware', 'Plywood', 'Glass', 'Windows', 'Doors', 'Waterproofing', 'Admixture', 'Chemical']
+interface LEntry { entry_id: string; direction: string; kind: string; qty: number; unit_rate: number | null; note: string | null; created_at: string; ref_type: string | null; ref_id: string | null }
 
-
+const UNITS = ['nos', 'bag', 'kg', 'ltr', 'cft', 'ton', 'MT', 'sqft', 'rft', 'unit', 'trip', 'pair', 'bundle', 'box', 'roll', 'set']
 const inr = (n: number) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN')
+const fmt = (n: number) => Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 1 })
+const initials = (n: string) => n.trim().split(/\s+/).slice(0, 2).map((x) => x[0]).join('').toUpperCase()
 const dstr = (s: string | null) => (s ? new Date(s).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '')
-const qfmt = (n: number, step: number) => { const v = Number(n) || 0; return (step < 1 ? v.toFixed(1) : String(Math.round(v))) }
-const stepFor = (unit: string | null) => (/^(t|ton|tons|tonne|tonnes|unit|units|load|loads|brass)$/i.test((unit || '').trim()) ? 0.5 : 1)
+const dayNo = (s: string | null) => (s ? new Date(s).setHours(0, 0, 0, 0) : 0)
+const DAY = 86400000
+const isLow = (m: Mat) => m.alert_qty != null && m.alert_qty > 0 && m.on_hand <= m.alert_qty
+function lasts(m: Mat): { text: string; sub: string; kind: string; days: number | null } | null {
+  if (!m.last_delivery_at) return null
+  const today = new Date().setHours(0, 0, 0, 0), li = dayNo(m.last_delivery_at)
+  const used = m.used_since || 0, days = Math.max(1, Math.round((today - li) / DAY))
+  if (!used) return { text: li >= today ? 'Arrived today' : 'Nothing used since it arrived', sub: 'No usage recorded since ' + dstr(m.last_delivery_at), kind: li >= today ? 'new' : 'dim', days: null }
+  const perDay = used / days, left = m.on_hand / perDay
+  return { text: 'About ' + (left < 1 ? 'a day' : Math.round(left) + ' days') + ' left', sub: 'at ~' + fmt(perDay) + ' ' + (m.unit ?? '') + ' a day since ' + dstr(m.last_delivery_at), kind: left < 5 ? 'low' : left < 12 ? '' : 'ok', days: left }
+}
 
 const CSS = `
-.stkx{--cream:#F4EFE7;--paper:#FBF8F2;--paper-2:#F8F3EA;--rule:#E4DCCF;--rule-soft:#EFE9DE;--ink:#2C1C13;--ink-2:#6B5B50;--mute:#9A8B7F;--clay:#C4552F;--clay-2:#B04B28;--clay-soft:#F7E6DE;--sage:#6F8065;--sage-soft:#E8ECE3;--shadow:0 18px 50px rgba(44,28,19,.16);--shadow-s:0 6px 18px -8px rgba(44,28,19,.25);--sans:"DM Sans",ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;--serif:"Playfair Display",Georgia,"Times New Roman",serif;--mono:"DM Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;--ease:cubic-bezier(.2,.7,.2,1);background:var(--cream);color:var(--ink);font:15px/1.45 var(--sans);-webkit-font-smoothing:antialiased;min-height:100vh}
-.stkx *{box-sizing:border-box}
-.stkx button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;padding:0}
-.stkx .num{font-family:var(--mono);font-variant-numeric:tabular-nums}
-.stkx .page{max-width:1180px;margin:0 auto;padding:36px 32px 120px}
-.stkx .crumb{color:var(--mute);font-size:13.5px;margin-bottom:22px}
-.stkx .crumb a{color:var(--ink-2);text-decoration:none;cursor:pointer}
-.stkx .crumb b{color:var(--ink);font-weight:500}
-.stkx h1{font:500 46px/1.05 var(--serif);margin:0 0 12px;letter-spacing:-.01em}
-.stkx .lede{color:var(--ink-2);max-width:60ch;margin:0}
-.stkx .head{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:start;column-gap:40px;row-gap:18px}
-.stkx .head-r{display:flex;flex-direction:column;align-items:flex-end;gap:10px;padding-top:6px}
-.stkx .snapmeta{color:var(--mute);font-size:12.5px;white-space:nowrap}
-.stkx .snapmeta b{color:var(--ink-2);font-weight:500}
-.stkx .snapb{display:inline-flex;align-items:center;gap:10px;height:46px;padding:0 18px;border-radius:999px;background:var(--clay);color:#fff;font-weight:600;font-size:15px;box-shadow:0 8px 24px -10px rgba(196,85,47,.7);border:1px solid var(--clay);transition:background .2s,transform .15s}
-.stkx .snapb:hover{background:var(--clay-2)}
-.stkx .snapb:active{transform:scale(.985)}
-.stkx .snapb.soon{background:var(--paper);color:var(--sage);border-color:var(--sage);box-shadow:none;pointer-events:none}
-.stkx .band{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.3fr);align-items:end;column-gap:48px;margin:44px 0 26px}
-.stkx .band .big{font-size:44px;font-weight:500;letter-spacing:-.015em;line-height:1}
-.stkx .band .big small{font-size:15px;color:var(--ink-2);font-family:var(--sans);font-weight:400;margin-left:10px}
-.stkx .band .sub{color:var(--ink-2);font-size:14px;margin-top:10px}
-.stkx .band .sub b{color:var(--ink);font-weight:600}
-.stkx .bh{display:flex;justify-content:space-between;align-items:baseline;font-size:14px;margin-bottom:12px}
-.stkx .bh span{color:var(--mute);font-size:12.5px}
-.stkx .bars{display:flex;gap:4px;align-items:flex-start}
-.stkx .bars .g{cursor:pointer;min-width:0;transition:opacity .2s;padding:4px 0;border-radius:6px}
-.stkx .bars .g .bar{height:9px;border-radius:5px;background:var(--rule);transition:background .2s,transform .2s;transform-origin:left center}
-.stkx .bars .g:hover .bar{background:var(--ink-2);transform:scaleY(1.25)}
-.stkx .bars .g.on .bar{background:var(--clay)}
-.stkx .bars .g .gv{font-family:var(--mono);font-size:14px;margin-top:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.stkx .bars .g .gn{font-size:12.5px;color:var(--ink-2);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.stkx .bars .g .gp{font-size:12px;color:var(--mute);white-space:nowrap}
-.stkx .bars.filtered .g:not(.on){opacity:.4}
-.stkx .body{display:grid;grid-template-columns:168px minmax(0,1fr);column-gap:28px;align-items:start;margin-top:8px}
-.stkx .rail{position:sticky;top:18px;display:flex;flex-direction:column;gap:2px;padding-top:36px}
-.stkx .rt{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-radius:8px;font-size:14px;color:var(--ink-2);text-align:left;transition:background .15s,color .15s}
-.stkx .rt span{color:var(--mute);font-size:12px}
-.stkx .rt:hover{background:var(--rule-soft);color:var(--ink)}
-.stkx .rt.on{background:var(--ink);color:var(--cream)}.stkx .rt.on span{color:var(--cream);opacity:.7}
-.stkx .group{margin-top:26px}.stkx .group.hide{display:none}.stkx .lists .group:first-child{margin-top:0}
-.stkx .group-h{display:flex;align-items:baseline;gap:12px;padding:0 18px 10px;color:var(--ink-2);font-size:13.5px}
-.stkx .group-h b{color:var(--ink);font-weight:600;font-size:14px}
-.stkx .tbl{background:var(--paper);border:1px solid var(--rule);border-radius:12px;overflow:hidden}
-.stkx .hd,.stkx .row{display:grid;grid-template-columns:minmax(0,1fr) 200px 180px auto;align-items:center;gap:20px;padding:0 18px}
-.stkx .hd{height:38px;color:var(--mute);font-size:12.5px;border-bottom:1px solid var(--rule-soft)}
-.stkx .hd>div:nth-child(2),.stkx .hd>div:nth-child(3){text-align:right}
-.stkx .row{min-height:64px;padding-top:11px;padding-bottom:11px;border-bottom:1px solid var(--rule-soft);cursor:pointer;transition:background .18s;position:relative}
-.stkx .row:last-child{border-bottom:0}
-.stkx .row:hover{background:var(--paper-2)}
-.stkx .row[aria-current="true"]{background:var(--rule-soft)}
-.stkx .row.flash{animation:stkFlash 1.2s var(--ease)}
-@keyframes stkFlash{0%{background:var(--sage-soft)}100%{background:transparent}}
-.stkx .row .name{font-weight:600;font-size:15.5px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.stkx .row .attr{color:var(--mute);font-size:13px;margin-top:2px}
-.stkx .row .left{text-align:right}
-.stkx .row .left .base{font-size:19px;font-weight:500;color:var(--ink);white-space:nowrap}
-.stkx .row .left .base u{text-decoration:none;color:var(--mute);font-size:13px;font-family:var(--sans);margin-left:4px;font-weight:400}
-.stkx .row .left .ev{display:inline-flex;align-items:center;gap:5px;color:var(--mute);font-size:12px;margin-top:2px;white-space:nowrap}
-.stkx .row .left .lv.bump{color:var(--clay);transition:color .6s}
-.stkx .row .arr{text-align:right;color:var(--ink-2);font-size:13.5px;white-space:nowrap}
-.stkx .row .arr .q{color:var(--ink);margin-left:8px}
-.stkx .pmw{display:flex;gap:6px;justify-self:end}
-.stkx .pill{display:inline-flex;align-items:center;height:34px;padding:0 11px;border:1px solid var(--rule);border-radius:999px;font-size:13px;color:var(--ink-2);background:var(--paper);white-space:nowrap;cursor:pointer;user-select:none;transition:border-color .22s,color .22s,background .22s,opacity .22s,transform .12s}
-.stkx .pill:hover{border-color:var(--clay);color:var(--clay)}
-.stkx .pill .lb{font-weight:500}
-.stkx .pill .ex{display:inline-flex;align-items:center;gap:6px;max-width:0;opacity:0;overflow:hidden;margin-left:0;transition:max-width .34s var(--ease),opacity .18s,margin-left .34s var(--ease)}
-.stkx .pill.open{border-color:var(--ink);color:var(--ink);cursor:default;box-shadow:var(--shadow-s)}
-.stkx .pill.open .ex{max-width:230px;opacity:1;margin-left:8px;overflow:visible}
-.stkx .pill .st{width:26px;height:26px;border-radius:50%;border:1px solid var(--rule);display:grid;place-items:center;font-size:16px;color:var(--ink-2);transition:background .15s,border-color .15s,transform .1s}
-.stkx .pill .st:hover{border-color:var(--ink);color:var(--ink)}
-.stkx .pill .st:active{transform:scale(.9);background:var(--rule-soft)}
-.stkx .pill .ex input{width:52px;height:26px;font:500 15px var(--mono);text-align:center;border:0;border-bottom:1.5px solid var(--rule);background:none;color:var(--ink);padding:0 2px}
-.stkx .pill .ex input:focus{outline:0;border-bottom-color:var(--clay)}
-.stkx .pill .ex .u{color:var(--mute);font-size:12.5px}
-.stkx .pill .ex .go{width:26px;height:26px;border-radius:50%;background:var(--ink);display:grid;place-items:center;cursor:pointer;transition:background .2s,transform .12s,opacity .2s}
-.stkx .pill .ex .go svg{width:12px;height:12px;fill:none;stroke:var(--cream);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
-.stkx .pill .ex .go:hover{background:var(--clay)}.stkx .pill .ex .go:active{transform:scale(.9)}
-.stkx .pill.busy{opacity:.5;pointer-events:none}
-.stkx .pill.done{border-color:var(--sage);color:var(--sage);pointer-events:none}
-.stkx .pill.done .ex{max-width:40px;opacity:1;margin-left:8px}
-.stkx .pill.done .ex>*{display:none}
-.stkx .pill.done .ex .okw{display:inline-flex;align-items:center}
-.stkx .tick{width:18px;height:18px}
-.stkx .tick circle{stroke:var(--sage);stroke-width:1.8;fill:none;stroke-dasharray:70;stroke-dashoffset:70;animation:stkRing .32s ease-out forwards}
-.stkx .tick path{stroke:var(--sage);stroke-width:2.2;fill:none;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:20;stroke-dashoffset:20;animation:stkRing .26s .22s ease-out forwards}
-@keyframes stkRing{to{stroke-dashoffset:0}}
-.stkx .pmw.hasopen .pill:not(.open):not(.done){opacity:.3;pointer-events:none}
-.stkx .empty{padding:70px 20px;text-align:center;color:var(--mute)}
-.stkx .queue{display:flex;align-items:center;gap:14px;background:var(--paper);border:1px solid var(--rule);border-radius:10px;padding:14px 18px;margin:18px 0 26px;width:100%;text-align:left;transition:border-color .2s,box-shadow .2s,transform .12s}
-.stkx .queue:hover{border-color:var(--clay);box-shadow:var(--shadow-s)}
-.stkx .queue:active{transform:scale(.995)}
-.stkx .queue .qd{width:9px;height:9px;border-radius:50%;background:var(--clay);flex:none}
-.stkx .queue .qt{flex:1}.stkx .queue .qt b{font-weight:600}.stkx .queue .qt span{color:var(--ink-2);margin-left:10px}
-.stkx .queue .qgo{color:var(--clay);font-weight:500}
-.stkx .rl{border:1px solid var(--rule);border-radius:12px;padding:14px 16px;margin-bottom:12px;transition:opacity .3s}
-.stkx .rl .raw{display:flex;justify-content:space-between;gap:12px;align-items:baseline}
-.stkx .rl .raw b{font-weight:600;font-size:15px}.stkx .rl .raw .q{white-space:nowrap;color:var(--ink-2)}
-.stkx .rl .src{color:var(--mute);font-size:12.5px;margin-top:2px}
-.stkx .rl .match{display:flex;align-items:center;gap:10px;margin:12px 0 10px;padding:10px 12px;border-radius:8px;background:var(--rule-soft);font-size:14px}
-.stkx .rl .match b{font-weight:500}.stkx .rl .match .conf{margin-left:auto;color:var(--mute);font-size:12.5px;white-space:nowrap}
-.stkx .rl .match.unk{background:var(--clay-soft)}
-.stkx .rl .opts{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-.stkx .rl .opts button{border:1px solid var(--rule);border-radius:999px;padding:8px 13px;font-size:13px;min-height:36px;transition:border-color .15s,transform .1s}
-.stkx .rl .opts button:hover{border-color:var(--ink)}.stkx .rl .opts button:active{transform:scale(.96)}
-.stkx .rl .opts button.yes{background:var(--ink);color:var(--cream);border-color:var(--ink)}
-.stkx .rl .opts select{border:1px solid var(--rule);border-radius:999px;padding:8px 12px;font:inherit;font-size:13px;background:var(--paper);color:var(--ink);min-height:36px}
-.stkx .rl.busy{opacity:.5;pointer-events:none}
-.stkx .cechip,.stkx .cewrap{display:inline-flex;align-items:center;gap:0}
-.stkx .cechip{border:1px solid var(--rule);border-radius:999px;overflow:hidden}
-.stkx .cechip.hasyes{}
-.stkx .cechip>button:first-child{border:0;border-radius:0;padding:8px 12px;font-size:13px;min-height:36px}
-.stkx .cechip .ceedit{border:0;border-left:1px solid var(--rule);padding:0 10px;min-height:36px;display:flex;align-items:center;color:var(--mute);transition:color .15s,background .15s}
-.stkx .cechip .ceedit:hover{color:var(--ink);background:var(--rule-soft)}
-.stkx .cewrap{border:1px solid var(--clay);border-radius:999px;padding:2px 4px 2px 12px;gap:8px;background:var(--paper)}
-.stkx .cewrap .ceinput{border:0;outline:none;font:inherit;font-size:13px;color:var(--ink);background:transparent;min-width:120px;width:140px}
-.stkx .cewrap .cesuffix{color:var(--mute);font-size:12.5px;white-space:nowrap}
-.stkx .cewrap .cetick{display:flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:50%;background:var(--ink);color:var(--cream);flex:none;transition:transform .12s}
-.stkx .cewrap .cetick:hover{transform:scale(1.06)}
-.stkx .cewrap .cetick.pop{animation:cetickpop .38s var(--ease);background:#2e7d52}
-@keyframes cetickpop{0%{transform:scale(1)}40%{transform:scale(1.35)}100%{transform:scale(1)}}
-.stkx .peek .editb{border:1px solid var(--rule);border-radius:999px;padding:6px 14px;font-size:13px;color:var(--ink);transition:border-color .15s,background .15s}
-.stkx .peek .editb:hover{border-color:var(--ink);background:var(--rule-soft)}
-.stkx .iedit{margin-top:20px;display:flex;flex-direction:column;gap:16px}
-.stkx .iedit label{display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--mute);letter-spacing:.02em}
-.stkx .iedit input{border:1px solid var(--rule);border-radius:9px;padding:10px 12px;font:inherit;font-size:15px;color:var(--ink);background:var(--paper)}
-.stkx .iedit input:focus{outline:none;border-color:var(--clay)}
-.stkx .iedit .r3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
-.stkx .iedit .r2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.stkx .iedit .als .lbl{font-size:12px;color:var(--mute);margin-bottom:8px;letter-spacing:.02em}
-.stkx .iedit .chips{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:8px}
-.stkx .iedit .chip{display:inline-flex;align-items:center;gap:6px;background:var(--rule-soft);border:1px solid var(--rule);border-radius:999px;padding:5px 6px 5px 12px;font-size:13px}
-.stkx .iedit .chip button{color:var(--mute);font-size:15px;line-height:1;padding:0 4px;border-radius:50%}
-.stkx .iedit .chip button:hover{color:var(--ink)}
-.stkx .iedit .addrow{display:flex;gap:8px}
-.stkx .iedit .addrow input{flex:1}
-.stkx .iedit .addrow button{border:1px solid var(--rule);border-radius:9px;padding:0 16px;font-size:14px}
-.stkx .iedit .addrow button:hover{border-color:var(--ink)}
-.stkx .iedit .acts{display:flex;justify-content:flex-end;gap:10px;margin-top:4px}
-.stkx .iedit .acts button{border:1px solid var(--rule);border-radius:999px;padding:10px 20px;font-size:14px}
-.stkx .iedit .acts .save{background:var(--ink);color:var(--cream);border-color:var(--ink)}
-.stkx .iedit .acts .save:disabled{opacity:.5}
-.stkx .mlist{display:flex;flex-direction:column;gap:6px;max-height:46vh;overflow:auto}
-.stkx .mrow{display:flex;align-items:center;justify-content:space-between;gap:12px;border:1px solid var(--rule);border-radius:10px;padding:11px 14px;text-align:left;transition:border-color .15s,background .15s}
-.stkx .mrow:hover{border-color:var(--clay);background:var(--rule-soft)}
-.stkx .mrow:disabled{opacity:.5}
-.stkx .mrow .mn{font-weight:600;font-size:14.5px}
-.stkx .mrow .mq{color:var(--mute);font-size:13px;white-space:nowrap}
-.stkx .scrim{position:fixed;inset:0;background:rgba(44,28,19,.22);opacity:0;pointer-events:none;transition:opacity .25s;z-index:20}
-.stkx .scrim.on{opacity:1;pointer-events:auto}
-.stkx .peek{position:fixed;top:0;right:0;bottom:0;width:min(540px,100%);background:var(--paper);border-left:1px solid var(--rule);box-shadow:var(--shadow);transform:translateX(104%);transition:transform .32s var(--ease);overflow:auto;z-index:21}
-.stkx .peek.on{transform:none}
-.stkx .peek-in{padding:26px 28px 40px}
-.stkx .peek .top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
-.stkx .peek .kind{color:var(--mute);font-size:13px}
-.stkx .peek h2{font:500 28px/1.1 var(--serif);margin:4px 0 0}
-.stkx .peek .x{color:var(--mute);font-size:22px;line-height:1;padding:4px 10px;border-radius:50%;transition:background .15s}
-.stkx .peek .x:hover{background:var(--rule-soft);color:var(--ink)}
-.stkx .hero{margin:22px 0 6px;display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
-.stkx .hero .base{font-size:38px;font-weight:500;letter-spacing:-.01em}
-.stkx .hero .base u{text-decoration:none;font-family:var(--sans);font-size:16px;color:var(--ink-2);margin-left:6px}
-.stkx .meta{display:flex;gap:26px;color:var(--ink-2);font-size:14px;margin:14px 0 22px;flex-wrap:wrap}
-.stkx .meta b{color:var(--ink);font-weight:500}
-.stkx .ledger h3{font-size:14px;font-weight:600;margin:0 0 6px;color:var(--ink-2)}
-.stkx .mv{display:grid;grid-template-columns:64px 1fr auto auto;gap:14px;align-items:baseline;padding:11px 0;border-bottom:1px solid var(--rule-soft)}
-.stkx .mv:last-child{border-bottom:0}
-.stkx .mv.new{animation:stkFlash 1.4s var(--ease)}
-.stkx .mv .d{color:var(--mute);font-size:12.5px}
-.stkx .mv .w b{font-weight:500}.stkx .mv .w span{display:block;color:var(--mute);font-size:12.5px;margin-top:1px}
-.stkx .mv .q{text-align:right;font-weight:500}.stkx .mv .q.minus{color:var(--ink-2)}
-.stkx .mv .bal{text-align:right;color:var(--mute);font-size:12.5px;min-width:56px}
-@media (max-width:1000px){.stkx .body{grid-template-columns:1fr}
-  .stkx .rail{position:sticky;top:0;z-index:3;background:var(--cream);flex-direction:row;gap:6px;padding:10px 0;overflow-x:auto;-webkit-overflow-scrolling:touch;margin:0 -16px;padding-left:16px;padding-right:16px}
-  .stkx .rt{flex:none;padding:8px 13px;border:1px solid var(--rule);border-radius:999px;font-size:13.5px;gap:6px;min-height:40px;background:var(--paper)}
-  .stkx .rt.on{border-color:var(--ink)}}
-@media (max-width:860px){.stkx .page{padding:18px 16px 100px}.stkx h1{font-size:34px}
-  .stkx .head{grid-template-columns:1fr;row-gap:16px}.stkx .head-r{align-items:stretch;padding-top:0}.stkx .snapb{width:100%;justify-content:center}
-  .stkx .band{grid-template-columns:1fr;margin:24px 0 16px}.stkx .band .big{font-size:36px}.stkx .band-r{display:none}
-  .stkx .group-h{padding:0 4px 8px}.stkx .hd{display:none}
-  .stkx .row{grid-template-columns:1fr auto;grid-template-areas:"name left" "arr arr" "pm pm";row-gap:8px;padding:14px 14px;min-height:0}
-  .stkx .row .m{grid-area:name}.stkx .row .left{grid-area:left}.stkx .row .arr{grid-area:arr;text-align:left;font-size:13px}.stkx .pmw{grid-area:pm;justify-self:stretch}
-  .stkx .row .name{font-size:16px}.stkx .row .left .base{font-size:21px}
-  .stkx .pmw .pill{flex:1;justify-content:center;height:44px;font-size:14px}
-  .stkx .pill.open{flex:2.4}.stkx .pill .st{width:34px;height:34px;font-size:18px}.stkx .pill .ex input{width:56px;height:34px;font-size:17px}.stkx .pill .ex .go{width:34px;height:34px}
-  .stkx .peek{top:auto;bottom:0;left:0;right:0;width:100%;max-height:88vh;border-left:0;border-top:1px solid var(--rule);border-radius:22px 22px 0 0;transform:translateY(104%)}
-  .stkx .peek.on{transform:none}.stkx .peek-in{padding:16px 18px 34px}}
+.stk2{--ground:#FAF8F3;--paper:#FFFFFF;--ink:#2B211A;--ink-2:#5C4F45;--ink-3:#8A7B6E;--line:#E9E1D6;--line-2:#DCD2C4;--rule:#F0E9DF;--wash:#F3EEE5;--sand:#F1ECE1;
+  --night:#15100C;--cream:250,248,243;--clay:#B5472A;--clay-hi:#D4633E;--clay-wash:#FBEDE6;--sage:#2F5D3A;--sage-hi:#8FC79A;--sage-wash:#E7F0E6;--amber:#8A6A2E;--amber-wash:#F6EEDC;--wa:#25A65B;
+  --serif:'Playfair Display',Georgia,serif;--sans:'DM Sans',system-ui,-apple-system,'Segoe UI',sans-serif;--mono:'DM Mono',ui-monospace,Menlo,monospace;--ease:cubic-bezier(.2,.7,.2,1);--spring:cubic-bezier(.34,1.4,.64,1);
+  background:var(--ground);color:var(--ink);font-family:var(--sans);font-size:14.5px;line-height:1.4;min-height:100%}
+.stk2 *{box-sizing:border-box}
+.stk2 button,.stk2 input{font:inherit;color:inherit}.stk2 button{cursor:pointer}
+.stk2 .wrap{max-width:1240px;margin:0 auto;padding:28px 40px 100px}
+.stk2 .top{display:flex;align-items:flex-start;justify-content:space-between;gap:24px}
+.stk2 .top h1{margin:0;font-family:var(--serif);font-weight:600;font-size:34px;letter-spacing:-.01em;line-height:1.1}
+.stk2 .acts{display:flex;gap:8px}
+.stk2 .btn{display:inline-flex;align-items:center;gap:8px;height:40px;padding:0 16px;border-radius:20px;border:1px solid var(--line-2);background:var(--paper);font-size:14px;font-weight:600;color:var(--ink);transition:background .2s,border-color .2s,transform .14s var(--ease),box-shadow .2s,color .2s;white-space:nowrap}
+.stk2 .btn:hover{border-color:var(--ink-3);background:#FFFDF9}.stk2 .btn:active{transform:scale(.98)}
+.stk2 .btn.pri{background:var(--clay);border-color:var(--clay);color:#fff;box-shadow:0 10px 20px -12px rgba(181,71,42,.9)}
+.stk2 .btn.pri:hover{background:var(--clay-hi);border-color:var(--clay-hi)}
+.stk2 .btn svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.stk2 .btn svg.wa{fill:var(--wa);stroke:none}
+.stk2 .hero{margin-top:22px}
+.stk2 .hero .big{display:flex;align-items:baseline;gap:12px;font-family:var(--mono);font-size:36px;font-weight:500;letter-spacing:-.01em}
+.stk2 .hero .big small{font-family:var(--sans);font-size:14px;color:var(--ink-3);font-weight:500}
+.stk2 .hero .sub{margin-top:6px;font-size:14px;color:var(--ink-3);display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.stk2 .hero .sub b{font-weight:500;color:var(--ink-2);font-family:var(--mono);font-size:13.5px}
+.stk2 .hero .sub .sep{color:var(--line-2)}.stk2 .hero .sub .low b{color:var(--clay)}
+.stk2 .needs{margin:24px -16px 0;padding:6px 16px;border-radius:24px;background:var(--sand)}
+.stk2 .needs .line{display:grid;grid-template-columns:28px 1fr max-content;gap:12px;align-items:center;padding:12px 8px;border-top:1px dashed var(--line-2);color:var(--ink-2);font-size:14.5px}
+.stk2 .needs .line:first-child{border-top:0}.stk2 .needs .line b{font-weight:600;color:var(--ink)}
+.stk2 .needs .line .ic{width:28px;height:28px;border-radius:14px;display:grid;place-items:center;background:rgba(255,255,255,.7)}
+.stk2 .needs .line .ic svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.stk2 .needs .line .ic.clay{color:var(--clay)}.stk2 .needs .line .ic.amber{color:var(--amber)}
+.stk2 .needs .line a{color:var(--ink-2);text-decoration:underline;text-decoration-color:var(--line-2);text-underline-offset:4px;cursor:pointer;font-weight:600;transition:text-decoration-color .15s}
+.stk2 .needs .line a:hover{text-decoration-color:var(--ink-2)}
+.stk2 .filters{display:flex;align-items:center;gap:10px;margin-top:26px;flex-wrap:wrap}
+.stk2 .chip{height:40px;padding:0 16px;border-radius:20px;border:1px solid var(--line-2);background:var(--paper);font-size:14.5px;color:var(--ink);display:inline-flex;align-items:center;gap:8px;font-weight:500;white-space:nowrap;transition:background .18s,border-color .18s,color .18s}
+.stk2 .chip:hover{border-color:var(--ink-3)}
+.stk2 .chip.on{background:var(--clay-wash);border-color:var(--clay-wash);color:var(--clay)}
+.stk2 .chip em{font-style:normal;font-family:var(--mono);font-size:12.5px;color:var(--ink-3)}.stk2 .chip.on em{color:var(--clay)}
+.stk2 .search{flex:1;min-width:200px;height:50px;border:1px solid var(--line-2);background:var(--paper);border-radius:25px;display:flex;align-items:center;gap:12px;padding:0 20px;color:var(--ink-3);font-size:15px;transition:border-color .18s,box-shadow .18s}
+.stk2 .search:focus-within{border-color:var(--ink-2);box-shadow:0 0 0 4px rgba(43,33,26,.05)}
+.stk2 .search svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round}
+.stk2 .search input{border:0;background:none;outline:none;flex:1;font-size:15px;color:var(--ink);padding:0}
+.stk2 .ledger{margin-top:32px}
+.stk2 .grp{display:flex;align-items:baseline;justify-content:space-between;padding:0 16px 12px;border-bottom:1px solid var(--line)}
+.stk2 .grp h3{margin:0;font-family:var(--serif);font-weight:600;font-size:20px;color:var(--ink)}
+.stk2 .grp h3 span{font-family:var(--sans);font-weight:400;font-size:14px;color:var(--ink-3);margin-left:8px}
+.stk2 .grp .r{font-size:13.5px;color:var(--ink-3)}.stk2 .grp .r b{font-family:var(--mono);font-weight:500;color:var(--ink-2)}
+.stk2 .card{background:var(--paper);border:1px solid var(--line);border-radius:18px;margin:14px 0 30px;box-shadow:0 1px 0 rgba(43,33,26,.03)}
+.stk2 .tr{display:grid;grid-template-columns:36px minmax(0,1fr) 150px 150px 200px max-content;gap:16px;align-items:center;padding:14px 20px;border-top:1px solid var(--rule);cursor:pointer;transition:background .2s;position:relative}
+.stk2 .tr:first-child{border-top:0}.stk2 .tr:hover{background:#FFFDF9}
+.stk2 .tr::before{content:"";position:absolute;left:0;top:10px;bottom:10px;width:3px;border-radius:0 2px 2px 0;background:var(--clay);opacity:0;transform:scaleY(.4);transition:opacity .2s,transform .25s var(--ease)}
+.stk2 .tr:hover::before{opacity:.35;transform:none}.stk2 .tr.low::before{opacity:.9;transform:none}
+.stk2 .tr.flash{animation:s2fl 1.6s var(--ease)}
+@keyframes s2fl{0%{background:var(--sage-wash)}100%{background:transparent}}
+.stk2 .tr .av{width:36px;height:36px;border-radius:18px;background:var(--wash);display:grid;place-items:center;font-size:11.5px;font-weight:700;color:var(--ink-2);transition:background .2s,color .2s}
+.stk2 .tr:hover .av{background:var(--sand);color:var(--ink)}
+.stk2 .tr .nm{min-width:0}
+.stk2 .tr .nm b{display:flex;align-items:center;gap:6px;font-size:15.5px;font-weight:600;color:var(--ink)}
+.stk2 .tr .nm b .txt{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.stk2 .tr .nm span{display:block;margin-top:2px;font-size:13.5px;color:var(--ink-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stk2 .tr .nm span b{display:inline;font-size:13.5px;font-weight:500;color:var(--ink-2)}
+.stk2 .tr .nm span b.low{color:var(--clay);font-weight:600}.stk2 .tr .nm span b.ok{color:var(--sage)}.stk2 .tr .nm span b.new{color:var(--sage)}
+.stk2 .tr .mini{min-width:0}
+.stk2 .tr .mini .bar{display:flex;height:4px;border-radius:2px;overflow:hidden;background:var(--wash)}
+.stk2 .tr .mini .bar i{display:block;height:100%;transition:width .6s var(--ease)}
+.stk2 .tr .mini .bar .u{background:var(--clay-hi);opacity:.85}.stk2 .tr .mini .bar .l{background:var(--sage-hi)}
+.stk2 .tr .mini small{display:block;margin-top:6px;font-size:12px;color:var(--ink-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stk2 .tr .mini small b{font-family:var(--mono);font-weight:500;color:var(--ink-2)}
+.stk2 .tr .st{text-align:right;white-space:nowrap}
+.stk2 .tr .st b{font-family:var(--mono);font-size:19px;font-weight:500;color:var(--ink);display:inline-block}
+.stk2 .tr .st b.low{color:var(--clay)}
+.stk2 .tr .st span{font-size:13px;color:var(--ink-3);margin-left:4px}
+.stk2 .tr .st small{display:block;font-size:12.5px;color:var(--ink-3);margin-top:1px}
+.stk2 .tr .st small.used{color:var(--clay)}.stk2 .tr .st small.in{color:var(--sage)}
+.stk2 .tr .ac{display:flex;justify-content:flex-end;gap:8px;min-width:0}
+.stk2 .pill{height:36px;padding:0 14px;border-radius:18px;border:1px solid transparent;background:none;font-size:14px;font-weight:600;color:var(--ink-3);display:inline-flex;align-items:center;gap:6px;white-space:nowrap;transition:background .18s,border-color .18s,color .18s,transform .14s var(--ease),opacity .2s}
+.stk2 .tr:hover .pill{color:var(--ink);border-color:var(--line-2);background:var(--paper)}
+.stk2 .pill:hover{border-color:var(--ink-3)!important;background:var(--wash)!important}.stk2 .pill:active{transform:scale(.97)}
+.stk2 .tr:hover .pill.out{color:var(--clay)}.stk2 .tr:hover .pill.in{color:var(--sage)}
+.stk2 .pill.out:hover{background:var(--clay-wash)!important;border-color:var(--clay)!important;color:var(--clay)!important}
+.stk2 .pill.in:hover{background:var(--sage-wash)!important;border-color:var(--sage)!important;color:var(--sage)!important}
+.stk2 .entry{position:relative;display:flex;align-items:center;gap:4px;height:40px;padding:0 4px;border-radius:20px;border:1.5px solid var(--ink-2);background:var(--paper);box-shadow:0 8px 24px -14px rgba(43,33,26,.5),0 0 0 4px rgba(43,33,26,.05)}
+.stk2 .entry.out{border-color:var(--clay);box-shadow:0 8px 24px -14px rgba(181,71,42,.6),0 0 0 4px var(--clay-wash)}
+.stk2 .entry.in{border-color:var(--sage);box-shadow:0 8px 24px -14px rgba(47,93,58,.6),0 0 0 4px var(--sage-wash)}
+.stk2 .entry .k{font-size:13.5px;font-weight:600;padding:0 6px 0 10px;white-space:nowrap}
+.stk2 .entry.out .k{color:var(--clay)}.stk2 .entry.in .k{color:var(--sage)}
+.stk2 .entry .stp{width:28px;height:28px;border-radius:14px;border:0;background:var(--wash);color:var(--ink-2);display:grid;place-items:center;font-size:15px;font-weight:600;line-height:1;transition:background .15s,transform .12s var(--ease)}
+.stk2 .entry .stp:hover{background:var(--line)}.stk2 .entry .stp:active{transform:scale(.9)}
+.stk2 .entry input{width:70px;height:34px;border:0;background:none;text-align:center;font-family:var(--mono);font-size:17px;font-weight:500;outline:none;padding:0;color:var(--ink)}
+.stk2 .entry input::placeholder{color:var(--line-2);font-size:13.5px;font-family:var(--sans);font-weight:500}
+.stk2 .entry .u{font-size:13px;color:var(--ink-3);padding-right:4px}
+.stk2 .entry .save{width:32px;height:32px;border-radius:16px;border:0;background:var(--line);color:var(--ink-3);display:grid;place-items:center;transition:background .25s,color .25s,transform .18s var(--spring);flex:none}
+.stk2 .entry .save.ready{background:var(--ink);color:rgb(var(--cream));transform:scale(1.04)}
+.stk2 .entry.out .save.ready{background:var(--clay)}.stk2 .entry.in .save.ready{background:var(--sage)}
+.stk2 .entry .save:active{transform:scale(.92)}
+.stk2 .entry .save svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round}
+.stk2 .entry .x{width:26px;height:26px;border:0;background:none;color:var(--ink-3);border-radius:13px;display:grid;place-items:center;flex:none;transition:background .15s,color .15s}
+.stk2 .entry .x:hover{background:var(--wash);color:var(--ink)}
+.stk2 .entry .x svg{width:12px;height:12px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round}
+.stk2 .tr .lead{position:relative;width:36px;height:36px}
+.stk2 .tr .lead .av{position:absolute;inset:0;transition:opacity .18s,transform .18s var(--ease)}
+.stk2 .tr .pick{position:absolute;inset:0;display:grid;place-items:center;opacity:0;transform:scale(.8);transition:opacity .18s,transform .2s var(--spring);cursor:pointer}
+.stk2 .tr .pick .box{width:20px;height:20px;border-radius:6px;border:1.5px solid var(--line-2);background:var(--paper);display:grid;place-items:center;transition:background .18s,border-color .18s,transform .15s var(--spring)}
+.stk2 .tr .pick .box svg{width:12px;height:12px;fill:none;stroke:#fff;stroke-width:3;stroke-linecap:round;stroke-linejoin:round;opacity:0;transform:scale(.6);transition:opacity .15s,transform .2s var(--spring)}
+.stk2 .tr .pick:hover .box{border-color:var(--ink-3)}
+.stk2 .tr:hover .av,.stk2 .ledger.has-sel .av,.stk2 .tr.sel .av{opacity:0;transform:scale(.9)}
+.stk2 .tr:hover .pick,.stk2 .ledger.has-sel .pick,.stk2 .tr.sel .pick{opacity:1;transform:none}
+.stk2 .tr.sel .pick .box{background:var(--clay);border-color:var(--clay)}
+.stk2 .tr.sel .pick .box svg{opacity:1;transform:none}
+.stk2 .tr.sel{background:#FFFBF5}.stk2 .tr.sel::before{opacity:1;transform:none;background:var(--clay)}
+.stk2 .tr .nm .pen{width:24px;height:24px;border-radius:12px;border:0;background:none;color:var(--ink-3);display:grid;place-items:center;opacity:0;transform:translateX(-4px);transition:opacity .18s,transform .2s var(--ease),background .15s,color .15s;flex:none}
+.stk2 .tr:hover .nm .pen{opacity:1;transform:none}
+.stk2 .tr .nm .pen:hover{background:var(--wash);color:var(--ink)}
+.stk2 .tr .nm .pen svg{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.stk2 .tr .nm input.rn{height:30px;border:0;border-bottom:1.5px solid var(--ink-2);background:none;padding:0;font-size:15.5px;font-weight:600;color:var(--ink);outline:none;width:100%;max-width:280px}
+.stk2 .tr.bye{animation:s2bye .4s var(--ease) forwards}
+@keyframes s2bye{to{opacity:0;transform:translateX(-12px);max-height:0;padding-top:0;padding-bottom:0;border-top-color:transparent}}
+.stk2 .selbar{position:fixed;left:50%;bottom:30px;transform:translate(-50%,24px);opacity:0;pointer-events:none;background:var(--night);color:rgb(var(--cream));border-radius:18px;padding:8px 8px 8px 18px;display:flex;align-items:center;gap:6px;box-shadow:0 24px 50px -20px rgba(21,16,12,.7);z-index:45;transition:transform .32s var(--spring),opacity .22s;white-space:nowrap}
+.stk2 .selbar.on{transform:translate(-50%,0);opacity:1;pointer-events:auto}
+.stk2 .selbar .n{font-size:14px;font-weight:600;margin-right:10px}
+.stk2 .selbar .n b{font-family:var(--mono);font-weight:500;color:var(--clay-hi);margin-right:2px}
+.stk2 .selbar button{height:36px;padding:0 14px;border-radius:12px;border:0;background:none;color:rgba(var(--cream),.85);font-size:14px;font-weight:600;display:inline-flex;align-items:center;gap:8px;transition:background .15s,color .15s,opacity .15s;position:relative}
+.stk2 .selbar button:hover{background:rgba(var(--cream),.1);color:rgb(var(--cream))}
+.stk2 .selbar button[disabled]{opacity:.35;cursor:not-allowed}.stk2 .selbar button[disabled]:hover{background:none}
+.stk2 .selbar button svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.stk2 .selbar button.del:hover{color:#F3B4A4;background:rgba(212,99,62,.15)}
+.stk2 .selbar .sep{width:1px;height:20px;background:rgba(var(--cream),.15);margin:0 4px}
+.stk2 .selbar .xb{width:36px;padding:0;justify-content:center}
+.stk2 .selbar .pop{position:absolute;bottom:calc(100% + 12px);left:50%;transform:translateX(-50%);background:var(--paper);color:var(--ink);border-radius:16px;padding:14px 16px;min-width:340px;box-shadow:0 24px 50px -20px rgba(21,16,12,.6),0 0 0 1px var(--line);white-space:normal;text-align:left;cursor:default;font-weight:400}
+.stk2 .selbar .pop h5{margin:0;font-size:15px;font-weight:600;color:var(--ink)}
+.stk2 .selbar .pop p{margin:6px 0 0;font-size:13.5px;color:var(--ink-2);line-height:1.45}
+.stk2 .selbar .pop .into{display:flex;flex-direction:column;gap:6px;margin-top:12px}
+.stk2 .selbar .pop .into label{display:flex;align-items:center;gap:10px;height:38px;padding:0 12px;border:1px solid var(--line);border-radius:11px;background:var(--ground);font-size:14px;font-weight:500;color:var(--ink);cursor:pointer;transition:border-color .15s,background .15s}
+.stk2 .selbar .pop .into label:hover{border-color:var(--ink-3)}
+.stk2 .selbar .pop .into label.on{border-color:var(--clay);background:#FFFBF5}
+.stk2 .selbar .pop .into label i{width:16px;height:16px;border-radius:50%;border:1.5px solid var(--line-2);display:grid;place-items:center;flex:none}
+.stk2 .selbar .pop .into label.on i{border-color:var(--clay)}
+.stk2 .selbar .pop .into label.on i::after{content:"";width:8px;height:8px;border-radius:50%;background:var(--clay)}
+.stk2 .selbar .pop .into label small{margin-left:auto;font-family:var(--mono);font-size:12px;color:var(--ink-3)}
+.stk2 .selbar .pop .pacts{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
+.stk2 .selbar .pop .pacts button{color:var(--ink);background:none;border:1px solid var(--line-2);height:36px;padding:0 14px}
+.stk2 .selbar .pop .pacts button:hover{background:var(--wash);color:var(--ink)}
+.stk2 .selbar .pop .pacts button.go,.stk2 .selbar .pop .pacts button.danger{background:var(--clay);border-color:var(--clay);color:#fff}
+.stk2 .selbar .pop .pacts button.go:hover,.stk2 .selbar .pop .pacts button.danger:hover{background:var(--clay-hi)}
+.stk2 .tr.merging{animation:s2mo .5s var(--ease) forwards}
+@keyframes s2mo{to{opacity:0;transform:translateY(-14px) scale(.98);max-height:0;padding-top:0;padding-bottom:0;border-top-color:transparent}}
+.stk2 .scrim{position:fixed;inset:0;background:rgba(43,33,26,.28);opacity:0;pointer-events:none;transition:opacity .3s;z-index:50}
+.stk2 .scrim.on{opacity:1;pointer-events:auto}
+.stk2 .drawer{position:fixed;top:0;right:0;bottom:0;width:620px;max-width:100%;background:var(--ground);box-shadow:-24px 0 60px -30px rgba(43,33,26,.5);transform:translateX(100%);transition:transform .4s var(--ease);display:flex;flex-direction:column;z-index:51}
+.stk2 .drawer.on{transform:none}
+.stk2 .dtop{padding:24px 34px 0;display:flex;align-items:flex-start;gap:14px}
+.stk2 .dtop .cat{font-size:13px;color:var(--ink-3)}
+.stk2 .dtop h2{margin:2px 0 0;font-family:var(--serif);font-weight:600;font-size:30px;line-height:1.1}
+.stk2 .dtop .rr{margin-left:auto;display:flex;gap:8px;align-items:center}
+.stk2 .dtop .x{width:36px;height:36px;border-radius:18px;border:0;background:none;color:var(--ink-3);display:grid;place-items:center;transition:background .15s}
+.stk2 .dtop .x:hover{background:var(--wash)}
+.stk2 .dtop .x svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round}
+.stk2 .unitc{display:inline-flex;align-items:center;gap:6px;margin-top:8px;height:28px;padding:0 10px 0 12px;border-radius:14px;border:1px solid var(--line-2);background:var(--paper);font-size:12.5px;color:var(--ink-2);cursor:pointer;position:relative;transition:border-color .15s}
+.stk2 .unitc:hover{border-color:var(--ink-3)}
+.stk2 .unitc svg{width:11px;height:11px;fill:none;stroke:var(--ink-3);stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+.stk2 .drawer .body{flex:1;overflow:auto;padding:0 34px 70px}
+.stk2 .dhero{margin-top:22px;display:flex;align-items:flex-end;gap:20px;flex-wrap:wrap}
+.stk2 .dhero .big{font-family:var(--mono);font-size:54px;font-weight:500;line-height:1;letter-spacing:-.02em}
+.stk2 .dhero .big.low{color:var(--clay)}
+.stk2 .dhero .big small{font-family:var(--sans);font-size:15px;color:var(--ink-3);font-weight:500;margin-left:10px;letter-spacing:0}
+.stk2 .dhero .lasts{font-size:14.5px;color:var(--ink-2);padding-bottom:6px}
+.stk2 .dhero .lasts b{font-weight:600;color:var(--ink)}.stk2 .dhero .lasts.warn b{color:var(--clay)}.stk2 .dhero .lasts.ok b{color:var(--sage)}
+.stk2 .dhero .lasts small{display:block;font-size:12.5px;color:var(--ink-3);margin-top:2px}
+.stk2 .dacts{display:flex;gap:8px;margin-top:20px;align-items:center;flex-wrap:wrap}
+.stk2 .dacts .pill{color:var(--ink);border-color:var(--line-2);background:var(--paper)}
+.stk2 .dacts .pill.out{color:var(--clay)}.stk2 .dacts .pill.in{color:var(--sage)}
+.stk2 .dacts .pill svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.stk2 .dacts .pill svg.wa{fill:var(--wa);stroke:none}
+.stk2 .since{margin-top:26px;padding:16px 18px;border:1px solid var(--line);border-radius:16px;background:var(--paper)}
+.stk2 .since h4{margin:0;font-size:12.5px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-3)}
+.stk2 .since .bar{display:flex;height:12px;border-radius:6px;overflow:hidden;background:var(--wash);margin-top:12px}
+.stk2 .since .bar i{display:block;height:100%;transition:width .7s var(--ease)}
+.stk2 .since .bar .u{background:var(--clay-hi)}.stk2 .since .bar .l{background:var(--sage-hi)}
+.stk2 .since .legs{display:grid;grid-template-columns:1fr 1fr 1fr;margin-top:10px;font-size:13.5px;color:var(--ink-2)}
+.stk2 .since .legs b{font-family:var(--mono);font-weight:500;color:var(--ink);display:block}
+.stk2 .since .legs .u b{color:var(--clay)}.stk2 .since .legs .l b{color:var(--sage)}
+.stk2 .since .legs span{display:block;font-size:12px;color:var(--ink-3)}.stk2 .since .legs small{font-size:12px;color:var(--ink-3)}
+.stk2 .facts{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:12px}
+.stk2 .fact{padding:12px 14px;border:1px solid var(--line);border-radius:14px;background:var(--paper)}
+.stk2 .fact span{display:block;font-size:12px;color:var(--ink-3)}
+.stk2 .fact b{display:block;margin-top:3px;font-size:15px;font-weight:600}.stk2 .fact b.dim{color:var(--ink-3);font-weight:500}
+.stk2 .fact small{display:block;font-size:12px;color:var(--ink-3);margin-top:1px}
+.stk2 .alert{margin-top:12px;display:flex;align-items:center;gap:10px;padding:10px 14px;border:1px dashed var(--line-2);border-radius:14px;font-size:13.5px;color:var(--ink-2)}
+.stk2 .alert:focus-within{border-color:var(--ink-3);background:var(--paper)}
+.stk2 .alert input{width:64px;height:30px;border:1px solid var(--line-2);border-radius:8px;text-align:center;font-family:var(--mono);background:var(--paper);outline:none}
+.stk2 .alert input:focus{border-color:var(--ink-2)}
+.stk2 .alert .on{margin-left:auto;font-size:12.5px;color:var(--sage);font-weight:600;opacity:0;transition:opacity .2s}.stk2 .alert.set .on{opacity:1}
+.stk2 .lg{margin-top:28px}
+.stk2 .lg .hd{display:flex;align-items:center;gap:12px}
+.stk2 .lg h4{margin:0;font-family:var(--serif);font-weight:600;font-size:19px}
+.stk2 .lg .fl{margin-left:auto;display:flex;gap:4px;background:var(--wash);padding:3px;border-radius:12px}
+.stk2 .lg .fl button{height:28px;padding:0 12px;border:0;border-radius:9px;background:none;font-size:13px;font-weight:500;color:var(--ink-3);transition:background .18s,color .18s}
+.stk2 .lg .fl button.on{background:var(--paper);color:var(--ink);box-shadow:0 1px 2px rgba(43,33,26,.08)}
+.stk2 .lg .day{margin-top:18px;font-family:var(--serif);font-weight:600;font-size:15px;color:var(--ink);padding-bottom:6px;border-bottom:1px solid var(--line)}
+.stk2 .lg .day span{font-family:var(--sans);font-weight:400;font-size:12.5px;color:var(--ink-3);margin-left:8px}
+.stk2 .lg .row{display:grid;grid-template-columns:1fr 90px 70px;gap:12px;align-items:center;padding:11px 0;border-bottom:1px solid var(--rule)}
+.stk2 .lg .row .w{min-width:0;padding-left:6px}
+.stk2 .lg .row .w b{font-weight:600;display:flex;align-items:center;gap:8px}
+.stk2 .lg .row .w b i{width:8px;height:8px;border-radius:50%;flex:none}
+.stk2 .lg .row.in .w b i{background:var(--sage)}.stk2 .lg .row.out .w b i{background:var(--clay-hi)}.stk2 .lg .row.adj .w b i{background:var(--amber)}
+.stk2 .lg .row .w small{display:block;font-size:12.5px;color:var(--ink-3);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stk2 .lg .row .q{text-align:right;font-family:var(--mono);font-size:15px;font-weight:500}
+.stk2 .lg .row.in .q{color:var(--sage)}.stk2 .lg .row.out .q{color:var(--clay)}.stk2 .lg .row.adj .q{color:var(--amber)}
+.stk2 .lg .row .bal{text-align:right;font-family:var(--mono);font-size:13px;color:var(--ink-3);padding-right:6px}
+.stk2 .lg .empty{padding:24px 6px;color:var(--ink-3);font-size:14px}
+.stk2 .emptyall{padding:48px 16px;text-align:center;color:var(--ink-3)}
+.stk2 .fab{position:fixed;right:26px;bottom:26px;width:60px;height:60px;border-radius:30px;background:var(--clay);color:#fff;border:0;display:grid;place-items:center;box-shadow:0 18px 30px -14px rgba(181,71,42,.9);transition:transform .2s var(--spring),background .2s;z-index:40}
+.stk2 .fab:hover{transform:scale(1.05);background:var(--clay-hi)}
+.stk2 .fab svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round}
+@media (max-width:1100px){.stk2 .wrap{padding:20px 16px 100px}.stk2 .tr{grid-template-columns:36px minmax(0,1fr) 150px max-content}.stk2 .tr .mini{display:none}.stk2 .drawer{width:100%}.stk2 .facts{grid-template-columns:1fr 1fr}}
+@media (prefers-reduced-motion:reduce){.stk2 *{transition:none!important;animation:none!important}}
 `
 
-const Tick = () => (<svg className="tick" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10.5" /><path d="M7 12.5l3.2 3.2L17 9" /></svg>)
+const I = {
+  wa: <svg className="wa" viewBox="0 0 24 24"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2Zm4.5 12.1c-.2-.1-1.5-.7-1.7-.8s-.4-.1-.6.1-.6.8-.8 1-.3.2-.5.1a6.7 6.7 0 0 1-3.3-2.9c-.3-.4.2-.4.7-1.3.1-.2 0-.3 0-.4l-.8-1.8c-.2-.5-.4-.4-.6-.4h-.5a1 1 0 0 0-.7.3 3 3 0 0 0-.9 2.2 5.2 5.2 0 0 0 1.1 2.7 11.8 11.8 0 0 0 4.5 4c1.7.7 2.3.8 3.1.6a2.7 2.7 0 0 0 1.8-1.2 2.2 2.2 0 0 0 .1-1.2c0-.1-.2-.2-.4-.3Z" /></svg>,
+  tick: <svg viewBox="0 0 24 24"><path d="m5 12 4.5 4.5L19 7" /></svg>,
+  x: <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18" /></svg>,
+  plus: <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>,
+  ch: <svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6" /></svg>,
+  pen: <svg viewBox="0 0 24 24"><path d="M4 20h4l10.5-10.5a2 2 0 0 0 0-2.8l-1.2-1.2a2 2 0 0 0-2.8 0L4 16v4Z" /><path d="m13 7 4 4" /></svg>,
+  merge: <svg viewBox="0 0 24 24"><path d="M8 6h8M8 12h8M8 18h8" /><path d="M4 6l2 2-2 2M20 14l-2 2 2 2" /></svg>,
+  trash: <svg viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" /></svg>,
+}
 
 export default function ProjectInventory({ session: _session }: { session: Session }) {
   const { projectId } = useParams<{ projectId: string }>()
@@ -235,403 +276,362 @@ export default function ProjectInventory({ session: _session }: { session: Sessi
     enabled: !!projectId,
   })
 
-  const { data: rows = [], isLoading } = useQuery({
+  const { data: mats = [], isLoading } = useQuery({
     queryKey: ['project_stock_material', projectId],
     enabled: !!projectId,
     queryFn: async () => {
       const { data, error } = await supabase.from('v_stock_material')
-        .select('item_key, inventory_id, item_name, unit, on_hand, total_in, total_out, stock_value, avg_rate, last_movement_at, last_delivery_at, last_delivery_qty, category, spec, brand')
+        .select('item_key, inventory_id, item_name, unit, on_hand, total_out, used_since, avg_rate, last_delivery_at, last_delivery_qty, last_movement_at, category, alert_qty, aliases, stock_value')
         .eq('project_id', projectId!).order('item_name')
       if (error) throw error
-      return (data ?? []) as StockRow[]
+      return (data ?? []) as Mat[]
     },
   })
 
-  const materials = useMemo(() => rows.filter((r) => Number(r.on_hand) > 0.0001), [rows])
-  const catName = (r: StockRow) => (r.category?.trim() || 'Uncategorised')
-
-  // categories present in the data (by vendor category), with counts
-  const cats = useMemo(() => {
-    const m = new Map<string, number>()
-    materials.forEach((r) => m.set(catName(r), (m.get(catName(r)) ?? 0) + 1))
-    return [...m.entries()].map(([n, c]) => ({ n, c })).sort((a, b) => b.c - a.c || a.n.localeCompare(b.n))
-  }, [materials])
-
-  // value bars: top-5 categories by value + "Other"
-  const bars = useMemo(() => {
-    const m = new Map<string, number>()
-    materials.forEach((r) => m.set(catName(r), (m.get(catName(r)) ?? 0) + (Number(r.stock_value) || 0)))
-    const arr = [...m.entries()].map(([n, v]) => ({ n, v })).sort((a, b) => b.v - a.v)
-    const top = arr.slice(0, 5), rest = arr.slice(5)
-    const out = [...top]
-    if (rest.length) out.push({ n: 'Other', v: rest.reduce((a, g) => a + g.v, 0) })
-    return out
-  }, [materials])
-  const totalValue = materials.reduce((a, r) => a + (Number(r.stock_value) || 0), 0)
-  const notCounted = materials.filter((r) => r.total_out === 0 && r.last_delivery_at).length
-
-  const [filter, setFilter] = useState<string>('')
-  const [peek, setPeek] = useState<StockRow | null>(null)
-  const [editing, setEditing] = useState(false)
-  const [edit, setEdit] = useState<InvEdit | null>(null)
-  const [savingEdit, setSavingEdit] = useState(false)
-  const [aliasInput, setAliasInput] = useState('')
-  const [mergeOpen, setMergeOpen] = useState(false)
-  const [busyMerge, setBusyMerge] = useState<string | null>(null)
-  const [snapSoon, setSnapSoon] = useState(false)
-  const [pill, setPill] = useState<{ key: string; kind: 'in' | 'out'; val: number } | null>(null)
-  const [busyKey, setBusyKey] = useState<string | null>(null)
-  const [doneKey, setDoneKey] = useState<string | null>(null)
-  const [flashKey, setFlashKey] = useState<string | null>(null)
-
-  const ledger = useQuery({
-    queryKey: ['stock_ledger_item', projectId, peek?.item_key],
-    enabled: !!peek && !!projectId,
-    queryFn: async () => {
-      let q = supabase.from('stock_ledger')
-        .select('entry_id, qty, direction, kind, unit, unit_rate, note, created_at, ref_id')
-        .eq('project_id', projectId!)
-      // A mapped material owns its movements by identity; an unmapped one still folds on name+unit.
-      q = peek!.inventory_id
-        ? q.eq('inventory_id', peek!.inventory_id)
-        : q.is('inventory_id', null).eq('unit', peek!.unit ?? '').ilike('item_name', peek!.item_name)
-      const { data } = await q.order('created_at', { ascending: true })
-      return (data ?? []) as Move[]
-    },
-  })
-
-  // The doubtful-arrivals inbox (stock_resolution_queue) — how many need clarification.
-  const [resolveOpen, setResolveOpen] = useState(false)
   const queueQ = useQuery({
     queryKey: ['stock_queue_count', projectId],
     enabled: !!projectId,
     queryFn: async () => {
-      const { count } = await supabase.from('stock_resolution_queue')
-        .select('id', { count: 'exact', head: true }).eq('project_id', projectId!)
+      const { count } = await supabase.from('stock_resolution_queue').select('id', { count: 'exact', head: true }).eq('project_id', projectId!)
       return count ?? 0
     },
   })
   const queueCount = queueQ.data ?? 0
 
-  const commit = async (r: StockRow, kind: 'in' | 'out', qty: number) => {
-    if (!qty || qty <= 0) return
-    const key = r.item_key + kind
-    setBusyKey(key)
+  const [cat, setCat] = useState('All')
+  const [onlyLow, setOnlyLow] = useState(false)
+  const [q, setQ] = useState('')
+  const [resolveOpen, setResolveOpen] = useState(false)
+  const [sel, setSel] = useState<Set<string>>(new Set())
+  const [pop, setPop] = useState<'merge' | 'delete' | null>(null)
+  const [mergeInto, setMergeInto] = useState<string | null>(null)
+  const [renameId, setRenameId] = useState<string | null>(null)
+  const [renameVal, setRenameVal] = useState('')
+  const [entry, setEntry] = useState<{ id: string; kind: 'in' | 'out'; qty: string; where: 'row' | 'drawer' } | null>(null)
+  const [busyEntry, setBusyEntry] = useState(false)
+  const [flashId, setFlashId] = useState<string | null>(null)
+  const [open, setOpen] = useState<Mat | null>(null)
+  const [dfilter, setDfilter] = useState<'all' | 'in' | 'out'>('all')
+  const [alertVal, setAlertVal] = useState<string>('')
+  const [unitMenu, setUnitMenu] = useState(false)
+
+  const byKey = (k: string) => mats.find((m) => m.item_key === k)
+  const cats = useMemo(() => [...new Set(mats.map((m) => m.category?.trim() || 'Uncategorised'))], [mats])
+  const catOf = (m: Mat) => m.category?.trim() || 'Uncategorised'
+  const lowList = useMemo(() => mats.filter(isLow), [mats])
+  const totalValue = mats.reduce((a, m) => a + (Number(m.stock_value) || 0), 0)
+  const visible = useMemo(() => mats.filter((m) => (cat === 'All' || catOf(m) === cat) && (!onlyLow || isLow(m)) && (!q || m.item_name.toLowerCase().includes(q.toLowerCase()))), [mats, cat, onlyLow, q])
+  const latest = useMemo(() => mats.map((m) => m.last_delivery_at).filter(Boolean).sort().reverse()[0] ?? null, [mats])
+
+  // drawer ledger
+  const ledger = useQuery({
+    queryKey: ['stock_ledger_item', projectId, open?.item_key],
+    enabled: !!open && !!projectId,
+    queryFn: async () => {
+      let query = supabase.from('stock_ledger').select('entry_id, direction, kind, qty, unit_rate, note, created_at, ref_type, ref_id').eq('project_id', projectId!)
+      query = open!.inventory_id ? query.eq('inventory_id', open!.inventory_id) : query.is('inventory_id', null).eq('unit', open!.unit ?? '').ilike('item_name', open!.item_name)
+      const { data } = await query.order('created_at', { ascending: false })
+      return (data ?? []) as LEntry[]
+    },
+  })
+
+  const invalidate = () => { qc.invalidateQueries({ queryKey: ['project_stock_material', projectId] }); if (open) qc.invalidateQueries({ queryKey: ['stock_ledger_item', projectId, open.item_key] }) }
+
+  const saveEntry = async () => {
+    if (!entry || busyEntry) return
+    const m = byKey(entry.id); if (!m) return
+    const val = parseFloat(entry.qty); if (!(val > 0)) return
+    setBusyEntry(true)
     try {
       const { data, error } = await supabase.rpc('record_stock_movement', {
-        p_org_id: orgId, p_project_id: projectId, p_item_name: r.item_name, p_unit: r.unit,
-        p_qty: qty, p_direction: kind, p_unit_rate: kind === 'in' ? (r.avg_rate ?? null) : null,
-        p_inventory_id: r.inventory_id ?? null,
+        p_org_id: orgId, p_project_id: projectId, p_item_name: m.item_name, p_unit: m.unit,
+        p_qty: val, p_direction: entry.kind, p_unit_rate: entry.kind === 'in' ? (m.avg_rate ?? null) : null, p_inventory_id: m.inventory_id ?? null,
       })
       if (error || !(data as any)?.ok) throw new Error((data as any)?.error || error?.message || 'Could not record it')
-      setPill(null); setDoneKey(key)
-      setFlashKey(r.item_key); setTimeout(() => setFlashKey(null), 1200)
-      await qc.invalidateQueries({ queryKey: ['project_stock_material', projectId] })
-      await qc.invalidateQueries({ queryKey: ['stock_ledger_item', projectId, r.item_key] })
-      setTimeout(() => setDoneKey(null), 1500)
+      show((entry.kind === 'out' ? 'Used ' : 'Arrived: ') + fmt(val) + ' ' + (m.unit ?? '') + ' of ' + m.item_name)
+      setFlashId(m.item_key); setTimeout(() => setFlashId(null), 1600)
+      setEntry(null); invalidate()
     } catch (e) { show((e as Error).message || 'Could not record it', { type: 'error' }) }
-    finally { setBusyKey(null) }
+    finally { setBusyEntry(false) }
   }
 
-  // Open the identity editor for the peeked material (mapped rows only).
-  const openEdit = async () => {
-    if (!peek?.inventory_id) return
-    const { data } = await supabase.from('inventory_items')
-      .select('item, variant, dimension, grade, category, unit, aliases')
-      .eq('inventory_id', peek.inventory_id).single()
-    if (!data) { show('Could not load this material', { type: 'error' }); return }
-    setEdit({ item: data.item ?? '', variant: data.variant ?? '', dimension: data.dimension ?? '', grade: data.grade ?? '', category: data.category ?? '', unit: data.unit ?? '', aliases: (data.aliases ?? []) as string[] })
-    setAliasInput(''); setEditing(true)
+  const commitRename = async (m: Mat, save: boolean) => {
+    const v = renameVal.trim()
+    setRenameId(null)
+    if (!save || !v || v === m.item_name || !m.inventory_id) return
+    const { data, error } = await supabase.rpc('rename_inventory_item', { p_org_id: orgId, p_inventory_id: m.inventory_id, p_name: v })
+    if (error || !(data as any)?.ok) { show((data as any)?.error || error?.message || 'Could not rename', { type: 'error' }); return }
+    show('Renamed — bills that say "' + m.item_name + '" will still match')
+    qc.invalidateQueries({ queryKey: ['project_stock_material', projectId] })
   }
-  const closeEdit = () => { setEditing(false); setEdit(null); setAliasInput(''); setMergeOpen(false) }
 
-  // Fold this material into another (kills a near-duplicate; its wordings become the survivor's aliases).
-  const doMerge = async (intoId: string) => {
-    if (!peek?.inventory_id || busyMerge) return
-    setBusyMerge(intoId)
+  const doMerge = async () => {
+    const ids = [...sel]; const into = mergeInto || ids[0]
+    const others = ids.filter((k) => k !== into).map(byKey).filter(Boolean) as Mat[]
+    const target = byKey(into)
+    if (!target?.inventory_id || others.some((o) => !o.inventory_id)) { show('These rows aren\'t tracked yet — resolve them first', { type: 'error' }); return }
     try {
-      const { data, error } = await supabase.rpc('merge_inventory_items', { p_org_id: orgId, p_from: peek.inventory_id, p_into: intoId })
-      if (error || !(data as any)?.ok) throw new Error((data as any)?.error || error?.message || 'Could not merge')
-      show('Merged')
-      await qc.invalidateQueries({ queryKey: ['project_stock_material', projectId] })
-      setMergeOpen(false); setPeek(null)
+      for (const o of others) await supabase.rpc('merge_inventory_items', { p_org_id: orgId, p_from: o.inventory_id, p_into: target.inventory_id })
+      show('Merged into ' + target.item_name)
+      setSel(new Set()); setPop(null); setMergeInto(null)
+      qc.invalidateQueries({ queryKey: ['project_stock_material', projectId] })
     } catch (e) { show((e as Error).message || 'Could not merge', { type: 'error' }) }
-    finally { setBusyMerge(null) }
   }
-  const addAlias = () => {
-    const a = aliasInput.trim(); if (!a || !edit) return
-    if (!edit.aliases.some((x) => x.toLowerCase() === a.toLowerCase())) setEdit({ ...edit, aliases: [...edit.aliases, a] })
-    setAliasInput('')
-  }
-  const saveEdit = async () => {
-    if (!edit || !peek?.inventory_id) return
-    if (!edit.item.trim()) { show('A material name is required', { type: 'error' }); return }
-    setSavingEdit(true)
+
+  const doDelete = async () => {
+    const ids = [...sel].map(byKey).filter(Boolean) as Mat[]
     try {
-      const { data, error } = await supabase.rpc('update_inventory_item', {
-        p_inventory_id: peek.inventory_id, p_org_id: orgId,
-        p_item: edit.item, p_variant: edit.variant || null, p_dimension: edit.dimension || null,
-        p_grade: edit.grade || null, p_category: edit.category || null, p_unit: edit.unit || null,
-        p_aliases: edit.aliases,
-      })
-      if (error || !(data as any)?.ok) throw new Error((data as any)?.error || error?.message || 'Could not save')
-      closeEdit()
-      await qc.invalidateQueries({ queryKey: ['project_stock_material', projectId] })
-      setPeek(null)   // the row's name/unit may have changed; reopen from the refreshed list
-    } catch (e) { show((e as Error).message || 'Could not save', { type: 'error' }) }
-    finally { setSavingEdit(false) }
+      for (const m of ids) { if (m.inventory_id) await supabase.rpc('delete_inventory_item', { p_org_id: orgId, p_inventory_id: m.inventory_id }) }
+      show('Deleted ' + (ids.length === 1 ? ids[0].item_name : ids.length + ' materials'))
+      setSel(new Set()); setPop(null)
+      qc.invalidateQueries({ queryKey: ['project_stock_material', projectId] })
+    } catch (e) { show((e as Error).message || 'Could not delete', { type: 'error' }) }
   }
 
-  // Deferred enrichment sweep: when the page shows raw (un-identified) rows, standardize them
-  // into clean identities (observe-never-invent) and fold them in. Runs once per raw set.
-  const enrichingRef = useRef(false)
-  const sweptRef = useRef<Set<string>>(new Set())
-  useEffect(() => {
-    const unmapped = rows.filter((r) => !r.inventory_id)
-    if (!orgId || !projectId || unmapped.length === 0 || enrichingRef.current) return
-    const sig = unmapped.map((r) => r.item_key).sort().join('|')
-    if (sweptRef.current.has(sig)) return
-    sweptRef.current.add(sig)
-    enrichingRef.current = true
-    ;(async () => {
-      try {
-        // Skip rows already waiting in the clarify panel — they stay unmapped, don't re-triage them.
-        const { data: qd } = await supabase.from('stock_resolution_queue').select('raw_name, unit').eq('project_id', projectId!)
-        const queued = new Set((qd ?? []).map((q: any) => `${String(q.raw_name || '').toLowerCase().trim()}|${q.unit || ''}`))
-        const items = unmapped
-          .map((r) => ({ item_name: r.item_name, unit: r.unit, qty: r.on_hand }))
-          .filter((it) => !queued.has(`${String(it.item_name || '').toLowerCase().trim()}|${it.unit || ''}`))
-        if (items.length === 0) { enrichingRef.current = false; return }
-        const { data, error } = await supabase.functions.invoke('stock-triage', { body: { org_id: orgId, project_id: projectId, source: 'grn', items } })
-        if (!error && (data as any)?.ok && (((data as any).adopted ?? 0) > 0 || ((data as any).queued ?? 0) > 0)) {
-          await qc.invalidateQueries({ queryKey: ['project_stock_material', projectId] })
-          await qc.invalidateQueries({ queryKey: ['stock_queue_count', projectId] })
-        }
-      } catch { /* best-effort sweep — never block the page */ }
-      finally { enrichingRef.current = false }
-    })()
-  }, [rows, orgId, projectId, qc])
+  const saveAlert = async (m: Mat, v: string) => {
+    if (!m.inventory_id) return
+    const n = parseFloat(v) || 0
+    await supabase.rpc('set_material_alert', { p_org_id: orgId, p_inventory_id: m.inventory_id, p_alert: n })
+    qc.invalidateQueries({ queryKey: ['project_stock_material', projectId] })
+    show(n > 0 ? 'You\'ll hear when ' + m.item_name + ' drops below ' + fmt(n) + ' ' + (m.unit ?? '') : 'Alert cleared')
+  }
 
-  const shown = filter ? materials.filter((r) => catName(r) === filter) : materials
+  const changeUnit = async (m: Mat, u: string) => {
+    setUnitMenu(false)
+    if (!m.inventory_id) return
+    await supabase.rpc('set_material_unit', { p_org_id: orgId, p_inventory_id: m.inventory_id, p_unit: u })
+    show(m.item_name + ' is now counted in ' + u)
+    qc.invalidateQueries({ queryKey: ['project_stock_material', projectId] })
+    setOpen((o) => (o ? { ...o, unit: u } : o))
+  }
+
+  useEffect(() => { if (open) { const fresh = mats.find((m) => m.item_key === open.item_key); if (fresh) setOpen(fresh) } }, [mats]) // eslint-disable-line
+  useEffect(() => { if (open) setAlertVal(open.alert_qty ? String(open.alert_qty) : '') }, [open?.item_key]) // eslint-disable-line
+
+  const toggleSel = (k: string) => setSel((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n })
+  const stepEntry = (d: number) => setEntry((e) => (e ? { ...e, qty: String(Math.max(0, (parseFloat(e.qty) || 0) + d)) } : e))
+
+  const heroTotal = inr(totalValue)
 
   return (
-    <div className="stkx">
+    <div className="stk2">
       <style>{CSS}</style>
-      <main className="page">
-        <div className="crumb"><a onClick={() => navigate(`/projects/${projectId}`)}>{project?.name ?? 'Project'}</a> &nbsp;/&nbsp; <b>Stock</b></div>
-
-        <header className="head">
-          <div className="head-l">
+      <div className="wrap">
+        <header className="top">
+          <div>
             <h1>Stock</h1>
-            <p className="lede">Materials at this site. Quantities come in from bills and POs; they go out when the site sends a count.</p>
+            <div className="hero">
+              <div className="big"><span>{heroTotal}</span><small>on site · {project?.name ?? 'this site'}</small></div>
+              <div className="sub">
+                <span><b>{mats.length}</b> materials</span><span className="sep">·</span>
+                <span className={lowList.length ? 'low' : ''}><b>{lowList.length}</b> running low</span><span className="sep">·</span>
+                <span>last delivery <b>{latest ? dstr(latest) : '—'}</b></span>
+              </div>
+            </div>
           </div>
-          <div className="head-r">
-            <button className={`snapb${snapSoon ? ' soon' : ''}`} onClick={() => { setSnapSoon(true); setTimeout(() => setSnapSoon(false), 2200) }}>
-              <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M3 5.5h2.2l1-1.5h5.6l1 1.5H15v8H3z" /><circle cx="9" cy="9.3" r="2.4" /></svg>
-              {snapSoon ? 'Snapshot requests — coming soon' : 'Ask the site for a snapshot'}
-            </button>
-            {materials.length > 0 && <div className="snapmeta">Last movement <b>{dstr(materials.map((m) => m.last_movement_at).sort().reverse()[0] ?? null)}</b> · {materials.length} materials</div>}
+          <div className="acts">
+            <button className="btn" onClick={() => show('Sends the site a WhatsApp asking for today\'s count — coming soon')}>{I.wa}Ask for a count</button>
+            <button className="btn pri" onClick={() => show('New-material form — coming soon')}>{I.plus}New material</button>
           </div>
         </header>
 
-        {isLoading ? <div className="empty">Loading stock…</div>
-          : materials.length === 0 ? (
-            <div className="empty" style={{ background: 'var(--paper)', border: '1px solid var(--rule)', borderRadius: 12, marginTop: 24 }}>
-              <p style={{ fontSize: 17, fontWeight: 700, color: 'var(--ink)', margin: '0 0 8px' }}>No stock yet</p>
-              <p style={{ maxWidth: 340, margin: '0 auto', lineHeight: 1.6 }}>When you receive a purchase order at this site, the goods appear here as stock on hand.</p>
-            </div>
-          ) : (
-          <>
-            <section className="band">
-              <div className="band-l">
-                <div className="big num">{inr(totalValue)}<small>in stock</small></div>
-                <div className="sub">across <b>{materials.length}</b> materials{notCounted > 0 ? <> · <b>{notCounted}</b> not counted since delivery</> : null}</div>
-              </div>
-              <div className="band-r">
-                <div className="bh">Where the value sits<span>{filter ? 'one category · tap again for all' : 'tap a category to filter'}</span></div>
-                <div className={`bars${filter ? ' filtered' : ''}`}>
-                  {bars.map((g) => (
-                    <div key={g.n} className={`g${filter === g.n ? ' on' : ''}`} title={g.n} style={{ flex: Math.max(g.v / (totalValue || 1), 0.08) }}
-                      onClick={() => { if (g.n !== 'Other') setFilter(filter === g.n ? '' : g.n) }}>
-                      <div className="bar" /><div className="gv">{inr(g.v)}</div><div className="gn">{g.n}</div><div className="gp">{Math.round(g.v / (totalValue || 1) * 100)}%</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </section>
-
+        {(queueCount > 0 || lowList.length > 0) && (
+          <section className="needs">
             {queueCount > 0 && (
-              <button className="queue" onClick={() => setResolveOpen(true)}>
-                <span className="qd" />
-                <span className="qt"><b>{queueCount} arrival{queueCount === 1 ? '' : 's'} need{queueCount === 1 ? 's' : ''} clarification</b>
-                  <span>we couldn't place {queueCount === 1 ? 'it' : 'them'} for sure</span></span>
-                <span className="qgo">Clarify →</span>
-              </button>
+              <div className="line">
+                <span className="ic clay"><svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6z" /><path d="M9 12h6M9 16h6" /></svg></span>
+                <span><b>{queueCount} arrival{queueCount === 1 ? '' : 's'}</b> came in without a clear material — we couldn't place {queueCount === 1 ? 'it' : 'them'} for sure</span>
+                <a onClick={() => setResolveOpen(true)}>Sort {queueCount === 1 ? 'it' : 'them'}</a>
+              </div>
             )}
+            {lowList.length > 0 && (
+              <div className="line">
+                <span className="ic amber"><svg viewBox="0 0 24 24"><path d="M12 3v11" /><path d="m7 9 5 5 5-5" /><path d="M4 20h16" /></svg></span>
+                <span><b>{lowList.slice(0, 3).map((m) => m.item_name).join(', ')}</b>{lowList.length > 3 ? ` +${lowList.length - 3}` : ''} {lowList.length === 1 ? 'is' : 'are'} running low</span>
+                <a onClick={() => navigate(`/projects/${projectId}`)}>Raise a PO</a>
+              </div>
+            )}
+          </section>
+        )}
 
-            <div className="body">
-              <nav className="rail" aria-label="Categories">
-                <button className={`rt${filter === '' ? ' on' : ''}`} onClick={() => setFilter('')}>All<span>{materials.length}</span></button>
-                {cats.map((c) => <button key={c.n} className={`rt${filter === c.n ? ' on' : ''}`} onClick={() => setFilter(filter === c.n ? '' : c.n)}>{c.n}<span>{c.c}</span></button>)}
-              </nav>
+        <div className="filters">
+          <button className={`chip${cat === 'All' ? ' on' : ''}`} onClick={() => setCat('All')}>All<em>{mats.length}</em></button>
+          {cats.map((c) => <button key={c} className={`chip${cat === c ? ' on' : ''}`} onClick={() => setCat(c)}>{c}<em>{mats.filter((m) => catOf(m) === c).length}</em></button>)}
+          <button className={`chip${onlyLow ? ' on' : ''}`} onClick={() => setOnlyLow((v) => !v)}>Running low<em>{lowList.length}</em></button>
+          <div className="search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg><input placeholder="Search materials" value={q} onChange={(e) => setQ(e.target.value)} /></div>
+        </div>
 
-              <div className="lists">
-                {(filter ? cats.filter((c) => c.n === filter) : cats).map((c) => {
-                  const its = shown.filter((r) => catName(r) === c.n)
-                  if (!its.length) return null
-                  return (
-                    <section className="group" key={c.n}>
-                      <div className="group-h"><b>{c.n}</b><span>{its.length} {its.length === 1 ? 'item' : 'items'}</span></div>
-                      <div className="tbl">
-                        <div className="hd"><div>Material</div><div>In stock</div><div>Last delivery</div><div /></div>
-                        {its.map((r) => {
-                          const step = stepFor(r.unit)
-                          const attr = [r.brand, r.spec].filter(Boolean).join(' · ')
-                          return (
-                            <div className={`row${flashKey === r.item_key ? ' flash' : ''}`} key={r.item_key} aria-current={peek?.item_key === r.item_key || undefined}
-                              onClick={(e) => { if ((e.target as HTMLElement).closest('.pmw')) return; setPeek(r) }}>
-                              <div className="m"><div className="name">{r.item_name}</div>{attr && <div className="attr">{attr}</div>}</div>
-                              <div className="left">
-                                <div className="base"><span className="lv num">{qfmt(r.on_hand, step)}</span><u>{r.unit}</u></div>
-                                <div className="ev">received {dstr(r.last_delivery_at) || dstr(r.last_movement_at)}</div>
+        <section className={`ledger${sel.size ? ' has-sel' : ''}`}>
+          {isLoading ? <div className="emptyall">Loading stock…</div>
+            : mats.length === 0 ? <div className="emptyall">No stock yet. When goods are received at this site, they appear here.</div>
+            : (cat === 'All' ? cats : [cat]).map((c) => {
+              const its = visible.filter((m) => catOf(m) === c)
+              if (!its.length) return null
+              const val = its.reduce((a, m) => a + (Number(m.stock_value) || 0), 0)
+              return (
+                <div key={c}>
+                  <div className="grp"><h3>{c}<span>{its.length} {its.length === 1 ? 'material' : 'materials'}</span></h3><span className="r">{val ? <><b>{inr(val)}</b> on site</> : ''}</span></div>
+                  <div className="card">
+                    {its.map((m) => {
+                      const low = isLow(m), lt = lasts(m), s = m.on_hand
+                      const li = m.last_delivery_qty ?? 0, us = m.used_since ?? 0
+                      const isRen = renameId === m.item_key
+                      const ent = entry && entry.id === m.item_key && entry.where === 'row' ? entry : null
+                      return (
+                        <div className={`tr${low ? ' low' : ''}${sel.has(m.item_key) ? ' sel' : ''}${flashId === m.item_key ? ' flash' : ''}`} key={m.item_key}
+                          onClick={(e) => { const el = e.target as HTMLElement; if (el.closest('button,input,label,.entry')) return; setOpen(m) }}>
+                          <span className="lead">
+                            <span className="av">{initials(m.item_name)}</span>
+                            <label className="pick" onClick={(e) => e.stopPropagation()}><input type="checkbox" style={{ position: 'absolute', opacity: 0 }} checked={sel.has(m.item_key)} onChange={() => toggleSel(m.item_key)} /><span className="box">{I.tick}</span></label>
+                          </span>
+                          <div className="nm">
+                            {isRen
+                              ? <b><input className="rn" autoFocus value={renameVal} onChange={(e) => setRenameVal(e.target.value)} onBlur={() => commitRename(m, true)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); commitRename(m, true) } else if (e.key === 'Escape') setRenameId(null) }} /></b>
+                              : <b><span className="txt">{m.item_name}</span>{m.inventory_id && <button className="pen" onClick={(e) => { e.stopPropagation(); setRenameId(m.item_key); setRenameVal(m.item_name) }}>{I.pen}</button>}</b>}
+                            <span>{low && <b className="low">Running low</b>}{low && lt ? ' · ' : ''}{lt ? <b className={lt.kind === 'new' ? 'new' : lt.kind === 'ok' ? 'ok' : ''}>{lt.text}</b> : (!low ? 'Nothing has arrived yet' : '')}{lt && lt.kind !== 'dim' && lt.kind !== 'new' ? ' · ' + lt.sub : ''}</span>
+                          </div>
+                          <div className="mini">{li ? <><div className="bar"><i className="u" style={{ width: Math.min(100, us / li * 100) + '%' }} /><i className="l" style={{ width: Math.max(0, (li - us) / li * 100) + '%' }} /></div><small>arrived <b>{fmt(li)}</b> · used <b>{fmt(us)}</b> since {dstr(m.last_delivery_at)}</small></> : <small>—</small>}</div>
+                          <div className="st"><b className={low ? 'low' : ''}>{fmt(s)}</b><span>{m.unit}</span><small>{m.last_delivery_at ? 'last ' + dstr(m.last_delivery_at) : ''}</small></div>
+                          <div className="ac" onClick={(e) => e.stopPropagation()}>
+                            {ent ? (
+                              <div className={`entry ${ent.kind}`}>
+                                <span className="k">{ent.kind === 'out' ? '− Used' : '+ Arrived'}</span>
+                                <button className="stp" onClick={() => stepEntry(-1)}>−</button>
+                                <input autoFocus inputMode="decimal" placeholder="how many" value={ent.qty} onChange={(e) => setEntry({ ...ent, qty: e.target.value })} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); saveEntry() } else if (e.key === 'Escape') setEntry(null) }} />
+                                <button className="stp" onClick={() => stepEntry(1)}>+</button>
+                                <span className="u">{m.unit}</span>
+                                <button className={`save${parseFloat(ent.qty) > 0 ? ' ready' : ''}`} disabled={busyEntry} onClick={saveEntry}>{I.tick}</button>
+                                <button className="x" onClick={() => setEntry(null)}>{I.x}</button>
                               </div>
-                              <div className="arr">{r.last_delivery_at ? <><span className="d">{dstr(r.last_delivery_at)}</span><span className="q num">{qfmt(r.last_delivery_qty ?? 0, step)} {r.unit}</span></> : <span className="d">—</span>}</div>
-                              <div className={`pmw${pill?.key === r.item_key ? ' hasopen' : ''}`}>
-                                {(['out', 'in'] as const).map((kind) => {
-                                  const key = r.item_key + kind
-                                  const open = pill?.key === r.item_key && pill?.kind === kind
-                                  const done = doneKey === key
-                                  const busy = busyKey === key
-                                  return (
-                                    <span key={kind} className={`pill${open ? ' open' : ''}${done ? ' done' : ''}${busy ? ' busy' : ''}`}
-                                      onClick={() => { if (!open && !done) setPill({ key: r.item_key, kind, val: 0 }) }}>
-                                      <span className="lb">{kind === 'out' ? '− Used' : '+ Arrived'}</span>
-                                      <span className="ex">
-                                        <button className="st" onClick={(e) => { e.stopPropagation(); setPill((p) => (p ? { ...p, val: Math.max(0, p.val - step) } : p)) }} aria-label="less">−</button>
-                                        <input className="num" inputMode="decimal" value={open ? qfmt(pill!.val, step) : '0'} onChange={(e) => setPill((p) => (p ? { ...p, val: parseFloat(e.target.value.replace(/[^\d.]/g, '')) || 0 } : p))} onClick={(e) => e.stopPropagation()} aria-label={kind === 'out' ? 'Used' : 'Arrived'} />
-                                        <button className="st" onClick={(e) => { e.stopPropagation(); setPill((p) => (p ? { ...p, val: p.val + step } : p)) }} aria-label="more">+</button>
-                                        <span className="u">{r.unit}</span>
-                                        <span className="go" role="button" aria-label="Add to ledger" onClick={(e) => { e.stopPropagation(); if (open) commit(r, kind, pill!.val) }}><svg viewBox="0 0 12 12"><path d="M2.5 6.5l2.4 2.4L9.8 4" /></svg></span>
-                                        <span className="okw"><Tick /></span>
-                                      </span>
-                                    </span>
-                                  )
-                                })}
-                              </div>
-                            </div>
-                          )
+                            ) : (
+                              <>
+                                <button className="pill out" onClick={() => setEntry({ id: m.item_key, kind: 'out', qty: '', where: 'row' })}>− Used</button>
+                                <button className="pill in" onClick={() => setEntry({ id: m.item_key, kind: 'in', qty: '', where: 'row' })}>+ Arrived</button>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )
+            })}
+          {!isLoading && mats.length > 0 && visible.length === 0 && <div className="emptyall">Nothing matches. Clear the filters to see all {mats.length} materials.</div>}
+        </section>
+      </div>
+
+      {/* selection bar */}
+      <div className={`selbar${sel.size ? ' on' : ''}`}>
+        {sel.size > 0 && (<>
+          <span className="n"><b>{sel.size}</b> selected</span>
+          <button disabled={sel.size < 2} onClick={() => { setPop(pop === 'merge' ? null : 'merge'); setMergeInto(null) }}>{I.merge}Merge</button>
+          <button disabled={sel.size !== 1} onClick={() => { const k = [...sel][0]; const m = byKey(k); setSel(new Set()); setPop(null); if (m) { setRenameId(k); setRenameVal(m.item_name) } }}>{I.pen}Edit</button>
+          <button className="del" onClick={() => setPop(pop === 'delete' ? null : 'delete')}>{I.trash}Delete</button>
+          <span className="sep" /><button className="xb" onClick={() => { setSel(new Set()); setPop(null) }}>{I.x}</button>
+          {pop === 'merge' && (() => {
+            const ms = [...sel].map(byKey).filter(Boolean) as Mat[]; const into = mergeInto || ms[0]?.item_key
+            return (
+              <div className="pop">
+                <h5>Merge {ms.length} materials into one</h5>
+                <p>Their ledgers combine, stock adds up, and the other names are kept as aliases so future bills still match.</p>
+                <div className="into">{ms.map((m) => <label key={m.item_key} className={m.item_key === into ? 'on' : ''} onClick={() => setMergeInto(m.item_key)}><i />{m.item_name}<small>{fmt(m.on_hand)} {m.unit}</small></label>)}</div>
+                <div className="pacts"><button onClick={() => setPop(null)}>Cancel</button><button className="go" onClick={doMerge}>Merge into {byKey(into || '')?.item_name}</button></div>
+              </div>
+            )
+          })()}
+          {pop === 'delete' && (() => {
+            const ms = [...sel].map(byKey).filter(Boolean) as Mat[]; const withStock = ms.filter((m) => m.on_hand > 0)
+            return (
+              <div className="pop">
+                <h5>Delete {ms.length === 1 ? ms[0].item_name : ms.length + ' materials'}?</h5>
+                <p>{withStock.length ? withStock.map((m) => m.item_name + ' still shows ' + fmt(m.on_hand) + ' ' + m.unit).join('; ') + '. This removes the material and its movements at this site.' : 'Nothing is in stock, so nothing is lost.'}</p>
+                <div className="pacts"><button onClick={() => setPop(null)}>Keep</button><button className="danger" onClick={doDelete}>Yes, delete</button></div>
+              </div>
+            )
+          })()}
+        </>)}
+      </div>
+
+      {/* drawer */}
+      <div className={`scrim${open ? ' on' : ''}`} onClick={() => { setOpen(null); setEntry(null); setUnitMenu(false) }} />
+      <aside className={`drawer${open ? ' on' : ''}`} aria-hidden={!open}>
+        {open && (() => {
+          const m = open, s = m.on_hand, low = isLow(m), lt = lasts(m), ar = m.avg_rate ?? 0
+          const li = m.last_delivery_qty ?? 0, us = m.used_since ?? 0
+          const raw = ledger.data ?? []
+          let bal = s; const withBal = raw.map((e) => { const r = { ...e, bal }; bal += e.direction === 'in' ? -e.qty : e.qty; return r } ).filter((e) => dfilter === 'all' || (dfilter === 'in' ? e.direction === 'in' : e.direction === 'out'))
+          const days = [...new Set(withBal.map((e) => e.created_at.slice(0, 10)))]
+          const ent = entry && entry.id === m.item_key && entry.where === 'drawer' ? entry : null
+          return (
+            <>
+              <div className="dtop">
+                <div>
+                  <div className="cat">{catOf(m)}{m.aliases && m.aliases.length ? ' · also called ' + m.aliases.slice(0, 3).join(', ') : ''}</div>
+                  <h2>{m.item_name}</h2>
+                  <span className="unitc" onClick={() => setUnitMenu((v) => !v)} style={{ position: 'relative' }}>counted in {m.unit}{I.ch}
+                    {unitMenu && <div style={{ position: 'absolute', top: '110%', left: 0, zIndex: 5, background: 'var(--paper)', border: '1px solid var(--line-2)', borderRadius: 12, padding: 6, boxShadow: '0 18px 40px -20px rgba(43,33,26,.5)', minWidth: 140 }} onClick={(e) => e.stopPropagation()}>
+                      {UNITS.map((u) => <button key={u} onClick={() => changeUnit(m, u)} style={{ display: 'flex', width: '100%', height: 32, padding: '0 10px', border: 0, background: u === m.unit ? 'var(--wash)' : 'none', borderRadius: 8, fontSize: 13.5, textAlign: 'left', alignItems: 'center', cursor: 'pointer' }}>{u}</button>)}
+                    </div>}
+                  </span>
+                </div>
+                <div className="rr"><button className="btn" onClick={() => { setRenameId(m.item_key); setRenameVal(m.item_name); setOpen(null) }}>Edit</button><button className="x" onClick={() => { setOpen(null); setEntry(null); setUnitMenu(false) }}>{I.x}</button></div>
+              </div>
+              <div className="body">
+                <div className="dhero"><div className={`big${low ? ' low' : ''}`}>{fmt(s)}<small>{m.unit}{low ? ' · running low' : ' on site'}</small></div>
+                  {lt && <div className={`lasts ${lt.kind === 'low' ? 'warn' : lt.kind === 'ok' || lt.kind === 'new' ? 'ok' : ''}`}><b>{lt.text}</b><small>{lt.sub}</small></div>}
+                </div>
+                <div className="dacts">
+                  {ent ? (
+                    <div className={`entry ${ent.kind}`}>
+                      <span className="k">{ent.kind === 'out' ? '− Used' : '+ Arrived'}</span>
+                      <button className="stp" onClick={() => stepEntry(-1)}>−</button>
+                      <input autoFocus inputMode="decimal" placeholder="how many" value={ent.qty} onChange={(e) => setEntry({ ...ent, qty: e.target.value })} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); saveEntry() } else if (e.key === 'Escape') setEntry(null) }} />
+                      <button className="stp" onClick={() => stepEntry(1)}>+</button>
+                      <span className="u">{m.unit}</span>
+                      <button className={`save${parseFloat(ent.qty) > 0 ? ' ready' : ''}`} disabled={busyEntry} onClick={saveEntry}>{I.tick}</button>
+                      <button className="x" onClick={() => setEntry(null)}>{I.x}</button>
+                    </div>
+                  ) : (<>
+                    <button className="pill out" onClick={() => setEntry({ id: m.item_key, kind: 'out', qty: '', where: 'drawer' })}>− Used</button>
+                    <button className="pill in" onClick={() => setEntry({ id: m.item_key, kind: 'in', qty: '', where: 'drawer' })}>+ Arrived</button>
+                  </>)}
+                  <button className="pill" onClick={() => show('Sent the site a WhatsApp: “How much ' + m.item_name + ' is on site now?” — coming soon')}>{I.wa}Ask for a count</button>
+                </div>
+                {m.last_delivery_at && (
+                  <div className="since"><h4>Since the last delivery · {dstr(m.last_delivery_at)}</h4>
+                    <div className="bar"><i className="u" style={{ width: Math.min(100, li ? us / li * 100 : 0) + '%' }} /><i className="l" style={{ width: Math.max(0, li ? (li - us) / li * 100 : 0) + '%' }} /></div>
+                    <div className="legs"><div><span>Arrived</span><b>{fmt(li)} {m.unit}</b></div><div className="u" style={{ textAlign: 'center' }}><span>Used</span><b>{fmt(us)} {m.unit}</b><small>{li ? Math.round(us / li * 100) + '% of it' : ''}</small></div><div className="l" style={{ textAlign: 'right' }}><span>Left from it</span><b>{fmt(Math.max(0, li - us))} {m.unit}</b></div></div>
+                  </div>
+                )}
+                <div className="facts">
+                  <div className="fact"><span>Average rate</span>{ar ? <><b>{inr(ar)} / {m.unit}</b></> : <b className="dim">Not on the bill</b>}</div>
+                  <div className="fact"><span>Value on site</span>{ar ? <><b>{inr(ar * s)}</b><small>{fmt(s)} × {inr(ar)}</small></> : <b className="dim">—</b>}</div>
+                  <div className="fact"><span>Used since delivery</span><b>{fmt(us)} {m.unit}</b></div>
+                </div>
+                <div className={`alert${(m.alert_qty ?? 0) > 0 ? ' set' : ''}`}>Tell me when it drops below <input inputMode="numeric" value={alertVal} onChange={(e) => setAlertVal(e.target.value)} onBlur={() => saveAlert(m, alertVal)} onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }} /> {m.unit}<span className="on">✓ on</span></div>
+                <div className="lg">
+                  <div className="hd"><h4>What came and went</h4><div className="fl">{(['all', 'in', 'out'] as const).map((f) => <button key={f} className={dfilter === f ? 'on' : ''} onClick={() => setDfilter(f)}>{f === 'all' ? 'All' : f === 'in' ? 'Arrived' : 'Used'}</button>)}</div></div>
+                  {ledger.isLoading ? <div className="empty">Loading…</div>
+                    : days.length === 0 ? <div className="empty">Nothing here yet.</div>
+                    : days.map((day) => (
+                      <div key={day}>
+                        <div className="day">{dstr(day)}{day === new Date().toISOString().slice(0, 10) ? <span>today</span> : ''}</div>
+                        {withBal.filter((e) => e.created_at.slice(0, 10) === day).map((e) => {
+                          const isIn = e.direction === 'in', adj = e.kind === 'adjustment'
+                          const sub = isIn ? (e.ref_id ? e.ref_id : 'manual, no bill') + (e.unit_rate ? ' · ' + inr(e.unit_rate) + '/' + (m.unit ?? '') : '') : (e.note || 'entered')
+                          return <div className={`row ${adj ? 'adj' : e.direction}`} key={e.entry_id}><div className="w"><b><i />{isIn ? 'Arrived' : adj ? 'Adjusted' : 'Used'}</b><small>{sub}</small></div><div className="q">{isIn ? '+' : '−'}{fmt(e.qty)}</div><div className="bal">{fmt(e.bal)}</div></div>
                         })}
                       </div>
-                    </section>
-                  )
-                })}
-              </div>
-            </div>
-          </>
-        )}
-      </main>
-
-      <div className={`scrim${peek ? ' on' : ''}`} onClick={() => { setPeek(null); closeEdit() }} />
-      <aside className={`peek${peek ? ' on' : ''}`} aria-hidden={!peek}>
-        {peek && (() => {
-          const step = stepFor(peek.unit)
-          const attr = [peek.brand, peek.spec].filter(Boolean).join(' · ')
-          const moves = ledger.data ?? []
-          let bal = 0
-          const withBal = moves.map((mv) => { bal += mv.direction === 'in' ? Number(mv.qty) : -Number(mv.qty); return { ...mv, bal } })
-          return (
-            <div className="peek-in">
-              <div className="top">
-                <div><div className="kind">{catName(peek)}{attr ? ` · ${attr}` : ''}</div><h2>{peek.item_name}</h2></div>
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                  {peek.inventory_id && !editing && !mergeOpen && <button className="editb" onClick={() => setMergeOpen(true)}>Merge</button>}
-                  {peek.inventory_id && !editing && !mergeOpen && <button className="editb" onClick={openEdit}>Edit</button>}
-                  <button className="x" aria-label="Close" onClick={() => { setPeek(null); closeEdit() }}>×</button>
-                </div>
-              </div>
-
-              {mergeOpen ? (
-                <div className="iedit">
-                  <div className="als"><div className="lbl">Merge “{peek.item_name}” into…</div></div>
-                  <p style={{ color: 'var(--mute)', fontSize: 13, margin: '-6px 0 4px' }}>Its stock and its names move onto the material you pick. This one is then removed.</p>
-                  <div className="mlist">
-                    {materials.filter((m) => m.inventory_id && m.inventory_id !== peek.inventory_id).map((m) => (
-                      <button key={m.item_key} className="mrow" disabled={!!busyMerge} onClick={() => doMerge(m.inventory_id!)}>
-                        <span className="mn">{m.item_name}</span><span className="mq num">{qfmt(m.on_hand, stepFor(m.unit))} {m.unit}</span>
-                      </button>
                     ))}
-                    {materials.filter((m) => m.inventory_id && m.inventory_id !== peek.inventory_id).length === 0 && <div style={{ color: 'var(--mute)', fontSize: 13 }}>No other tracked materials to merge into yet.</div>}
-                  </div>
-                  <div className="acts"><button onClick={() => setMergeOpen(false)}>Cancel</button></div>
                 </div>
-              ) : editing && edit ? (
-                <div className="iedit">
-                  <label>Material<input value={edit.item} onChange={(e) => setEdit({ ...edit, item: e.target.value })} placeholder="e.g. TMT Bar" /></label>
-                  <div className="r3">
-                    <label>Dimension<input value={edit.dimension} onChange={(e) => setEdit({ ...edit, dimension: e.target.value })} placeholder="12mm" /></label>
-                    <label>Variant<input value={edit.variant} onChange={(e) => setEdit({ ...edit, variant: e.target.value })} placeholder="—" /></label>
-                    <label>Grade<input value={edit.grade} onChange={(e) => setEdit({ ...edit, grade: e.target.value })} placeholder="Fe500" /></label>
-                  </div>
-                  <div className="r2">
-                    <label>Category<input list="inv-cats" value={edit.category} onChange={(e) => setEdit({ ...edit, category: e.target.value })} placeholder="Steel" /></label>
-                    <label>Standard unit<input list="inv-units" value={edit.unit} onChange={(e) => setEdit({ ...edit, unit: e.target.value })} placeholder="MT" /></label>
-                  </div>
-                  <datalist id="inv-cats">{INV_CATS.map((c) => <option key={c} value={c} />)}</datalist>
-                  <datalist id="inv-units">{INV_UNITS.map((u) => <option key={u} value={u} />)}</datalist>
-                  <div className="als">
-                    <div className="lbl">Also called (helps match future bills)</div>
-                    <div className="chips">
-                      {edit.aliases.length === 0 && <span style={{ color: 'var(--mute)', fontSize: 13 }}>No other names yet.</span>}
-                      {edit.aliases.map((a, i) => (
-                        <span className="chip" key={a + i}>{a}<button aria-label={`remove ${a}`} onClick={() => setEdit({ ...edit, aliases: edit.aliases.filter((_, j) => j !== i) })}>×</button></span>
-                      ))}
-                    </div>
-                    <div className="addrow">
-                      <input value={aliasInput} onChange={(e) => setAliasInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addAlias() } }} placeholder="add a name a vendor might use…" />
-                      <button onClick={addAlias}>Add</button>
-                    </div>
-                  </div>
-                  <div className="acts">
-                    <button onClick={closeEdit}>Cancel</button>
-                    <button className="save" disabled={savingEdit} onClick={saveEdit}>{savingEdit ? 'Saving…' : 'Save'}</button>
-                  </div>
-                </div>
-              ) : (
-              <>
-              <div className="hero"><div className="base num">{qfmt(peek.on_hand, step)}<u>{peek.unit}</u></div></div>
-              <div className="meta">
-                {peek.last_delivery_at && <span>Last delivery <b>{dstr(peek.last_delivery_at)}, {qfmt(peek.last_delivery_qty ?? 0, step)} {peek.unit}</b></span>}
-                <span>Used since <b className="num">{qfmt(peek.total_out, step)}</b></span>
-                {peek.avg_rate != null && <span>Avg rate <b className="num">{inr(peek.avg_rate)} / {peek.unit}</b></span>}
-                <span>Value <b className="num">{inr(peek.stock_value)}</b></span>
               </div>
-              <div className="ledger">
-                <h3>Ledger</h3>
-                {ledger.isLoading ? <p style={{ color: 'var(--mute)', fontSize: 13 }}>Loading…</p>
-                  : withBal.length === 0 ? <p style={{ color: 'var(--mute)', fontSize: 13 }}>No movements yet.</p>
-                  : [...withBal].reverse().map((mv) => {
-                    const isIn = mv.direction === 'in'
-                    const label = mv.kind === 'grn_receipt' ? `Arrived ${qfmt(mv.qty, step)} ${mv.unit ?? peek.unit}` : mv.kind === 'manual_in' ? `Arrived ${qfmt(mv.qty, step)} ${mv.unit ?? peek.unit}` : `Used ${qfmt(mv.qty, step)} ${mv.unit ?? peek.unit}`
-                    const sub = mv.ref_id ? `Receipt ${mv.ref_id}${mv.unit_rate ? ` · ${inr(mv.unit_rate)}/${mv.unit ?? peek.unit}` : ''}` : (mv.note || (isIn ? 'from the Stock page' : 'issued from the Stock page'))
-                    return (
-                      <div className="mv" key={mv.entry_id}><div className="d">{dstr(mv.created_at)}</div><div className="w"><b>{label}</b><span>{sub}</span></div><div className={`q num${isIn ? '' : ' minus'}`}>{isIn ? '+' : '−'}{qfmt(mv.qty, step)}</div><div className="bal num">{qfmt(mv.bal, step)}</div></div>
-                    )
-                  })}
-              </div>
-              </>
-              )}
-            </div>
+            </>
           )
         })()}
       </aside>
 
-      <BillResolvePanel
-        open={resolveOpen}
-        onClose={() => setResolveOpen(false)}
-        orgId={orgId}
-        projectId={projectId!}
-        onResolved={() => { qc.invalidateQueries({ queryKey: ['project_stock_material', projectId] }); qc.invalidateQueries({ queryKey: ['stock_queue_count', projectId] }) }}
-      />
+      <BillResolvePanel open={resolveOpen} onClose={() => setResolveOpen(false)} orgId={orgId} projectId={projectId!} onResolved={() => { qc.invalidateQueries({ queryKey: ['project_stock_material', projectId] }); qc.invalidateQueries({ queryKey: ['stock_queue_count', projectId] }) }} />
     </div>
   )
 }
