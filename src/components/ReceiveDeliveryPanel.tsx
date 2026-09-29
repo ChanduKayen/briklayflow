@@ -2,7 +2,7 @@
 // short/over), any problem, and the proof (challan no + photo) — then save. Nothing blocks the
 // save. Writes a GRN (create_grn) → stock; doubtful lines fall to the clarify panel via triage.
 // Design ported from the reference (scoped .rcv); mobile-first.
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useSnackbar } from './Snackbar'
 
@@ -119,6 +119,8 @@ export default function ReceiveDeliveryPanel({ open, onClose, orgId, po, receive
   const [more, setMore] = useState(false)
   const [photo, setPhoto] = useState<File | null>(null)
   const [saving, setSaving] = useState(false)
+  const [asking, setAsking] = useState(false)
+  const [asked, setAsked] = useState(false)
   const [done, setDone] = useState<{ grn: string; text: string } | null>(null)
   const [seededFor, setSeededFor] = useState<string | null>(null)
 
@@ -178,7 +180,21 @@ export default function ReceiveDeliveryPanel({ open, onClose, orgId, po, receive
     finally { setSaving(false) }
   }
 
-  const nWord = useMemo(() => nRecv === 0 ? 'Save — nothing came' : nRecv === po.lines.length ? `Receive all ${nRecv} items` : `Receive ${nRecv} of ${po.lines.length} items`, [nRecv, po.lines.length])
+  const askRaju = async () => {
+    if (asking || !po) return
+    setAsking(true)
+    try {
+      const { data, error } = await supabase.rpc('create_receive_token', { p_org_id: orgId, p_po_id: po.po_id })
+      if (error || !(data as any)?.ok) throw new Error((data as any)?.error || error?.message || 'Could not create the link')
+      const link = `${window.location.origin}/receive/${(data as any).token}`
+      const msg = `${po.vendor} lorry${po.site ? ' for ' + po.site : ''} — did it all come? Tap to confirm what arrived: ${link}`
+      window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, '_blank')
+      setAsked(true); show('Link ready — pick the supervisor in WhatsApp')
+    } catch (e) { show((e as Error).message || 'Could not create the link', { type: 'error' }) }
+    finally { setAsking(false) }
+  }
+
+  const nWord = nRecv === 0 ? 'Save — nothing came' : nRecv === po.lines.length ? `Receive all ${nRecv} items` : `Receive ${nRecv} of ${po.lines.length} items`
 
   return (
     <div className="rcv" role="dialog" aria-modal="true">
@@ -237,7 +253,7 @@ export default function ReceiveDeliveryPanel({ open, onClose, orgId, po, receive
                   </label>
                   <div className="chal"><label>Challan no.</label><input placeholder="optional" value={challan} onChange={(e) => setChallan(e.target.value)} /></div>
                 </div>
-                <div className="ask2"><span>Not at site? Raju can do this from his phone.</span><button className="btn sm" onClick={() => show('Supervisor link on WhatsApp — coming soon')}>{WA}Ask Raju</button></div>
+                <div className="ask2"><span>{asked ? 'Link sent — the supervisor confirms from site.' : 'Not at site? The supervisor can do this from their phone.'}</span><button className={`btn sm${asking ? ' busy' : ''}`} disabled={asking} onClick={askRaju}>{WA}{asked ? 'Link ready' : 'Ask supervisor'}</button></div>
               </div>
 
               <div className="more">

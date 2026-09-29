@@ -90,6 +90,7 @@ import { isSecondaryNavRoute } from './components/nav/navTokens';
 const Orders = lazy(() => import('./pages/Orders'));
 import InviteAccept from './pages/InviteAccept';
 import VendorQuote from './pages/VendorQuote';
+import SupervisorReceive from './pages/SupervisorReceive';
 import OnboardingFlow from './components/onboarding/OnboardingFlow';
 import Pending from './pages/Pending';
 import Welcome from './pages/Welcome';
@@ -414,6 +415,12 @@ function App() {
   if (location.pathname.startsWith('/quote/')) {
     const token = location.pathname.replace('/quote/', '');
     return <VendorQuote token={token} />;
+  }
+
+  // Public, no-login supervisor receive page — the "Ask Raju" WhatsApp link lands here.
+  if (location.pathname.startsWith('/receive/')) {
+    const token = location.pathname.replace('/receive/', '');
+    return <SupervisorReceive token={token} />;
   }
 
   if (location.pathname === '/pending') {
