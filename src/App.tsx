@@ -91,6 +91,7 @@ const Orders = lazy(() => import('./pages/Orders'));
 import InviteAccept from './pages/InviteAccept';
 import VendorQuote from './pages/VendorQuote';
 import SupervisorReceive from './pages/SupervisorReceive';
+import SupervisorCount from './pages/SupervisorCount';
 import OnboardingFlow from './components/onboarding/OnboardingFlow';
 import Pending from './pages/Pending';
 import Welcome from './pages/Welcome';
@@ -421,6 +422,12 @@ function App() {
   if (location.pathname.startsWith('/receive/')) {
     const token = location.pathname.replace('/receive/', '');
     return <SupervisorReceive token={token} />;
+  }
+
+  // Public, no-login supervisor stock-count page — the "Ask for a count/snapshot" link lands here.
+  if (location.pathname.startsWith('/count/')) {
+    const token = location.pathname.replace('/count/', '');
+    return <SupervisorCount token={token} />;
   }
 
   if (location.pathname === '/pending') {

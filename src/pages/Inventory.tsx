@@ -532,6 +532,24 @@ export default function Inventory({ session: _session }: { session: Session }) {
     finally { setSavingNew(false) }
   }
 
+  // Ask the site for a physical count — one material (from the drawer) or the whole site
+  // (a snapshot). Mints a token and opens WhatsApp with the /count/ link; the supervisor's
+  // reply posts an adjustment so on-hand matches what's actually there.
+  const askCount = async (proj: string | undefined, invId?: string | null, label?: string) => {
+    if (!proj) { show('Pick one site first to ask for its count', { type: 'error' }); return }
+    try {
+      const { data, error } = await supabase.rpc('create_count_token', { p_org_id: orgId, p_project_id: proj, p_inventory_id: invId ?? null })
+      if (error || !(data as any)?.ok) throw new Error((data as any)?.error || error?.message || 'Could not create the link')
+      const link = `${window.location.origin}/count/${(data as any).token}`
+      const where = siteName[proj] ? ` at ${siteName[proj]}` : ''
+      const msg = invId
+        ? `How much ${label ?? 'this material'} is on site${where} right now? Tap to send the count: ${link}`
+        : `Quick stock count${where} — how much of each material is on site now? Tap: ${link}`
+      window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, '_blank')
+      show('Count link ready — pick the supervisor in WhatsApp')
+    } catch (e) { show((e as Error).message || 'Could not create the link', { type: 'error' }) }
+  }
+
   const toggleSel = (k: string) => setSel((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n })
   const stepEntry = (d: number) => setEntry((e) => (e ? { ...e, qty: String(Math.max(0, (parseFloat(e.qty) || 0) + d)) } : e))
 
@@ -615,7 +633,7 @@ export default function Inventory({ session: _session }: { session: Session }) {
             </div>
           </div>
           <div className="acts">
-            <button className="btn" onClick={() => show('Sends the site a WhatsApp asking for today\'s count — coming soon')}>{I.wa}Ask for a count</button>
+            <button className="btn" onClick={() => askCount(projectId || site, null)}>{I.wa}Ask for a snapshot</button>
             <button className="btn pri" onClick={() => setNewOpen(true)}>{I.plus}New material</button>
           </div>
         </header>
@@ -799,7 +817,7 @@ export default function Inventory({ session: _session }: { session: Session }) {
                     <button className="pill out" onClick={() => setEntry({ id: m.rowKey, kind: 'out', qty: '', where: 'drawer' })}>− Used</button>
                     <button className="pill in" onClick={() => setEntry({ id: m.rowKey, kind: 'in', qty: '', where: 'drawer' })}>+ Arrived</button>
                   </>)}
-                  <button className="pill" onClick={() => show('Sent the site a WhatsApp: “How much ' + m.item_name + ' is on site now?” — coming soon')}>{I.wa}Ask for a count</button>
+                  <button className="pill" onClick={() => m.inventory_id ? askCount(m.project_id, m.inventory_id, m.item_name) : show('Resolve this material first, then ask for its count', { type: 'error' })}>{I.wa}Ask for a count</button>
                 </div>
                 {m.last_delivery_at && (
                   <div className="since"><h4>Since the last delivery · {dstr(m.last_delivery_at)}</h4>
