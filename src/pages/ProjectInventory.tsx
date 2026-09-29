@@ -174,6 +174,12 @@ const CSS = `
 .stkx .iedit .acts button{border:1px solid var(--rule);border-radius:999px;padding:10px 20px;font-size:14px}
 .stkx .iedit .acts .save{background:var(--ink);color:var(--cream);border-color:var(--ink)}
 .stkx .iedit .acts .save:disabled{opacity:.5}
+.stkx .mlist{display:flex;flex-direction:column;gap:6px;max-height:46vh;overflow:auto}
+.stkx .mrow{display:flex;align-items:center;justify-content:space-between;gap:12px;border:1px solid var(--rule);border-radius:10px;padding:11px 14px;text-align:left;transition:border-color .15s,background .15s}
+.stkx .mrow:hover{border-color:var(--clay);background:var(--rule-soft)}
+.stkx .mrow:disabled{opacity:.5}
+.stkx .mrow .mn{font-weight:600;font-size:14.5px}
+.stkx .mrow .mq{color:var(--mute);font-size:13px;white-space:nowrap}
 .stkx .scrim{position:fixed;inset:0;background:rgba(44,28,19,.22);opacity:0;pointer-events:none;transition:opacity .25s;z-index:20}
 .stkx .scrim.on{opacity:1;pointer-events:auto}
 .stkx .peek{position:fixed;top:0;right:0;bottom:0;width:min(540px,100%);background:var(--paper);border-left:1px solid var(--rule);box-shadow:var(--shadow);transform:translateX(104%);transition:transform .32s var(--ease);overflow:auto;z-index:21}
@@ -270,6 +276,8 @@ export default function ProjectInventory({ session: _session }: { session: Sessi
   const [edit, setEdit] = useState<InvEdit | null>(null)
   const [savingEdit, setSavingEdit] = useState(false)
   const [aliasInput, setAliasInput] = useState('')
+  const [mergeOpen, setMergeOpen] = useState(false)
+  const [busyMerge, setBusyMerge] = useState<string | null>(null)
   const [snapSoon, setSnapSoon] = useState(false)
   const [pill, setPill] = useState<{ key: string; kind: 'in' | 'out'; val: number } | null>(null)
   const [busyKey, setBusyKey] = useState<string | null>(null)
@@ -335,7 +343,21 @@ export default function ProjectInventory({ session: _session }: { session: Sessi
     setEdit({ item: data.item ?? '', variant: data.variant ?? '', dimension: data.dimension ?? '', grade: data.grade ?? '', category: data.category ?? '', unit: data.unit ?? '', aliases: (data.aliases ?? []) as string[] })
     setAliasInput(''); setEditing(true)
   }
-  const closeEdit = () => { setEditing(false); setEdit(null); setAliasInput('') }
+  const closeEdit = () => { setEditing(false); setEdit(null); setAliasInput(''); setMergeOpen(false) }
+
+  // Fold this material into another (kills a near-duplicate; its wordings become the survivor's aliases).
+  const doMerge = async (intoId: string) => {
+    if (!peek?.inventory_id || busyMerge) return
+    setBusyMerge(intoId)
+    try {
+      const { data, error } = await supabase.rpc('merge_inventory_items', { p_org_id: orgId, p_from: peek.inventory_id, p_into: intoId })
+      if (error || !(data as any)?.ok) throw new Error((data as any)?.error || error?.message || 'Could not merge')
+      show('Merged')
+      await qc.invalidateQueries({ queryKey: ['project_stock_material', projectId] })
+      setMergeOpen(false); setPeek(null)
+    } catch (e) { show((e as Error).message || 'Could not merge', { type: 'error' }) }
+    finally { setBusyMerge(null) }
+  }
   const addAlias = () => {
     const a = aliasInput.trim(); if (!a || !edit) return
     if (!edit.aliases.some((x) => x.toLowerCase() === a.toLowerCase())) setEdit({ ...edit, aliases: [...edit.aliases, a] })
@@ -522,12 +544,27 @@ export default function ProjectInventory({ session: _session }: { session: Sessi
               <div className="top">
                 <div><div className="kind">{catName(peek)}{attr ? ` · ${attr}` : ''}</div><h2>{peek.item_name}</h2></div>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                  {peek.inventory_id && !editing && <button className="editb" onClick={openEdit}>Edit</button>}
+                  {peek.inventory_id && !editing && !mergeOpen && <button className="editb" onClick={() => setMergeOpen(true)}>Merge</button>}
+                  {peek.inventory_id && !editing && !mergeOpen && <button className="editb" onClick={openEdit}>Edit</button>}
                   <button className="x" aria-label="Close" onClick={() => { setPeek(null); closeEdit() }}>×</button>
                 </div>
               </div>
 
-              {editing && edit ? (
+              {mergeOpen ? (
+                <div className="iedit">
+                  <div className="als"><div className="lbl">Merge “{peek.item_name}” into…</div></div>
+                  <p style={{ color: 'var(--mute)', fontSize: 13, margin: '-6px 0 4px' }}>Its stock and its names move onto the material you pick. This one is then removed.</p>
+                  <div className="mlist">
+                    {materials.filter((m) => m.inventory_id && m.inventory_id !== peek.inventory_id).map((m) => (
+                      <button key={m.item_key} className="mrow" disabled={!!busyMerge} onClick={() => doMerge(m.inventory_id!)}>
+                        <span className="mn">{m.item_name}</span><span className="mq num">{qfmt(m.on_hand, stepFor(m.unit))} {m.unit}</span>
+                      </button>
+                    ))}
+                    {materials.filter((m) => m.inventory_id && m.inventory_id !== peek.inventory_id).length === 0 && <div style={{ color: 'var(--mute)', fontSize: 13 }}>No other tracked materials to merge into yet.</div>}
+                  </div>
+                  <div className="acts"><button onClick={() => setMergeOpen(false)}>Cancel</button></div>
+                </div>
+              ) : editing && edit ? (
                 <div className="iedit">
                   <label>Material<input value={edit.item} onChange={(e) => setEdit({ ...edit, item: e.target.value })} placeholder="e.g. TMT Bar" /></label>
                   <div className="r3">
