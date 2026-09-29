@@ -884,6 +884,7 @@ function BillDetailView({ id }: { id: string }) {
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [linkOpen, setLinkOpen] = useState(false);
+  const [receiving, setReceiving] = useState(false);
 
   // Back goes where you came FROM. Opening a bill from a PO and being returned to the bills register
   // loses the thread you were pulling — you were reading that order, not the register.
@@ -918,6 +919,29 @@ function BillDetailView({ id }: { id: string }) {
     } catch (e) { show((e as Error)?.message || 'Could not delete the bill', { type: 'error' }); setDeleting(false); }
   };
 
+  // Receive this bill's goods into stock. Clear items land straight in stock; the doubtful
+  // ones wait in the site's "needs clarification" panel (stock-triage decides).
+  const rawId = id.replace(/^(bl|po|cb)~/, '');
+  const canReceive = id.startsWith('bl~') && !!b.projectId;
+  const onReceive = async () => {
+    setReceiving(true);
+    try {
+      const { data, error } = await supabase.rpc('receive_bill_into_stock', { p_bill_id: rawId });
+      const r = data as { ok?: boolean; error?: string; already?: boolean; project_id?: string };
+      if (error || !r?.ok) throw new Error(r?.error || error?.message || 'Could not receive into stock');
+      const items = (b.lines ?? []).filter((l) => (Number(l.qty) || 0) > 0).map((l) => ({ item_name: l.name, unit: l.unit, qty: l.qty, rate: l.rate }));
+      if (!r.already && items.length) {
+        await supabase.functions.invoke('stock-triage', { body: { org_id: orgId, project_id: r.project_id ?? b.projectId, source: 'bill', source_ref: rawId, items } });
+      }
+      show(r.already ? 'Already received into stock' : 'Received into stock');
+      qc.invalidateQueries({ queryKey: ['bill', id] });
+      qc.invalidateQueries({ queryKey: ['bills'] });
+      qc.invalidateQueries({ queryKey: ['stock_queue_count'] });
+      qc.invalidateQueries({ queryKey: ['project_stock_material'] });
+    } catch (e) { show((e as Error)?.message || 'Could not receive into stock', { type: 'error' }); }
+    finally { setReceiving(false); }
+  };
+
   return (
     <div className="blx">
       <style>{BLX_CSS}</style>
@@ -938,6 +962,11 @@ function BillDetailView({ id }: { id: string }) {
             <div className={`state status ${b.status}`}>
               {b.status === 'settled' ? 'Settled' : b.status === 'part' ? `Part-paid — ${inr(remaining)} remaining` : `Unpaid — ${inr(b.amount)} due`}
             </div>
+            {canReceive && (
+              <button className="btn-prim" style={{ marginTop: 10, fontSize: '.78rem', padding: '6px 14px' }} disabled={receiving || !!b.stockReceivedAt} onClick={onReceive}>
+                {b.stockReceivedAt ? 'Received into stock ✓' : receiving ? 'Receiving…' : 'Receive stock'}
+              </button>
+            )}
             <button className="delbill" disabled={deleting} onClick={onDelete}>{deleting ? 'Deleting…' : 'Delete bill'}</button>
           </div>
         </header>

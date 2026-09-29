@@ -5,13 +5,14 @@
 // vendor's category. The snapshot-count flow, the bill-line resolve queue and consumables are in the design
 // but have no backend yet, so the snapshot button is inert (coming soon) and the other two are omitted until
 // their data exists — nothing here shows fabricated numbers.
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import type { Session } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
 import { useOrgId } from '../lib/auth/AuthProvider'
 import { useSnackbar } from '../components/Snackbar'
+import BillResolvePanel from '../components/BillResolvePanel'
 
 interface StockRow {
   item_key: string; inventory_id: string | null; item_name: string; unit: string | null
@@ -20,11 +21,9 @@ interface StockRow {
   category: string | null; spec: string | null; brand: string | null
 }
 interface Move { entry_id: string; qty: number; direction: string; kind: string; unit: string | null; unit_rate: number | null; note: string | null; created_at: string; ref_id: string | null }
-interface QLine { bill_id: string; vendor_name: string | null; vendor_category: string | null; bill_no: string | null; bill_date: string | null; line_index: number; raw_name: string; spec: string | null; unit: string | null; qty: number | null; rate: number | null; amount: number | null }
-interface InvItem { inventory_id: string; display_name: string | null; item: string; unit: string | null }
-interface Canonical { item: string; variant: string | null; dimension: string | null; grade: string | null; unit: string | null; category: string | null }
-interface Resol { line_index: number; status: 'mapped' | 'needs_confirm' | 'create_suggested'; inventory_id?: string; confidence: number; source: string; canonical?: Canonical; candidates?: { inventory_id: string; display_name: string | null; confidence: number }[] }
-const canonLabel = (c?: Canonical | null) => c ? [c.item, c.dimension, c.variant, c.grade].filter(Boolean).join(' · ') : ''
+interface InvEdit { item: string; variant: string; dimension: string; grade: string; category: string; unit: string; aliases: string[] }
+const INV_UNITS = ['Bags', 'kg', 'MT', 'Nos', 'Mtr', 'Sqft', 'Cft', 'Ltr', 'Unit', 'Trip', 'Tin', 'Bundle', 'Roll', 'Sheet', 'Coil', 'Pair', 'Box', 'Packet', 'Quintal']
+const INV_CATS = ['Cement', 'Steel', 'Sand', 'Aggregate', 'Brick', 'Block', 'Tile', 'Paint', 'Plumbing', 'Electrical', 'Hardware', 'Plywood', 'Glass', 'Windows', 'Doors', 'Waterproofing', 'Admixture', 'Chemical']
 
 
 const inr = (n: number) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN')
@@ -141,6 +140,40 @@ const CSS = `
 .stkx .rl .opts button.yes{background:var(--ink);color:var(--cream);border-color:var(--ink)}
 .stkx .rl .opts select{border:1px solid var(--rule);border-radius:999px;padding:8px 12px;font:inherit;font-size:13px;background:var(--paper);color:var(--ink);min-height:36px}
 .stkx .rl.busy{opacity:.5;pointer-events:none}
+.stkx .cechip,.stkx .cewrap{display:inline-flex;align-items:center;gap:0}
+.stkx .cechip{border:1px solid var(--rule);border-radius:999px;overflow:hidden}
+.stkx .cechip.hasyes{}
+.stkx .cechip>button:first-child{border:0;border-radius:0;padding:8px 12px;font-size:13px;min-height:36px}
+.stkx .cechip .ceedit{border:0;border-left:1px solid var(--rule);padding:0 10px;min-height:36px;display:flex;align-items:center;color:var(--mute);transition:color .15s,background .15s}
+.stkx .cechip .ceedit:hover{color:var(--ink);background:var(--rule-soft)}
+.stkx .cewrap{border:1px solid var(--clay);border-radius:999px;padding:2px 4px 2px 12px;gap:8px;background:var(--paper)}
+.stkx .cewrap .ceinput{border:0;outline:none;font:inherit;font-size:13px;color:var(--ink);background:transparent;min-width:120px;width:140px}
+.stkx .cewrap .cesuffix{color:var(--mute);font-size:12.5px;white-space:nowrap}
+.stkx .cewrap .cetick{display:flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:50%;background:var(--ink);color:var(--cream);flex:none;transition:transform .12s}
+.stkx .cewrap .cetick:hover{transform:scale(1.06)}
+.stkx .cewrap .cetick.pop{animation:cetickpop .38s var(--ease);background:#2e7d52}
+@keyframes cetickpop{0%{transform:scale(1)}40%{transform:scale(1.35)}100%{transform:scale(1)}}
+.stkx .peek .editb{border:1px solid var(--rule);border-radius:999px;padding:6px 14px;font-size:13px;color:var(--ink);transition:border-color .15s,background .15s}
+.stkx .peek .editb:hover{border-color:var(--ink);background:var(--rule-soft)}
+.stkx .iedit{margin-top:20px;display:flex;flex-direction:column;gap:16px}
+.stkx .iedit label{display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--mute);letter-spacing:.02em}
+.stkx .iedit input{border:1px solid var(--rule);border-radius:9px;padding:10px 12px;font:inherit;font-size:15px;color:var(--ink);background:var(--paper)}
+.stkx .iedit input:focus{outline:none;border-color:var(--clay)}
+.stkx .iedit .r3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+.stkx .iedit .r2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.stkx .iedit .als .lbl{font-size:12px;color:var(--mute);margin-bottom:8px;letter-spacing:.02em}
+.stkx .iedit .chips{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:8px}
+.stkx .iedit .chip{display:inline-flex;align-items:center;gap:6px;background:var(--rule-soft);border:1px solid var(--rule);border-radius:999px;padding:5px 6px 5px 12px;font-size:13px}
+.stkx .iedit .chip button{color:var(--mute);font-size:15px;line-height:1;padding:0 4px;border-radius:50%}
+.stkx .iedit .chip button:hover{color:var(--ink)}
+.stkx .iedit .addrow{display:flex;gap:8px}
+.stkx .iedit .addrow input{flex:1}
+.stkx .iedit .addrow button{border:1px solid var(--rule);border-radius:9px;padding:0 16px;font-size:14px}
+.stkx .iedit .addrow button:hover{border-color:var(--ink)}
+.stkx .iedit .acts{display:flex;justify-content:flex-end;gap:10px;margin-top:4px}
+.stkx .iedit .acts button{border:1px solid var(--rule);border-radius:999px;padding:10px 20px;font-size:14px}
+.stkx .iedit .acts .save{background:var(--ink);color:var(--cream);border-color:var(--ink)}
+.stkx .iedit .acts .save:disabled{opacity:.5}
 .stkx .scrim{position:fixed;inset:0;background:rgba(44,28,19,.22);opacity:0;pointer-events:none;transition:opacity .25s;z-index:20}
 .stkx .scrim.on{opacity:1;pointer-events:auto}
 .stkx .peek{position:fixed;top:0;right:0;bottom:0;width:min(540px,100%);background:var(--paper);border-left:1px solid var(--rule);box-shadow:var(--shadow);transform:translateX(104%);transition:transform .32s var(--ease);overflow:auto;z-index:21}
@@ -233,6 +266,10 @@ export default function ProjectInventory({ session: _session }: { session: Sessi
 
   const [filter, setFilter] = useState<string>('')
   const [peek, setPeek] = useState<StockRow | null>(null)
+  const [editing, setEditing] = useState(false)
+  const [edit, setEdit] = useState<InvEdit | null>(null)
+  const [savingEdit, setSavingEdit] = useState(false)
+  const [aliasInput, setAliasInput] = useState('')
   const [snapSoon, setSnapSoon] = useState(false)
   const [pill, setPill] = useState<{ key: string; kind: 'in' | 'out'; val: number } | null>(null)
   const [busyKey, setBusyKey] = useState<string | null>(null)
@@ -255,93 +292,18 @@ export default function ProjectInventory({ session: _session }: { session: Sessi
     },
   })
 
-  // Bill lines that still need a material (the resolve queue). Bills feed stock once each line is confirmed.
+  // The doubtful-arrivals inbox (stock_resolution_queue) — how many need clarification.
+  const [resolveOpen, setResolveOpen] = useState(false)
   const queueQ = useQuery({
-    queryKey: ['stock_bill_queue', projectId],
+    queryKey: ['stock_queue_count', projectId],
     enabled: !!projectId,
     queryFn: async () => {
-      const { data } = await supabase.from('v_bill_lines_unresolved')
-        .select('bill_id, vendor_name, vendor_category, bill_no, bill_date, line_index, raw_name, spec, unit, qty, rate, amount')
-        .eq('project_id', projectId!).order('bill_date', { ascending: false })
-      return (data ?? []) as QLine[]
+      const { count } = await supabase.from('stock_resolution_queue')
+        .select('id', { count: 'exact', head: true }).eq('project_id', projectId!)
+      return count ?? 0
     },
   })
-  const [resolveOpen, setResolveOpen] = useState(false)
-  const [resolvedKeys, setResolvedKeys] = useState<Set<string>>(new Set())
-  const [pickLine, setPickLine] = useState<string | null>(null)
-  const [busyLine, setBusyLine] = useState<string | null>(null)
-  const [resolving, setResolving] = useState(false)
-  const [resolutions, setResolutions] = useState<Record<string, Resol>>({})
-  const keyOf = (l: QLine) => `${l.bill_id}:${l.line_index}`
-  const queue = useMemo(() => (queueQ.data ?? []).filter((l) => !resolvedKeys.has(keyOf(l))), [queueQ.data, resolvedKeys])
-  const queueVendors = useMemo(() => [...new Set(queue.map((l) => l.vendor_name).filter(Boolean))] as string[], [queue])
-
-  // The org's inventory materials — for the "another material" picker.
-  const invQ = useQuery({
-    queryKey: ['inventory_items', orgId],
-    enabled: !!orgId && resolveOpen,
-    queryFn: async () => {
-      const { data } = await supabase.from('inventory_items')
-        .select('inventory_id, display_name, item, unit').eq('org_id', orgId).order('item')
-      return (data ?? []) as InvItem[]
-    },
-  })
-
-  const invalidateStock = async () => {
-    await qc.invalidateQueries({ queryKey: ['stock_bill_queue', projectId] })
-    await qc.invalidateQueries({ queryKey: ['project_stock_material', projectId] })
-  }
-
-  // Low-level commit of one line to stock (or expense/skip). Returns ok.
-  const commitRpc = async (l: QLine, opts: { action: 'material' | 'expense' | 'skip'; inventory_id?: string; canonical?: Canonical | null; unit?: string | null }): Promise<boolean> => {
-    const c = opts.canonical
-    const { data, error } = await supabase.rpc('commit_bill_line', {
-      p_org_id: orgId, p_bill_id: l.bill_id, p_line_index: l.line_index, p_action: opts.action,
-      p_inventory_id: opts.inventory_id ?? null,
-      p_raw_name: l.raw_name, p_qty: l.qty, p_rate: l.rate,
-      p_item: c?.item ?? (opts.action === 'material' && !opts.inventory_id ? l.raw_name : null),
-      p_variant: c?.variant ?? null, p_dimension: c?.dimension ?? null, p_grade: c?.grade ?? null,
-      p_category: c?.category ?? null, p_unit: opts.unit ?? c?.unit ?? l.unit ?? null,
-    })
-    if (error || !(data as any)?.ok) { show((data as any)?.error || error?.message || 'Could not save it', { type: 'error' }); return false }
-    return true
-  }
-
-  // Ask the resolver to classify every queued line (grouped by bill); auto-commit the confident ones.
-  const runResolver = async () => {
-    if (resolving || queue.length === 0) return
-    setResolving(true)
-    try {
-      const byBill = new Map<string, QLine[]>()
-      queue.forEach((l) => { const g = byBill.get(l.bill_id) ?? []; g.push(l); byBill.set(l.bill_id, g) })
-      const next: Record<string, Resol> = {}
-      const auto: string[] = []
-      for (const [, lines] of byBill) {
-        const { data, error } = await supabase.functions.invoke('inventory-resolve', {
-          body: { org_id: orgId, vendor_category: lines[0]?.vendor_category ?? null, lines: lines.map((l) => ({ line_index: l.line_index, raw_name: l.raw_name, spec: l.spec, unit: l.unit, qty: l.qty, rate: l.rate })) },
-        })
-        if (error || !(data as any)?.ok) continue
-        for (const r of (((data as any).resolutions ?? []) as Resol[])) {
-          const line = lines.find((l) => l.line_index === r.line_index)
-          if (!line) continue
-          const k = keyOf(line); next[k] = r
-          if (r.status === 'mapped' && r.inventory_id && await commitRpc(line, { action: 'material', inventory_id: r.inventory_id })) auto.push(k)
-        }
-      }
-      setResolutions(next)
-      if (auto.length) setResolvedKeys((s) => { const n = new Set(s); auto.forEach((k) => n.add(k)); return n })
-      await invalidateStock()
-    } catch (e) { show((e as Error).message || 'Could not read the queue', { type: 'error' }) }
-    finally { setResolving(false) }
-  }
-
-  // A user-driven decision from the queue (accept a candidate / create / expense / skip).
-  const resolveLine = async (l: QLine, opts: { action: 'material' | 'expense' | 'skip'; inventory_id?: string; canonical?: Canonical | null; unit?: string | null }) => {
-    const key = keyOf(l); setBusyLine(key)
-    try {
-      if (await commitRpc(l, opts)) { setResolvedKeys((s) => new Set(s).add(key)); setPickLine(null); await invalidateStock() }
-    } finally { setBusyLine(null) }
-  }
+  const queueCount = queueQ.data ?? 0
 
   const commit = async (r: StockRow, kind: 'in' | 'out', qty: number) => {
     if (!qty || qty <= 0) return
@@ -362,6 +324,71 @@ export default function ProjectInventory({ session: _session }: { session: Sessi
     } catch (e) { show((e as Error).message || 'Could not record it', { type: 'error' }) }
     finally { setBusyKey(null) }
   }
+
+  // Open the identity editor for the peeked material (mapped rows only).
+  const openEdit = async () => {
+    if (!peek?.inventory_id) return
+    const { data } = await supabase.from('inventory_items')
+      .select('item, variant, dimension, grade, category, unit, aliases')
+      .eq('inventory_id', peek.inventory_id).single()
+    if (!data) { show('Could not load this material', { type: 'error' }); return }
+    setEdit({ item: data.item ?? '', variant: data.variant ?? '', dimension: data.dimension ?? '', grade: data.grade ?? '', category: data.category ?? '', unit: data.unit ?? '', aliases: (data.aliases ?? []) as string[] })
+    setAliasInput(''); setEditing(true)
+  }
+  const closeEdit = () => { setEditing(false); setEdit(null); setAliasInput('') }
+  const addAlias = () => {
+    const a = aliasInput.trim(); if (!a || !edit) return
+    if (!edit.aliases.some((x) => x.toLowerCase() === a.toLowerCase())) setEdit({ ...edit, aliases: [...edit.aliases, a] })
+    setAliasInput('')
+  }
+  const saveEdit = async () => {
+    if (!edit || !peek?.inventory_id) return
+    if (!edit.item.trim()) { show('A material name is required', { type: 'error' }); return }
+    setSavingEdit(true)
+    try {
+      const { data, error } = await supabase.rpc('update_inventory_item', {
+        p_inventory_id: peek.inventory_id, p_org_id: orgId,
+        p_item: edit.item, p_variant: edit.variant || null, p_dimension: edit.dimension || null,
+        p_grade: edit.grade || null, p_category: edit.category || null, p_unit: edit.unit || null,
+        p_aliases: edit.aliases,
+      })
+      if (error || !(data as any)?.ok) throw new Error((data as any)?.error || error?.message || 'Could not save')
+      closeEdit()
+      await qc.invalidateQueries({ queryKey: ['project_stock_material', projectId] })
+      setPeek(null)   // the row's name/unit may have changed; reopen from the refreshed list
+    } catch (e) { show((e as Error).message || 'Could not save', { type: 'error' }) }
+    finally { setSavingEdit(false) }
+  }
+
+  // Deferred enrichment sweep: when the page shows raw (un-identified) rows, standardize them
+  // into clean identities (observe-never-invent) and fold them in. Runs once per raw set.
+  const enrichingRef = useRef(false)
+  const sweptRef = useRef<Set<string>>(new Set())
+  useEffect(() => {
+    const unmapped = rows.filter((r) => !r.inventory_id)
+    if (!orgId || !projectId || unmapped.length === 0 || enrichingRef.current) return
+    const sig = unmapped.map((r) => r.item_key).sort().join('|')
+    if (sweptRef.current.has(sig)) return
+    sweptRef.current.add(sig)
+    enrichingRef.current = true
+    ;(async () => {
+      try {
+        // Skip rows already waiting in the clarify panel — they stay unmapped, don't re-triage them.
+        const { data: qd } = await supabase.from('stock_resolution_queue').select('raw_name, unit').eq('project_id', projectId!)
+        const queued = new Set((qd ?? []).map((q: any) => `${String(q.raw_name || '').toLowerCase().trim()}|${q.unit || ''}`))
+        const items = unmapped
+          .map((r) => ({ item_name: r.item_name, unit: r.unit, qty: r.on_hand }))
+          .filter((it) => !queued.has(`${String(it.item_name || '').toLowerCase().trim()}|${it.unit || ''}`))
+        if (items.length === 0) { enrichingRef.current = false; return }
+        const { data, error } = await supabase.functions.invoke('stock-triage', { body: { org_id: orgId, project_id: projectId, source: 'grn', items } })
+        if (!error && (data as any)?.ok && (((data as any).adopted ?? 0) > 0 || ((data as any).queued ?? 0) > 0)) {
+          await qc.invalidateQueries({ queryKey: ['project_stock_material', projectId] })
+          await qc.invalidateQueries({ queryKey: ['stock_queue_count', projectId] })
+        }
+      } catch { /* best-effort sweep — never block the page */ }
+      finally { enrichingRef.current = false }
+    })()
+  }, [rows, orgId, projectId, qc])
 
   const shown = filter ? materials.filter((r) => catName(r) === filter) : materials
 
@@ -411,12 +438,12 @@ export default function ProjectInventory({ session: _session }: { session: Sessi
               </div>
             </section>
 
-            {queue.length > 0 && (
-              <button className="queue" onClick={() => { setResolveOpen(true); if (!Object.keys(resolutions).length) runResolver() }}>
+            {queueCount > 0 && (
+              <button className="queue" onClick={() => setResolveOpen(true)}>
                 <span className="qd" />
-                <span className="qt"><b>{queue.length} bill {queue.length === 1 ? 'line needs' : 'lines need'} a material</b>
-                  {queueVendors.length > 0 && <span>from {queueVendors.slice(0, 3).join(', ')}{queueVendors.length > 3 ? ` +${queueVendors.length - 3}` : ''}</span>}</span>
-                <span className="qgo">Resolve →</span>
+                <span className="qt"><b>{queueCount} arrival{queueCount === 1 ? '' : 's'} need{queueCount === 1 ? 's' : ''} clarification</b>
+                  <span>we couldn't place {queueCount === 1 ? 'it' : 'them'} for sure</span></span>
+                <span className="qgo">Clarify →</span>
               </button>
             )}
 
@@ -482,7 +509,7 @@ export default function ProjectInventory({ session: _session }: { session: Sessi
         )}
       </main>
 
-      <div className={`scrim${peek || resolveOpen ? ' on' : ''}`} onClick={() => { setPeek(null); setResolveOpen(false); setPickLine(null) }} />
+      <div className={`scrim${peek ? ' on' : ''}`} onClick={() => { setPeek(null); closeEdit() }} />
       <aside className={`peek${peek ? ' on' : ''}`} aria-hidden={!peek}>
         {peek && (() => {
           const step = stepFor(peek.unit)
@@ -492,7 +519,48 @@ export default function ProjectInventory({ session: _session }: { session: Sessi
           const withBal = moves.map((mv) => { bal += mv.direction === 'in' ? Number(mv.qty) : -Number(mv.qty); return { ...mv, bal } })
           return (
             <div className="peek-in">
-              <div className="top"><div><div className="kind">{catName(peek)}{attr ? ` · ${attr}` : ''}</div><h2>{peek.item_name}</h2></div><button className="x" aria-label="Close" onClick={() => setPeek(null)}>×</button></div>
+              <div className="top">
+                <div><div className="kind">{catName(peek)}{attr ? ` · ${attr}` : ''}</div><h2>{peek.item_name}</h2></div>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  {peek.inventory_id && !editing && <button className="editb" onClick={openEdit}>Edit</button>}
+                  <button className="x" aria-label="Close" onClick={() => { setPeek(null); closeEdit() }}>×</button>
+                </div>
+              </div>
+
+              {editing && edit ? (
+                <div className="iedit">
+                  <label>Material<input value={edit.item} onChange={(e) => setEdit({ ...edit, item: e.target.value })} placeholder="e.g. TMT Bar" /></label>
+                  <div className="r3">
+                    <label>Dimension<input value={edit.dimension} onChange={(e) => setEdit({ ...edit, dimension: e.target.value })} placeholder="12mm" /></label>
+                    <label>Variant<input value={edit.variant} onChange={(e) => setEdit({ ...edit, variant: e.target.value })} placeholder="—" /></label>
+                    <label>Grade<input value={edit.grade} onChange={(e) => setEdit({ ...edit, grade: e.target.value })} placeholder="Fe500" /></label>
+                  </div>
+                  <div className="r2">
+                    <label>Category<input list="inv-cats" value={edit.category} onChange={(e) => setEdit({ ...edit, category: e.target.value })} placeholder="Steel" /></label>
+                    <label>Standard unit<input list="inv-units" value={edit.unit} onChange={(e) => setEdit({ ...edit, unit: e.target.value })} placeholder="MT" /></label>
+                  </div>
+                  <datalist id="inv-cats">{INV_CATS.map((c) => <option key={c} value={c} />)}</datalist>
+                  <datalist id="inv-units">{INV_UNITS.map((u) => <option key={u} value={u} />)}</datalist>
+                  <div className="als">
+                    <div className="lbl">Also called (helps match future bills)</div>
+                    <div className="chips">
+                      {edit.aliases.length === 0 && <span style={{ color: 'var(--mute)', fontSize: 13 }}>No other names yet.</span>}
+                      {edit.aliases.map((a, i) => (
+                        <span className="chip" key={a + i}>{a}<button aria-label={`remove ${a}`} onClick={() => setEdit({ ...edit, aliases: edit.aliases.filter((_, j) => j !== i) })}>×</button></span>
+                      ))}
+                    </div>
+                    <div className="addrow">
+                      <input value={aliasInput} onChange={(e) => setAliasInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addAlias() } }} placeholder="add a name a vendor might use…" />
+                      <button onClick={addAlias}>Add</button>
+                    </div>
+                  </div>
+                  <div className="acts">
+                    <button onClick={closeEdit}>Cancel</button>
+                    <button className="save" disabled={savingEdit} onClick={saveEdit}>{savingEdit ? 'Saving…' : 'Save'}</button>
+                  </div>
+                </div>
+              ) : (
+              <>
               <div className="hero"><div className="base num">{qfmt(peek.on_hand, step)}<u>{peek.unit}</u></div></div>
               <div className="meta">
                 {peek.last_delivery_at && <span>Last delivery <b>{dstr(peek.last_delivery_at)}, {qfmt(peek.last_delivery_qty ?? 0, step)} {peek.unit}</b></span>}
@@ -513,75 +581,20 @@ export default function ProjectInventory({ session: _session }: { session: Sessi
                     )
                   })}
               </div>
+              </>
+              )}
             </div>
           )
         })()}
       </aside>
 
-      <aside className={`peek${resolveOpen ? ' on' : ''}`} aria-hidden={!resolveOpen}>
-        {resolveOpen && (
-          <div className="peek-in">
-            <div className="top">
-              <div><div className="kind">Bills → stock</div><h2>What is each line?</h2></div>
-              <button className="x" aria-label="Close" onClick={() => { setResolveOpen(false); setPickLine(null) }}>×</button>
-            </div>
-            <p className="lede" style={{ margin: '10px 0 22px' }}>
-              A bill lists what a vendor charged for. We read each line and match it to a material — confirm the unsure ones. A material enters stock; a consumable is just an expense.
-            </p>
-            {resolving && <div className="empty" style={{ padding: '18px 10px' }}>Reading the lines…</div>}
-            {queue.length === 0 ? (
-              <div className="empty" style={{ padding: '40px 10px' }}>{resolving ? '' : 'Every bill line is resolved. Nothing waiting.'}</div>
-            ) : queue.map((l) => {
-              const k = keyOf(l)
-              const step = stepFor(l.unit)
-              const r = resolutions[k]
-              const busy = busyLine === k
-              const picking = pickLine === k
-              const cands = r?.candidates ?? []
-              const clabel = canonLabel(r?.canonical)
-              return (
-                <div className={`rl${busy ? ' busy' : ''}`} key={k}>
-                  <div className="raw">
-                    <b>{l.raw_name}</b>
-                    {l.qty != null && <span className="q num">{qfmt(l.qty, step)}{l.unit ? ` ${l.unit}` : ''}</span>}
-                  </div>
-                  <div className="src">{[l.vendor_name, l.bill_no ? `Bill ${l.bill_no}` : null, dstr(l.bill_date)].filter(Boolean).join(' · ')}</div>
-
-                  {!r ? (
-                    <div className="match unk"><span>{resolving ? 'Reading…' : 'Not read yet'}</span></div>
-                  ) : cands.length > 0 ? (
-                    <div className="match"><span>Best guess <b>{cands[0].display_name}</b></span><span className="conf">{cands[0].confidence}%</span></div>
-                  ) : clabel ? (
-                    <div className="match unk"><span>New material — <b>{clabel}</b></span></div>
-                  ) : (
-                    <div className="match unk"><span>No match in this site's stock</span></div>
-                  )}
-
-                  {picking ? (
-                    <div className="opts">
-                      <select autoFocus defaultValue="" onChange={(e) => { const m = (invQ.data ?? []).find((x) => x.inventory_id === e.target.value); if (m) resolveLine(l, { action: 'material', inventory_id: m.inventory_id, unit: m.unit }) }}>
-                        <option value="" disabled>Pick a material…</option>
-                        {(invQ.data ?? []).map((m) => <option key={m.inventory_id} value={m.inventory_id}>{m.display_name || m.item}{m.unit ? ` (${m.unit})` : ''}</option>)}
-                      </select>
-                      <button onClick={() => setPickLine(null)}>Cancel</button>
-                    </div>
-                  ) : (
-                    <div className="opts">
-                      {cands.slice(0, 2).map((c) => (
-                        <button key={c.inventory_id} className="yes" onClick={() => resolveLine(l, { action: 'material', inventory_id: c.inventory_id })}>Use {c.display_name}</button>
-                      ))}
-                      {clabel && <button className={cands.length ? '' : 'yes'} onClick={() => resolveLine(l, { action: 'material', canonical: r!.canonical })}>Create “{clabel}”</button>}
-                      <button onClick={() => setPickLine(k)}>Another material…</button>
-                      <button onClick={() => resolveLine(l, { action: 'expense' })}>Expense it</button>
-                      <button onClick={() => resolveLine(l, { action: 'skip' })}>Skip</button>
-                    </div>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-        )}
-      </aside>
+      <BillResolvePanel
+        open={resolveOpen}
+        onClose={() => setResolveOpen(false)}
+        orgId={orgId}
+        projectId={projectId!}
+        onResolved={() => { qc.invalidateQueries({ queryKey: ['project_stock_material', projectId] }); qc.invalidateQueries({ queryKey: ['stock_queue_count', projectId] }) }}
+      />
     </div>
   )
 }

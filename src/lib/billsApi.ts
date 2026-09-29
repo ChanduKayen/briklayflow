@@ -49,6 +49,7 @@ export interface BillDetail extends BillRow {
   poId: string | null;
   poProjectId: string | null;
   periodFrom?: string; periodTo?: string; note?: string;
+  stockReceivedAt?: string | null;
 }
 
 const num = (v: any) => Number(v) || 0;
@@ -219,6 +220,7 @@ export async function loadBillDetail(id: string): Promise<BillDetail | null> {
       docUrl: b.doc_url || null, docCount: invoiceCount(lines),
       addedAt: b.created_at ? String(b.created_at) : (b.bill_date || null),
       lines, payments, poId: b.po_id ?? null, poProjectId: b.project_id ?? null, note: b.note || undefined,
+      stockReceivedAt: b.stock_received_at ?? null,
     };
   }
 
