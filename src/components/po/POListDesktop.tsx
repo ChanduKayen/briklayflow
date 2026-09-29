@@ -47,8 +47,11 @@ type Stage = 'pending' | 'send' | 'sent' | 'recv' | 'bill' | 'paid';
 function stageOf(p: PORow): Stage {
   if (p.approvalStatus === 'PENDING' && !p.cancelled) return 'pending';
   const received = !!p.recv;
+  // Fulfilled requires the goods FULLY received (all items), same as the mobile list — not just
+  // any receipt. A PO billed/paid but not fully received is still in motion, so it stays in Live.
+  const fullyReceived = p.items.length > 0 ? p.items.every((i) => !!i.r) : received;
   const billed = p.billed > 0.5;
-  if (billed && p.paid >= p.billed - 0.5) return 'paid';
+  if (fullyReceived && billed && p.paid >= p.billed - 0.5) return 'paid';
   if (received && billed) return 'bill';
   if (received) return 'recv';
   if (p.sent) return 'sent';
