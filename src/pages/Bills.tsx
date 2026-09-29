@@ -271,7 +271,12 @@ const BLX_CSS = `
 .blx .billday .dhead{padding:0 4px 9px;font-family:'Newsreader',Georgia,serif;font-size:1.05rem;color:var(--walnut)}
 .blx .billday .dhead .wd{font-family:'Instrument Sans',sans-serif;font-size:.82rem;color:var(--walnut-soft);margin-left:8px}
 .blx .daycard{background:var(--paper);border:1px solid var(--line);border-radius:14px;overflow:hidden}
-.blx .brow{display:grid;grid-template-columns:42px minmax(0,1fr) auto minmax(120px,auto);gap:16px;align-items:center;padding:12px 18px;border-bottom:1px solid var(--line);cursor:pointer;transition:background .13s}
+.blx .brow{display:grid;grid-template-columns:42px minmax(0,1fr) auto auto minmax(120px,auto);gap:16px;align-items:center;padding:12px 18px;border-bottom:1px solid var(--line);cursor:pointer;transition:background .13s}
+.blx .bsite{justify-self:start;min-width:0}
+.blx .site-ok{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 12px;border-radius:15px;background:#E7F0E6;color:#2F5D3A;font-size:12.5px;font-weight:600;white-space:nowrap}
+.blx .site-go{display:inline-flex;align-items:center;gap:7px;height:30px;padding:0 12px;border-radius:15px;background:var(--paper);border:1.5px dashed #C48A38;color:#8A6A2E;font-size:12.5px;font-weight:600;white-space:nowrap;transition:background .15s,border-style .15s}
+.blx .site-go:hover{background:#F6EEDC;border-style:solid}
+.blx .site-go svg,.blx .site-ok svg{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
 .blx .brow:hover{background:#FBF7EF}
 .blx .bmain{min-width:0;display:flex;flex-direction:column;gap:3px}
 .blx .bmain .bv{font-weight:500;font-size:.92rem;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--walnut)}
@@ -504,6 +509,30 @@ function BillsDesktop() {
   const { show: showSnackbar } = useSnackbar();
   const mintBill = useMintBill();
   const qc = useQueryClient();
+  // "Reached site?" — confirm a delivery inline from the list (one object, two doors).
+  const [rcvBill, setRcvBill] = useState<BillRow | null>(null);
+  const [poRcv, setPoRcv] = useState<import('../components/ReceiveDeliveryPanel').ReceivePO | null>(null);
+  const openBillReceive = async (b: BillRow) => {
+    const rawId = b.id.replace(/^(bl|po|cb)~/, '');
+    if (b.poId) {
+      try {
+        const [poRes, liRes] = await Promise.all([
+          supabase.from('purchase_orders').select('project_id, stakeholder_id, stakeholders(name), projects(name)').eq('po_id', b.poId).single(),
+          supabase.from('po_line_items').select('id, item_name, unit, quantity_ordered, unit_rate').eq('po_id', b.poId).order('line_number'),
+        ]);
+        const po: any = poRes.data; if (!po) throw new Error('Linked PO not found');
+        setPoRcv({ po_id: b.poId!, project_id: po.project_id, stakeholder_id: po.stakeholder_id, vendor: (po.stakeholders as any)?.name || b.vendor, site: (po.projects as any)?.name ?? b.site, lines: (liRes.data ?? []).map((li: any) => ({ po_line_item_id: String(li.id), item_name: li.item_name, unit: li.unit || 'Nos', quantity_ordered: Number(li.quantity_ordered) || 0, unit_rate: Number(li.unit_rate) || 0 })) });
+      } catch (e) { showSnackbar((e as Error)?.message || 'Could not open the PO', { type: 'error' }); }
+    } else {
+      setRcvBill({ ...b, id: rawId });
+    }
+  };
+  const afterBillReceive = () => {
+    qc.invalidateQueries({ queryKey: ['bills'] });
+    qc.invalidateQueries({ queryKey: ['stock_queue_count'] });
+    qc.invalidateQueries({ queryKey: ['stock_material'] });
+    showSnackbar('📦 Receipt recorded');
+  };
 
   // Known vendors (to resolve a read name to a party) + active sites (the confirm's site chips).
   const { data: vendorParties = [] } = useQuery({
@@ -849,6 +878,11 @@ function BillsDesktop() {
                         <BillThumb docUrl={b.docUrl} vendor={b.vendor} />
                         <span className="bmain"><span className="bv">{b.vendor}</span><span className="bctx">{ctx || '—'}</span></span>
                         <span className="bref"><RefCell row={b} /></span>
+                        <span className="bsite">
+                          {b.id.startsWith('bl~') && b.projectId && (b.stockReceivedAt
+                            ? <span className="site-ok"><svg viewBox="0 0 24 24"><path d="m5 12 4.5 4.5L19 7" /></svg>At site</span>
+                            : <button type="button" className="site-go" onClick={(e) => { e.stopPropagation(); openBillReceive(b); }}><svg viewBox="0 0 24 24"><path d="m3 8 9-4 9 4-9 4-9-4Z" /><path d="M3 8v8l9 4 9-4V8" /><path d="M12 12v8" /></svg>Reached site?</button>)}
+                        </span>
                         <span className="bamt"><span className="amt">{inr(b.amount)}</span><StatusCell s={b.status} left={b.amount - b.paid} /></span>
                       </div>
                     );
@@ -866,6 +900,14 @@ function BillsDesktop() {
           </div>
         )}
       </div>
+      <BillReceivePanel
+        open={!!rcvBill}
+        onClose={() => setRcvBill(null)}
+        orgId={orgId}
+        bill={rcvBill ? { id: rcvBill.id, bill_no: rcvBill.billNo, vendor: rcvBill.vendor, site: rcvBill.site, project_id: rcvBill.projectId, lines: (rcvBill.lines ?? []).map((l) => ({ name: l.name, unit: l.unit, qty: l.qty, rate: l.rate })) } : null}
+        onReceived={afterBillReceive}
+      />
+      <ReceiveDeliveryPanel open={!!poRcv} onClose={() => setPoRcv(null)} orgId={orgId} po={poRcv} onReceived={afterBillReceive} />
     </div>
   );
 }

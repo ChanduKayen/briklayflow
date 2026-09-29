@@ -39,6 +39,11 @@ export interface BillRow {
   /** When the bill was ADDED to Briklay (created_at, falling back to its date) — the register sorts and
    *  groups on this, newest first, so the bill you just filed is at the top regardless of its printed date. */
   addedAt: string | null;
+  /** Receipt-at-site state for the list chip: when stock was received against this bill, and its PO
+   *  (if any) + lines so the "Reached site?" panel can open inline. Populated for first-class (bl~) bills. */
+  stockReceivedAt?: string | null;
+  poId?: string | null;
+  lines?: BillLine[];
 }
 
 export interface BillLine { name: string; spec: string | null; unit: string | null; qty: number; rate: number; amount: number }
@@ -77,7 +82,7 @@ function invoiceCount(lines: unknown): number {
 
 export async function loadBills(): Promise<BillRow[]> {
   const [billsR, poR, stkR, projR, cbR] = await Promise.all([
-    supabase.from('bills').select('id, stakeholder_id, project_id, po_id, bill_no, bill_date, amount, created_at, doc_url, lines'),
+    supabase.from('bills').select('id, stakeholder_id, project_id, po_id, bill_no, bill_date, amount, created_at, doc_url, lines, stock_received_at'),
     supabase.from('purchase_orders')
       .select(`po_id, stakeholder_id, project_id, vendor_bill_number, vendor_bill_doc_url, vendor_bill_url, ${BILL_DATE_COLUMNS}, status, approval_status`)
       .eq('approval_status', 'APPROVED')
@@ -160,6 +165,9 @@ export async function loadBills(): Promise<BillRow[]> {
       ref: b.po_id ? { kind: 'po', poId: b.po_id } : { kind: 'none' },
       docUrl: b.doc_url || null, docCount: invoiceCount(b.lines),
       addedAt: b.created_at ? String(b.created_at) : (b.bill_date || null),
+      stockReceivedAt: b.stock_received_at ?? null,
+      poId: b.po_id ?? null,
+      lines: Array.isArray(b.lines) ? b.lines.map((l: any) => ({ name: l.name ?? l.item ?? '—', spec: l.spec ?? null, unit: l.unit ?? null, qty: num(l.qty), rate: num(l.rate), amount: num(l.amount) || num(l.qty) * num(l.rate) })) : [],
     });
   }
   for (const p of pos) {
