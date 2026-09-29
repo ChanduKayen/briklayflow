@@ -514,14 +514,16 @@ function BillsDesktop() {
   const [poRcv, setPoRcv] = useState<import('../components/ReceiveDeliveryPanel').ReceivePO | null>(null);
   const openBillReceive = async (b: BillRow) => {
     const rawId = b.id.replace(/^(bl|po|cb)~/, '');
-    if (b.poId) {
+    // A po~ row IS a PO's vendor bill, so the PO is the id itself; a bl~ row may link one via poId.
+    const poId = b.id.startsWith('po~') ? rawId : (b.poId || null);
+    if (poId) {
       try {
         const [poRes, liRes] = await Promise.all([
-          supabase.from('purchase_orders').select('project_id, stakeholder_id, stakeholders(name), projects(name)').eq('po_id', b.poId).single(),
-          supabase.from('po_line_items').select('id, item_name, unit, quantity_ordered, unit_rate').eq('po_id', b.poId).order('line_number'),
+          supabase.from('purchase_orders').select('project_id, stakeholder_id, stakeholders(name), projects(name)').eq('po_id', poId).single(),
+          supabase.from('po_line_items').select('id, item_name, unit, quantity_ordered, unit_rate').eq('po_id', poId).order('line_number'),
         ]);
         const po: any = poRes.data; if (!po) throw new Error('Linked PO not found');
-        setPoRcv({ po_id: b.poId!, project_id: po.project_id, stakeholder_id: po.stakeholder_id, vendor: (po.stakeholders as any)?.name || b.vendor, site: (po.projects as any)?.name ?? b.site, lines: (liRes.data ?? []).map((li: any) => ({ po_line_item_id: String(li.id), item_name: li.item_name, unit: li.unit || 'Nos', quantity_ordered: Number(li.quantity_ordered) || 0, unit_rate: Number(li.unit_rate) || 0 })) });
+        setPoRcv({ po_id: poId, project_id: po.project_id, stakeholder_id: po.stakeholder_id, vendor: (po.stakeholders as any)?.name || b.vendor, site: (po.projects as any)?.name ?? b.site, lines: (liRes.data ?? []).map((li: any) => ({ po_line_item_id: String(li.id), item_name: li.item_name, unit: li.unit || 'Nos', quantity_ordered: Number(li.quantity_ordered) || 0, unit_rate: Number(li.unit_rate) || 0 })) });
       } catch (e) { showSnackbar((e as Error)?.message || 'Could not open the PO', { type: 'error' }); }
     } else {
       setRcvBill({ ...b, id: rawId });
@@ -879,7 +881,7 @@ function BillsDesktop() {
                         <span className="bmain"><span className="bv">{b.vendor}</span><span className="bctx">{ctx || '—'}</span></span>
                         <span className="bref"><RefCell row={b} /></span>
                         <span className="bsite">
-                          {b.id.startsWith('bl~') && b.projectId && (b.stockReceivedAt
+                          {(b.id.startsWith('bl~') || b.id.startsWith('po~')) && b.projectId && (b.stockReceivedAt
                             ? <span className="site-ok"><svg viewBox="0 0 24 24"><path d="m5 12 4.5 4.5L19 7" /></svg>At site</span>
                             : <button type="button" className="site-go" onClick={(e) => { e.stopPropagation(); openBillReceive(b); }}><svg viewBox="0 0 24 24"><path d="m3 8 9-4 9 4-9 4-9-4Z" /><path d="M3 8v8l9 4 9-4V8" /><path d="M12 12v8" /></svg>Reached site?</button>)}
                         </span>
