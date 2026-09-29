@@ -59,7 +59,7 @@ const CSS = `
 .stk2{--ground:#FAF8F3;--paper:#FFFFFF;--ink:#2B211A;--ink-2:#5C4F45;--ink-3:#8A7B6E;--line:#E9E1D6;--line-2:#DCD2C4;--rule:#F0E9DF;--wash:#F3EEE5;--sand:#F1ECE1;
   --night:#15100C;--cream:250,248,243;--clay:#B5472A;--clay-hi:#D4633E;--clay-wash:#FBEDE6;--sage:#2F5D3A;--sage-hi:#8FC79A;--sage-wash:#E7F0E6;--amber:#8A6A2E;--amber-wash:#F6EEDC;--wa:#25A65B;
   --serif:'Playfair Display',Georgia,serif;--sans:'DM Sans',system-ui,-apple-system,'Segoe UI',sans-serif;--mono:'DM Mono',ui-monospace,Menlo,monospace;--ease:cubic-bezier(.2,.7,.2,1);--spring:cubic-bezier(.34,1.4,.64,1);
-  background:var(--ground);color:var(--ink);font-family:var(--sans);font-size:14.5px;line-height:1.4;min-height:100%}
+  background:var(--ground);color:var(--ink);font-family:var(--sans);font-size:14.5px;line-height:1.4;min-height:100vh}
 .stk2 *{box-sizing:border-box}
 .stk2 button,.stk2 input{font:inherit;color:inherit}.stk2 button{cursor:pointer}
 .stk2 .wrap{max-width:1240px;margin:0 auto;padding:28px 40px 100px}

@@ -16,7 +16,9 @@ alter table public.inventory_items add column if not exists alert_qty numeric;
 
 -- ── v_stock_material — now carries inventory_id's aliases, the alert level, and the
 --    quantity used since the most recent delivery (for the since-bar / days-left). ──
-create or replace view public.v_stock_material
+-- Dropped + recreated (not REPLACE): used_since sits mid-list, and REPLACE can't reorder columns.
+drop view if exists public.v_stock_material;
+create view public.v_stock_material
 with (security_invoker = true) as
 with base as (
   select
