@@ -29,6 +29,9 @@ end$$;
 
 -- get_membership_context carries the two preferences to the client (resolver.ts maps them
 -- into MembershipContext). Must list them in BOTH the returns-table signature and the select.
+-- The return shape changes (two new OUT columns), and Postgres refuses to CREATE OR REPLACE a
+-- function with a different return type — so drop the old definition first.
+drop function if exists public.get_membership_context(uuid);
 create or replace function public.get_membership_context(
   p_user_id uuid
 )
