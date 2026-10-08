@@ -3,6 +3,7 @@ import React, {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from 'react'
@@ -10,6 +11,7 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { supabase, coalescedRefresh } from '../supabase'
 import { resolveAuthDestination, type MembershipContext } from './resolver'
+import { setWeekConfig } from '../attendanceApi'
 import { LOGIN_ROUTE } from './routes'
 import { parseStoredSession, isExpired, needsRefresh, backoffDelay, type StoredSessionInfo } from './refreshPolicy'
 
@@ -161,6 +163,7 @@ type AuthContextValue = {
   isRole:    (role: MembershipContext['role']) => boolean
   orgId:     string | null
   userId:    string | null
+  setPayWeek: (startDay: number, offDay: number | null) => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
@@ -478,11 +481,47 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return authState.context.role === role
   }, [authState])
 
+  // Keep the pay-week date layer (attendanceApi) in step with the org preference. In an effect (not the
+  // render body) so navigation — which re-renders this provider via useLocation — doesn't run a side
+  // effect every time; it re-runs only when the two week fields actually change. The attendance surfaces
+  // read the start/off day from the hooks directly, so the grid never depends on this call's timing; it
+  // is only the shared default for peripheral callers (weeklyPaymentsApi, payableAttribution, …).
+  const weekStartDay = authState.status === 'authenticated' ? authState.context.weekStartDay : undefined
+  const weeklyOffDay = authState.status === 'authenticated' ? authState.context.weeklyOffDay : undefined
+  useEffect(() => {
+    if (authState.status === 'authenticated') setWeekConfig({ startDay: weekStartDay, offDay: weeklyOffDay })
+  }, [authState.status, weekStartDay, weeklyOffDay])
+
+  // Change the org's pay week (owner + management; enforced by set_pay_week). Write-through: the RPC
+  // writes the org, then the context + cache + date layer update in place so the UI re-renders on the
+  // new week without a reload.
+  const setPayWeek = useCallback(async (startDay: number, offDay: number | null) => {
+    if (authState.status !== 'authenticated') throw new Error('not authenticated')
+    const { error } = await supabase.rpc('set_pay_week', {
+      p_org_id: authState.context.orgId, p_week_start: startDay, p_weekly_off: offDay,
+    })
+    if (error) throw error
+    const next: MembershipContext = { ...authState.context, weekStartDay: startDay, weeklyOffDay: offDay }
+    saveCtxCache(next)
+    setWeekConfig({ startDay, offDay })
+    setAuthState({ status: 'authenticated', context: next })
+  }, [authState])
+
   const orgId  = authState.status === 'authenticated' ? authState.context.orgId  : null
   const userId = authState.status === 'authenticated' ? authState.context.membershipId : null
 
+  // Memoise the context value so a navigation (which re-renders this provider through useLocation) does
+  // NOT hand every useAuth()/useOrgId()/useCan() consumer a fresh object and re-render the whole app on
+  // each tab switch. The pieces are all stable between auth changes — can/isRole/signOut/setPayWeek are
+  // useCallbacks keyed on authState, orgId/userId derive from it — so this object only changes when the
+  // auth state truly does, which is what consumers actually care about.
+  const ctxValue = useMemo<AuthContextValue>(
+    () => ({ authState, signOut, can, isRole, orgId, userId, setPayWeek }),
+    [authState, signOut, can, isRole, orgId, userId, setPayWeek],
+  )
+
   return (
-    <AuthContext.Provider value={{ authState, signOut, can, isRole, orgId, userId }}>
+    <AuthContext.Provider value={ctxValue}>
       {children}
     </AuthContext.Provider>
   )
@@ -504,4 +543,21 @@ export function useOrgId(): string {
   const { orgId } = useAuth()
   if (!orgId) throw new Error('useOrgId called outside authenticated context')
   return orgId
+}
+
+/** The org's pay-week start day (0 = Sun … 6 = Sat), Monday by default and for any pre-feature context. */
+export function useWeekStartDay(): number {
+  const { authState } = useAuth()
+  const v = authState.status === 'authenticated' ? authState.context.weekStartDay : undefined
+  return typeof v === 'number' && v >= 0 && v <= 6 ? v : 1
+}
+
+/** The org's default weekly-off day (0 = Sun … 6 = Sat), or null for "no weekly off". Pre-feature
+ *  contexts (field absent) fall back to Sunday, preserving the historical behaviour. */
+export function useWeeklyOffDay(): number | null {
+  const { authState } = useAuth()
+  if (authState.status !== 'authenticated') return 0
+  const v = authState.context.weeklyOffDay
+  if (v === undefined) return 0
+  return typeof v === 'number' && v >= 0 && v <= 6 ? v : null
 }

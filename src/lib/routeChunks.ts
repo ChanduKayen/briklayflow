@@ -20,15 +20,31 @@ export const TAB_CHUNKS: Record<string, () => Promise<unknown>> = {
   '/payables': loadPayables,
 };
 
+// The other desktop-rail destinations — warmed only on demand (hover / pointer-down from the rail), so a
+// cold rail tab doesn't flash the route rule while its chunk fetches. Deliberately NOT in TAB_CHUNKS, so
+// the mobile idle warmer (warmAllTabs) keeps touching only the four bottom tabs, not all of these.
+const RAIL_CHUNKS: Record<string, () => Promise<unknown>> = {
+  '/bills': () => import('../pages/Bills'),
+  '/attendance': () => import('../pages/Attendance'),
+  '/inventory': () => import('../pages/Inventory'),
+  '/work-orders': () => import('../pages/WorkOrders'),
+  '/stakeholders': () => import('../pages/Stakeholders'),
+  '/insights': () => import('../pages/Insights'),
+  '/billing': () => import('../pages/Billing'),
+};
+
 const warmed = new Set<string>();
 
-/** Warm one route's chunk. Safe to call repeatedly — it only ever fetches once. */
+/** Warm one route's chunk. Safe to call repeatedly — it only ever fetches once. Query/hash are stripped,
+ *  so '/stakeholders?tab=client' warms the same chunk as '/stakeholders'. A route with no known chunk is
+ *  simply a no-op. */
 export function warmRoute(path: string): void {
-  const load = TAB_CHUNKS[path];
-  if (!load || warmed.has(path)) return;
-  warmed.add(path);
+  const key = path.split(/[?#]/)[0];
+  const load = TAB_CHUNKS[key] ?? RAIL_CHUNKS[key];
+  if (!load || warmed.has(key)) return;
+  warmed.add(key);
   // A failed prefetch must stay silent: the route still works, it just loads on demand.
-  void load().catch(() => warmed.delete(path));
+  void load().catch(() => warmed.delete(key));
 }
 
 /** Warm every tab, one at a time while the browser is idle, so the first paint keeps the network. */

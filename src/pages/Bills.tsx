@@ -4,8 +4,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { loadBills, loadBillDetail, deleteBill, extractBill, loadLinkablePayments, linkPaymentToBill, allocTargetOf, type BillRow, type BillStatus, type ExtractedBill, type BillDetail, type LinkablePayment } from '../lib/billsApi';
+import { loadBills, loadBillDetail, deleteBill, updateBill, extractBill, loadLinkablePayments, linkPaymentToBill, allocTargetOf, type BillRow, type BillStatus, type ExtractedBill, type BillDetail, type BillLine, type LinkablePayment } from '../lib/billsApi';
 import { allocateAcross } from '../lib/billPayMath';
+import { assessBillDate } from '../lib/billDate';
 import { DocThumb } from '../components/DocThumb';
 import { ImageLightbox } from '../components/ImageLightbox';
 import { openDoc, resolveDocUrl } from '../lib/storage';
@@ -496,7 +497,6 @@ export default function Bills() {
 }
 
 function BillsDesktop() {
-  const navigate = useNavigate();
   const { data: bills = [], isLoading } = useQuery({ queryKey: ['bills'], queryFn: loadBills });
   const [site, setSite] = useState('');
   // Like the ledger: a grouping (by date / site / vendor, default date) and a scope (outstanding by
@@ -509,6 +509,9 @@ function BillsDesktop() {
   const { show: showSnackbar } = useSnackbar();
   const mintBill = useMintBill();
   const qc = useQueryClient();
+  // Opening a bill opens the side peek (a drawer), not a full-page navigation — same gesture as
+  // "stock reached site". Deep links (/bills/:id) still render the full page.
+  const [peek, setPeek] = useState<string | null>(null);
   // "Reached site?" — confirm a delivery inline from the list (one object, two doors).
   const [rcvBill, setRcvBill] = useState<BillRow | null>(null);
   const [poRcv, setPoRcv] = useState<import('../components/ReceiveDeliveryPanel').ReceivePO | null>(null);
@@ -875,8 +878,8 @@ function BillsDesktop() {
                     const ctx = [b.billNo ? `Bill ${b.billNo}` : null, fmtDate(b.billDate), group !== 'site' ? b.site : null].filter(Boolean).join(' · ');
                     return (
                       <div key={b.id} data-search-row={b.id} className="brow" role="button" tabIndex={0}
-                        onClick={() => navigate(`/bills/${encodeURIComponent(b.id)}`)}
-                        onKeyDown={(e) => { if (e.key === 'Enter') navigate(`/bills/${encodeURIComponent(b.id)}`); }}>
+                        onClick={() => setPeek(b.id)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') setPeek(b.id); }}>
                         <BillThumb docUrl={b.docUrl} vendor={b.vendor} />
                         <span className="bmain"><span className="bv">{b.vendor}</span><span className="bctx">{ctx || '—'}</span></span>
                         <span className="bref"><RefCell row={b} /></span>
@@ -910,6 +913,7 @@ function BillsDesktop() {
         onReceived={afterBillReceive}
       />
       <ReceiveDeliveryPanel open={!!poRcv} onClose={() => setPoRcv(null)} orgId={orgId} po={poRcv} onReceived={afterBillReceive} />
+      {peek && <BillPeek id={peek} onClose={() => setPeek(null)} />}
     </div>
   );
 }
@@ -1138,6 +1142,646 @@ function BillDetailView({ id }: { id: string }) {
         onReceived={afterReceive}
       />
     </div>
+  );
+}
+
+// ── bill peek (side drawer) ──────────────────────────────────────────────────
+// Opening a bill from the register shouldn't pull you off the page. The peek is a right-side drawer
+// — the same gesture as "stock reached site" — that carries the whole bill: the money truth up top
+// (amount, status, how much is settled), whether the goods reached site, the document, the lines, and
+// what points at it (PO + payments), with every action inline (confirm receipt, link a payment, open
+// the paper, delete). Design ported from the receive drawer (scoped .bpk); "Open full page" stays for
+// the rare deep read. It reuses the detail's data (loadBillDetail) and the same receive/link/delete
+// wiring, so nothing about the money or the receipt behaves differently from the full page.
+const BPK_CSS = `
+.blx.bpk-scope{background:none!important;min-height:0!important}
+.bpk{--ground:#FAF8F3;--paper:#FFFFFF;--ink:#2B211A;--ink-2:#5C4F45;--ink-3:#8A7B6E;--line:#E9E1D6;--line-2:#DCD2C4;--rule:#F0E9DF;--wash:#F3EEE5;--sand:#F1ECE1;
+  --clay:#B5472A;--clay-hi:#D4633E;--clay-wash:#FBEDE6;--sage:#2F5D3A;--sage-wash:#E7F0E6;--amber:#8A6A2E;--amber-wash:#F6EFDD;
+  --serif:'Playfair Display',Georgia,serif;--sans:'DM Sans',system-ui,-apple-system,'Segoe UI',sans-serif;--mono:'DM Mono',ui-monospace,Menlo,monospace;--ease:cubic-bezier(.2,.7,.2,1);
+  position:fixed;inset:0;z-index:50;font-family:var(--sans);font-size:14.5px;line-height:1.45;color:var(--ink)}
+.bpk *{box-sizing:border-box}
+.bpk button{font:inherit;color:inherit;cursor:pointer}
+.bpk .scrim{position:absolute;inset:0;background:rgba(43,33,26,.32);backdrop-filter:blur(1.5px);animation:bpkfade .3s ease}
+@keyframes bpkfade{from{opacity:0}to{opacity:1}}
+.bpk .panel{position:absolute;top:0;right:0;bottom:0;width:600px;max-width:100%;background:var(--ground);box-shadow:-26px 0 70px -34px rgba(43,33,26,.55);display:flex;flex-direction:column;animation:bpkin .36s var(--ease)}
+@keyframes bpkin{from{transform:translateX(30px);opacity:.5}to{transform:none;opacity:1}}
+/* top */
+.bpk .top{padding:22px 30px 18px;display:flex;align-items:flex-start;gap:14px;border-bottom:1px solid var(--line);background:linear-gradient(180deg,var(--paper),var(--ground))}
+.bpk .top .crumb{font-size:11px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--clay);margin-bottom:5px}
+.bpk .top h2{margin:0;font-family:var(--serif);font-weight:600;font-size:26px;line-height:1.08;letter-spacing:-.01em}
+/* the vendor name IS the door to the ledger — a real link (persistent dotted underline, ↗ on hover),
+   distinct from the edit pencil beside it and from the row/peek gesture that brought you here. */
+.bpk .top h2 .vname{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer;text-decoration:underline;text-decoration-style:dotted;text-decoration-color:var(--line-2);text-underline-offset:5px;transition:text-decoration-color .15s,color .15s}
+.bpk .top h2 .vname:hover{color:var(--clay);text-decoration-color:var(--clay)}
+.bpk .top h2 .vname .vgo{margin-left:6px;font-size:.62em;opacity:0;transition:opacity .15s}
+.bpk .top h2 .vname:hover .vgo{opacity:1}
+.bpk .top .stmt{margin-top:9px;display:inline-flex;align-items:center;gap:6px;border:0;background:none;padding:0;color:var(--clay);font-size:12.5px;font-weight:600;cursor:pointer}
+.bpk .top .stmt svg{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.bpk .top .stmt .chev{font-size:15px;line-height:1}
+.bpk .top .stmt:hover{color:var(--clay-hi);text-decoration:underline;text-underline-offset:3px}
+.bpk .top .meta{margin-top:7px;font-size:13px;color:var(--ink-3);display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center}
+.bpk .top .meta b{font-weight:500;color:var(--ink-2);font-family:var(--mono);font-size:12.5px}
+.bpk .top .meta .dot{width:3px;height:3px;border-radius:50%;background:var(--line-2)}
+.bpk .top .meta .site{display:inline-flex;align-items:center;gap:5px;padding:2px 9px;border-radius:20px;background:var(--sand);color:var(--ink-2);font-size:12px;font-weight:500}
+.bpk .top .pochip{margin-top:11px;display:inline-flex;align-items:center;gap:7px;height:30px;padding:0 12px;border-radius:16px;border:1px solid var(--line-2);background:var(--paper);color:var(--ink-2);font-size:12.5px;font-weight:500;transition:border-color .15s,background .15s}
+.bpk .top .pochip:hover{border-color:var(--clay);background:var(--clay-wash);color:var(--clay)}
+.bpk .top .pochip b{font-family:var(--mono);font-weight:500;color:var(--ink)}
+.bpk .top .pochip:hover b{color:var(--clay)}
+.bpk .top .pochip .go{color:var(--ink-3)}.bpk .top .pochip:hover .go{color:var(--clay)}
+.bpk .top .pochip svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+/* inline edit — an elegant pencil that lives beside the value, quiet until you look for it. */
+.bpk .ef{display:inline-flex;align-items:center;gap:5px}
+/* the pencil is always visible — a small bordered button, clay on hover — so an editable field reads
+   as editable at a glance (hover-reveal is invisible on touch). */
+.bpk .editpen{display:inline-grid;place-items:center;width:21px;height:21px;border:1px solid var(--line-2);border-radius:7px;background:var(--paper);color:var(--ink-3);transition:background .15s,color .15s,border-color .15s;flex:none;vertical-align:middle}
+.bpk .editpen:hover{background:var(--clay-wash);color:var(--clay);border-color:var(--clay)}
+.bpk .editpen svg{width:11.5px;height:11.5px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.bpk .editpen.h2pen{width:24px;height:24px;margin-left:9px}.bpk .editpen.h2pen svg{width:13px;height:13px}
+.bpk .editpen.sm{width:19px;height:19px}.bpk .editpen.sm svg{width:11px;height:11px}
+.bpk .frompo{font-style:normal;font-size:11px;color:var(--ink-3);margin-left:5px;opacity:.85}
+.bpk .addsite{display:inline-flex;align-items:center;gap:5px;padding:2px 10px 2px 7px;border-radius:20px;border:1px dashed var(--line-2);background:none;color:var(--ink-3);font-size:12px;font-weight:500}
+.bpk .addsite:hover{border-color:var(--clay);color:var(--clay)}
+.bpk .addsite svg{width:12px;height:12px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.bpk .editrow{display:inline-flex;align-items:center;gap:5px}
+.bpk .editrow .cur{color:var(--ink-3);font-size:13px}
+.bpk .editrow input,.bpk .editrow select{height:30px;border:1.5px solid var(--clay);border-radius:9px;background:var(--paper);padding:0 9px;font-family:var(--sans);font-size:13px;color:var(--ink);outline:none;max-width:150px}
+.bpk .editrow.vend{margin:6px 0 2px}.bpk .editrow.vend select{height:34px;max-width:230px;font-size:14px}
+.bpk .editrow.tight input{width:92px;text-align:right;font-family:var(--mono)}
+.bpk .editrow select{padding-right:4px}
+.bpk .ed-ok,.bpk .ed-x{width:30px;height:30px;border-radius:9px;border:0;display:grid;place-items:center;flex:none}
+.bpk .ed-ok{background:var(--clay);color:#fff}.bpk .ed-ok:hover{background:var(--clay-hi)}.bpk .ed-ok:disabled{opacity:.5}
+.bpk .ed-x{background:var(--wash);color:var(--ink-3)}.bpk .ed-x:hover{background:var(--sand);color:var(--ink)}
+.bpk .ed-ok svg,.bpk .ed-x svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+/* the line-amount value doubles as its own edit button */
+.bpk button.lrval{display:inline-flex;align-items:center;gap:4px;justify-content:flex-end;border:0;background:none;font-family:var(--mono);font-size:14px;font-weight:500;color:var(--ink);padding:4px 2px 4px 8px;border-radius:8px;transition:background .15s}
+.bpk button.lrval:hover{background:var(--wash)}
+.bpk button.lrval.unread{color:var(--ink-3)}
+.bpk .top .x{margin-left:auto;width:36px;height:36px;border-radius:18px;border:0;background:none;color:var(--ink-3);display:grid;place-items:center;flex:none;transition:background .15s}
+.bpk .top .x:hover{background:var(--wash)}
+.bpk .top .x svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round}
+.bpk .body{flex:1;overflow:auto;padding:20px 30px 26px;display:flex;flex-direction:column;gap:16px}
+/* cards must keep their natural height and let the body scroll — never shrink/clip. */
+.bpk .body>*{flex:none}
+/* money hero */
+.bpk .hero{background:var(--paper);border:1px solid var(--line);border-radius:18px;padding:18px 20px}
+.bpk .hero .row{display:flex;align-items:flex-start;justify-content:space-between;gap:14px}
+.bpk .hero .amt{font-family:var(--mono);font-size:34px;font-weight:500;letter-spacing:-.02em;line-height:1}
+.bpk .hero .amt .cur{font-size:20px;color:var(--ink-3);margin-right:2px}
+.bpk .hero .pill{flex:none;padding:6px 13px;border-radius:20px;font-size:12.5px;font-weight:600;white-space:nowrap}
+.bpk .hero .pill.settled{background:var(--sage-wash);color:var(--sage)}
+.bpk .hero .pill.part{background:var(--amber-wash);color:var(--amber)}
+.bpk .hero .pill.unpaid{background:var(--clay-wash);color:var(--clay)}
+.bpk .hero .track{margin-top:16px;height:7px;border-radius:5px;background:var(--wash);overflow:hidden}
+.bpk .hero .track .fill{height:100%;border-radius:5px;background:linear-gradient(90deg,var(--sage),#3f7a4d);transition:width .5s var(--ease)}
+.bpk .hero .lg{margin-top:9px;display:flex;justify-content:space-between;font-size:12.5px;color:var(--ink-3)}
+.bpk .hero .lg b{font-family:var(--mono);font-weight:500;color:var(--ink-2);font-size:12.5px}
+/* payments — the settlement, folded into the money block */
+.bpk .hero .pays{margin-top:14px;border-top:1px solid var(--rule);padding-top:6px}
+.bpk .hero .pay{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;padding:9px 2px;border:0;background:none;text-align:left;border-radius:8px;transition:background .15s}
+.bpk .hero .pay:hover{background:var(--wash)}
+.bpk .hero .pay .pk{display:flex;align-items:center;gap:8px;font-size:13.5px;color:var(--ink)}
+.bpk .hero .pay .pdot{width:6px;height:6px;border-radius:50%;background:var(--sage);flex:none}
+.bpk .hero .pay .pd{color:var(--ink-3);font-size:12.5px}
+.bpk .hero .pay .pa{font-family:var(--mono);font-size:13.5px;font-weight:500;display:flex;align-items:center;gap:6px;white-space:nowrap}
+.bpk .hero .pay .pa .go{color:var(--ink-3)}
+.bpk .hero .paylink{margin-top:4px;border:0;background:none;color:var(--clay);font-size:12.5px;font-weight:600;padding:6px 2px}
+.bpk .hero .paylink:hover{color:var(--clay-hi)}
+.bpk .hero .paynone{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;margin-top:2px;padding:11px 13px;border-radius:12px;border:1px dashed var(--clay);background:var(--clay-wash);text-align:left;transition:box-shadow .15s}
+.bpk .hero .paynone:hover{box-shadow:0 10px 20px -16px rgba(181,71,42,.7)}
+.bpk .hero .paynone span{font-size:13px;color:var(--ink-2)}.bpk .hero .paynone b{font-family:var(--mono);font-weight:500;color:var(--ink)}
+.bpk .hero .paynone .mini{color:var(--clay);font-weight:600;font-size:12.5px;white-space:nowrap}
+.bpk .hero .paysettled{margin-top:2px;font-size:12.5px;color:var(--ink-3);padding:2px}
+/* receipt strip */
+.bpk .recv{display:flex;align-items:center;gap:13px;padding:14px 16px;border-radius:16px}
+.bpk .recv.go{background:var(--paper);border:1.5px dashed var(--clay);cursor:pointer;transition:background .18s,box-shadow .18s}
+.bpk .recv.go:hover{background:var(--clay-wash);box-shadow:0 12px 24px -18px rgba(181,71,42,.7)}
+/* received — a quiet block; the header is a calm row, details unfold below it. */
+.bpk .recv.ok{display:block;padding:0;gap:0;background:var(--sage-wash)}
+.bpk .recv.ok .rhead{display:flex;align-items:center;gap:12px;padding:12px 15px}
+.bpk .recv .ic{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;flex:none}
+.bpk .recv.go .ic{width:38px;height:38px;border-radius:11px;background:var(--clay-wash);color:var(--clay)}.bpk .recv.ok .ic{background:#fff;color:var(--sage)}
+.bpk .recv .ic svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.bpk .recv.go .ic svg{width:19px;height:19px}
+.bpk .recv .t{flex:1;font-size:14px}.bpk .recv .t b{display:block;font-weight:600;font-size:14.5px}
+.bpk .recv.ok .t b{font-size:14px}
+.bpk .recv.ok .t{color:var(--sage)}.bpk .recv.ok .t b{color:var(--sage)}
+.bpk .recv .t span{color:var(--ink-3);font-size:12.5px}
+.bpk .recv.go .go-arrow{color:var(--clay);font-size:20px;flex:none}
+.bpk .recv.ok .rmore{flex:none;display:inline-flex;align-items:center;gap:3px;height:28px;padding:0 10px;border-radius:14px;border:1px solid rgba(47,93,58,.28);background:rgba(255,255,255,.55);color:var(--sage);font-size:12.5px;font-weight:600;transition:background .15s}
+.bpk .recv.ok .rmore:hover{background:#fff}
+.bpk .recv.ok .rmore .chev{font-size:15px;line-height:1}
+.bpk .recv.ok .rdetail{padding:6px 15px 13px;border-top:1px solid rgba(47,93,58,.16);animation:bpkfade .2s ease}
+.bpk .recv.ok .rmeta{font-size:12px;color:var(--sage);font-weight:500;padding:6px 0 4px}
+.bpk .recv.ok .rit{display:flex;align-items:baseline;justify-content:space-between;gap:12px;padding:6px 0;border-top:1px solid rgba(47,93,58,.1);font-size:13.5px}
+.bpk .recv.ok .rit:first-of-type{border-top:0}
+.bpk .recv.ok .rit .rin{color:var(--ink)}.bpk .recv.ok .rit .rin em{font-style:normal;color:var(--amber);font-size:12px}
+.bpk .recv.ok .rit .riq{font-family:var(--mono);font-size:13px;color:var(--ink-2);white-space:nowrap}
+.bpk .recv.ok .ropen{margin-top:9px;border:0;background:none;color:var(--sage);font-size:12.5px;font-weight:600;padding:2px 0}
+.bpk .recv.ok .ropen:hover{text-decoration:underline}
+/* cards */
+.bpk .card{background:var(--paper);border:1px solid var(--line);border-radius:18px;overflow:hidden}
+.bpk .card .ch{display:flex;align-items:center;justify-content:space-between;padding:13px 18px 11px;font-size:13px;font-weight:600;color:var(--ink-2)}
+.bpk .card .ch .aside{font-size:11.5px;font-weight:500;color:var(--ink-3);letter-spacing:.01em}
+.bpk .card .ch .lnk{border:0;background:none;color:var(--clay);font-size:12.5px;font-weight:600;padding:0}
+.bpk .card .ch .lnk:hover{color:var(--clay-hi)}
+/* document */
+.bpk .doc{display:flex;gap:16px;align-items:flex-start;padding:16px 18px}
+.bpk .doc .meta2{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px;padding-top:2px}
+.bpk .doc .meta2 b{font-size:14.5px;font-weight:600}
+.bpk .doc .meta2 span{font-size:12.5px;color:var(--ink-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bpk .doc .open{margin-top:8px;align-self:flex-start;display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 13px;border-radius:18px;border:1px solid var(--line-2);background:var(--paper);font-size:12.5px;font-weight:600;color:var(--ink)}
+.bpk .doc .open:hover{border-color:var(--ink-3);background:#FFFDF9}
+.bpk .doc .open svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+/* graceful empty state — icon, a plain line, a real action */
+.bpk .empty{padding:24px 20px 22px;display:flex;flex-direction:column;align-items:center;text-align:center}
+.bpk .empty .ei{width:42px;height:42px;border-radius:13px;background:var(--wash);display:grid;place-items:center;color:var(--ink-3);margin-bottom:11px}
+.bpk .empty .ei svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.bpk .empty b{font-size:14.5px;font-weight:600;color:var(--ink-2)}
+.bpk .empty p{margin:4px 0 0;font-size:12.5px;line-height:1.5;color:var(--ink-3);max-width:36ch}
+.bpk .empty .act{margin-top:14px;display:inline-flex;align-items:center;gap:7px;height:38px;padding:0 16px;border-radius:20px;border:1px solid var(--clay);background:var(--clay);color:#fff;font-size:13px;font-weight:600;box-shadow:0 12px 22px -14px rgba(181,71,42,.95)}
+.bpk .empty .act:hover{background:var(--clay-hi);border-color:var(--clay-hi)}
+.bpk .empty .act.ghost{background:var(--paper);border-color:var(--line-2);color:var(--ink);box-shadow:none}
+.bpk .empty .act.ghost:hover{border-color:var(--ink-3);background:#FFFDF9}
+.bpk .empty .act svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+/* lines */
+.bpk .ln{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px 14px;align-items:baseline;padding:11px 18px;border-top:1px solid var(--rule)}
+.bpk .ln .nm{font-size:14px;font-weight:500}
+.bpk .ln .nm .sp{display:block;font-size:12px;color:var(--ink-3);font-weight:400;margin-top:2px}
+.bpk .ln .qt{font-size:12px;color:var(--ink-3);font-family:var(--mono);margin-top:3px}
+.bpk .ln .lr{font-family:var(--mono);font-size:14px;font-weight:500;text-align:right;white-space:nowrap}
+.bpk .ln .lr.unread{color:var(--ink-3)}
+/* lines footer — subtotal → tax/charges → bill total, so the itemisation reconciles to the amount. */
+.bpk .tot{border-top:1px solid var(--line-2);margin-top:2px;padding:12px 18px 14px;background:var(--wash)}
+.bpk .tot .tr{display:flex;align-items:baseline;justify-content:space-between;font-size:13px;color:var(--ink-2);padding:3px 0}
+.bpk .tot .tr .v{font-family:var(--mono);font-weight:500;color:var(--ink-2)}
+.bpk .tot .tr.grand{margin-top:5px;padding-top:9px;border-top:1px solid var(--line-2);font-weight:600;color:var(--ink)}
+.bpk .tot .tr.grand .v{font-size:15px;color:var(--ink)}
+.bpk .tot .tr.warn{color:var(--clay)}.bpk .tot .tr.warn .v{color:var(--clay)}
+/* referenced-by */
+.bpk .ref{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;padding:12px 18px;border-top:1px solid var(--rule);background:none;border-left:0;border-right:0;border-bottom:0;text-align:left}
+.bpk button.ref{transition:background .15s}.bpk button.ref:hover{background:var(--wash)}
+.bpk .ref .what{display:flex;align-items:center;gap:10px;min-width:0}
+.bpk .ref .kind{font-size:10.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-3);background:var(--sand);padding:3px 8px;border-radius:6px;flex:none}
+.bpk .ref .chip{font-family:var(--mono);font-size:12.5px;color:var(--ink-2)}
+.bpk .ref .sub{font-size:13px;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bpk .ref .lr{font-family:var(--mono);font-size:13.5px;font-weight:500;display:flex;align-items:center;gap:6px;flex:none}
+.bpk .ref .lr .go{color:var(--ink-3)}
+.bpk .ref .open2{border:0;background:none;color:var(--clay);font-size:12.5px;font-weight:600;flex:none}
+.bpk .ref .none{font-size:13px;color:var(--ink-3);padding:0}
+/* footer */
+.bpk .foot{padding:14px 30px;border-top:1px solid var(--line);background:var(--ground);display:flex;align-items:center;gap:10px}
+.bpk .foot .g{display:inline-flex;align-items:center;gap:7px;height:40px;padding:0 16px;border-radius:20px;border:1px solid var(--line-2);background:var(--paper);font-size:13.5px;font-weight:600;color:var(--ink);transition:background .18s,border-color .18s,color .18s}
+.bpk .foot .g:hover{border-color:var(--ink-3);background:#FFFDF9}
+.bpk .foot .g svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.bpk .foot .g.del{margin-left:auto;color:var(--clay);border-color:transparent;background:none}
+.bpk .foot .g.del:hover{background:var(--clay-wash);border-color:var(--clay-wash)}
+.bpk .foot .g.pri{background:var(--clay);border-color:var(--clay);color:#fff;box-shadow:0 12px 22px -14px rgba(181,71,42,.95)}
+.bpk .foot .g.pri:hover{background:var(--clay-hi)}
+.bpk .foot .sp{flex:1}
+.bpk .loading{flex:1;display:grid;place-items:center;color:var(--ink-3);font-size:14px}
+@media(max-width:640px){.bpk .panel{width:100%}.bpk .top,.bpk .foot{padding-left:20px;padding-right:20px}.bpk .body{padding-left:20px;padding-right:20px}.bpk .foot{flex-wrap:wrap}}
+`;
+
+// Tiny glyphs for the inline edit affordances (kept local so the peek reads in one place).
+const Pen = () => <svg viewBox="0 0 24 24"><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>;
+const Ok = () => <svg viewBox="0 0 24 24"><path d="m5 12 5 5L20 6" /></svg>;
+const Ex = () => <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" /></svg>;
+
+function BillPeek({ id, onClose }: { id: string; onClose: () => void }) {
+  const navigate = useNavigate();
+  const qc = useQueryClient();
+  const { show } = useSnackbar();
+  const orgId = useOrgId();
+  const { data: b, isLoading } = useQuery({ queryKey: ['bill', id], queryFn: () => loadBillDetail(id) });
+  const [lightbox, setLightbox] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [linkOpen, setLinkOpen] = useState(false);
+  const [receiving, setReceiving] = useState(false);
+  const [billRcvOpen, setBillRcvOpen] = useState(false);
+  const [poRcv, setPoRcv] = useState<import('../components/ReceiveDeliveryPanel').ReceivePO | null>(null);
+  const [showReceipt, setShowReceipt] = useState(false);   // the "at site" details expander
+
+  // A po~ row IS a PO's vendor bill (the PO is the id); a bl~ row may link one via poId. Computed here
+  // because the editability split below depends on whether this bill is tracked by a PO.
+  const rawId = id.replace(/^(bl|po|cb)~/, '');
+  const poId = id.startsWith('po~') ? rawId : (b?.poId || null);
+
+  // ── editability ──────────────────────────────────────────────────────────
+  // Date + line prices are editable on any first-class or PO bill (the price matters most on handwritten
+  // chits, where the amount often isn't on the paper to read). Vendor + site are only editable when the
+  // bill is NOT tracked by a PO — otherwise they follow the order (shown as "from order", edited there).
+  const editable = id.startsWith('bl~') || id.startsWith('po~');
+  const editParty = editable && !poId;
+  const [edit, setEdit] = useState<null | 'date' | 'project' | 'vendor' | { line: number }>(null);
+  const [val, setVal] = useState('');            // the in-flight text (date / amount / project id / vendor id)
+  const [saving, setSaving] = useState(false);
+  const { data: projectOpts = [] } = useQuery({
+    queryKey: ['bill_projects_active'],
+    enabled: editable,
+    queryFn: async () => (await supabase.from('projects').select('project_id, name').eq('status', 'Active').order('name')).data ?? [],
+  });
+  const { data: vendorOpts = [] } = useQuery({
+    queryKey: ['bill_vendor_parties'],
+    enabled: editParty,
+    queryFn: async () => (await supabase.from('stakeholders').select('stakeholder_id, name').eq('type', 'Vendor').is('merged_into', null).order('name')).data ?? [],
+  });
+  // A field edit (date, site, vendor, a line price) ripples past this bill: the vendor's LEDGER reads the
+  // bill's date/amount (v_party_ledger_line), the weekly run and the PO views read it too. Invalidate them
+  // all — otherwise the ledger keeps serving its cached rows and the change looks like it didn't take.
+  const afterEdit = () => {
+    qc.invalidateQueries({ queryKey: ['bill', id] });
+    ['bills', 'party_ledger', 'party_balance', 'weekly_payments', 'po_detail', 'po_list_sheet', 'po_paid_rollup', 'purchase_orders_enhanced'].forEach(k => qc.invalidateQueries({ queryKey: [k] }));
+  };
+  const saveField = async (patch: Parameters<typeof updateBill>[1], ok: string) => {
+    setSaving(true);
+    try { await updateBill(id, patch); afterEdit(); setEdit(null); show(ok); }
+    catch (e) { show((e as Error)?.message || 'Could not save the change', { type: 'error' }); }
+    finally { setSaving(false); }
+  };
+  // Manual date edit gets the same plausibility net (lighter — a confirm, since the user chose it):
+  // a future / wrong-year / too-old date is queried before it's saved.
+  const saveDate = () => {
+    const a = assessBillDate({ iso: val || null });
+    if (a.flagged && a.date && !window.confirm(`${a.reason} Save this date anyway?`)) return;
+    saveField({ billDate: val || null }, 'Date updated');
+  };
+  const saveLineAmount = async (index: number, raw: string) => {
+    if (!b) return;
+    const amt = Number((raw || '').replace(/[^\d.]/g, '')) || 0;
+    const next: BillLine[] = b.lines.map((l, i) => i === index
+      ? { ...l, amount: amt, amountRead: amt > 0, rate: (l.basis !== 'lot' && l.qty > 0) ? Math.round((amt / l.qty) * 100) / 100 : l.rate }
+      : l);
+    // Keep the header total honest only when it was purely the sum of lines (no separate tax/charges);
+    // otherwise the printed total stands and the new subtotal simply reconciles beneath it.
+    const oldSub = b.lines.reduce((s, l) => s + (l.amountRead ? l.amount : 0), 0);
+    const newSub = next.reduce((s, l) => s + (l.amountRead ? l.amount : 0), 0);
+    const patch: Parameters<typeof updateBill>[1] = { lines: next };
+    if (Math.abs(b.amount - oldSub) <= 1 && newSub > 0) patch.amount = Math.round(newSub);
+    await saveField(patch, 'Line updated');
+  };
+
+  // Esc closes; lock the page scroll behind the drawer while it's open.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { if (edit) setEdit(null); else onClose(); } };
+    document.addEventListener('keydown', onKey);
+    const prev = document.body.style.overflow; document.body.style.overflow = 'hidden';
+    return () => { document.removeEventListener('keydown', onKey); document.body.style.overflow = prev; };
+  }, [onClose, edit]);
+
+  const remaining = b ? Math.max(0, b.amount - b.paid) : 0;
+  const pct = b && b.amount > 0 ? Math.min(100, Math.round((b.paid / b.amount) * 100)) : 0;
+  const preview = (url: string) => { if (/\.pdf(\?|$)/i.test(url)) void openDoc(url); else setLightbox(url); };
+
+  // Receipt — the same "one object, two doors" as the detail: a PO-linked bill opens the PO receive
+  // panel (ordered vs received); a no-PO bill opens the bill receive panel (billed vs received).
+  // (rawId/poId are computed once above, where the editability split needs them.)
+  const canReceive = (id.startsWith('bl~') || id.startsWith('po~')) && !!b?.projectId;
+  const openReceive = async () => {
+    if (!b) return;
+    if (poId) {
+      setReceiving(true);
+      try {
+        const [poRes, liRes] = await Promise.all([
+          supabase.from('purchase_orders').select('project_id, stakeholder_id, stakeholders(name), projects(name)').eq('po_id', poId).single(),
+          supabase.from('po_line_items').select('id, item_name, unit, quantity_ordered, unit_rate').eq('po_id', poId).order('line_number'),
+        ]);
+        const po: any = poRes.data;
+        if (!po) throw new Error('Linked PO not found');
+        setPoRcv({
+          po_id: poId, project_id: po.project_id, stakeholder_id: po.stakeholder_id,
+          vendor: (po.stakeholders as any)?.name || b.vendor, site: (po.projects as any)?.name ?? b.site,
+          lines: (liRes.data ?? []).map((li: any) => ({ po_line_item_id: String(li.id), item_name: li.item_name, unit: li.unit || 'Nos', quantity_ordered: Number(li.quantity_ordered) || 0, unit_rate: Number(li.unit_rate) || 0 })),
+        });
+      } catch (e) { show((e as Error)?.message || 'Could not open the PO', { type: 'error' }); }
+      finally { setReceiving(false); }
+    } else {
+      setBillRcvOpen(true);
+    }
+  };
+  const afterReceive = () => {
+    qc.invalidateQueries({ queryKey: ['bill', id] });
+    qc.invalidateQueries({ queryKey: ['bills'] });
+    qc.invalidateQueries({ queryKey: ['stock_queue_count'] });
+    qc.invalidateQueries({ queryKey: ['project_stock_material'] });
+    qc.invalidateQueries({ queryKey: ['stock_material'] });
+    show('📦 Receipt recorded');
+  };
+
+  const onDelete = async () => {
+    if (!b) return;
+    const msg = b.paid > 0.5
+      ? `Delete this bill? ${inr(b.paid)} was paid against it — that payment reverts to an unallocated advance. This can't be undone.`
+      : `Delete this bill? This can't be undone.`;
+    if (!window.confirm(msg)) return;
+    setDeleting(true);
+    try {
+      await deleteBill(id);
+      show('Bill deleted');
+      qc.invalidateQueries({ queryKey: ['bills'] });
+      qc.invalidateQueries({ queryKey: ['party_ledger'] });
+      qc.invalidateQueries({ queryKey: ['weekly_payments'] });
+      qc.invalidateQueries({ queryKey: ['po_detail'] });
+      qc.invalidateQueries({ queryKey: ['po_list_sheet'] });
+      onClose();
+    } catch (e) { show((e as Error)?.message || 'Could not delete the bill', { type: 'error' }); setDeleting(false); }
+  };
+
+  const statusLabel = !b ? '' : b.status === 'settled' ? 'Settled' : b.status === 'part' ? 'Part-paid' : 'Unpaid';
+
+  return createPortal(
+    <>
+      <div className="bpk">
+        <style>{BPK_CSS}</style>
+        <div className="scrim" onClick={onClose} />
+        <aside className="panel" role="dialog" aria-label="Bill">
+          {isLoading || !b ? (
+            <div className="loading">{isLoading ? 'Loading bill…' : 'Bill not found.'}</div>
+          ) : (
+            <>
+              <div className="top">
+                <div>
+                  <div className="crumb">{b.ref.kind === 'consolidated' ? 'Consolidated bill' : 'Vendor bill'}</div>
+                  {edit === 'vendor' ? (
+                    <div className="editrow vend">
+                      <select value={val} autoFocus onChange={e => setVal(e.target.value)}>
+                        {!(vendorOpts as any[]).some(v => v.stakeholder_id === val) && <option value={val}>{b.vendor}</option>}
+                        {(vendorOpts as any[]).map(v => <option key={v.stakeholder_id} value={v.stakeholder_id}>{v.name}</option>)}
+                      </select>
+                      <button className="ed-ok" disabled={saving} onClick={() => { const v = (vendorOpts as any[]).find(x => x.stakeholder_id === val); saveField({ stakeholderId: val, vendorName: v?.name ?? b.vendor }, 'Vendor updated'); }}><Ok /></button>
+                      <button className="ed-x" onClick={() => setEdit(null)}><Ex /></button>
+                    </div>
+                  ) : (
+                    <>
+                      <h2>
+                        {b.vendorId
+                          ? <button className="vname" onClick={() => navigate(`/stakeholders/${b.vendorId}`)} title={`Open ${b.vendor}'s ledger`}>{b.vendor}<span className="vgo" aria-hidden>↗</span></button>
+                          : b.vendor}
+                        {editParty && <button className="editpen h2pen" title="Change the vendor" onClick={() => { setVal(b.vendorId || ''); setEdit('vendor'); }}><Pen /></button>}
+                      </h2>
+                      {b.vendorId && (
+                        <button className="stmt" onClick={() => navigate(`/stakeholders/${b.vendorId}`)}>
+                          <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" /><path d="M14 2v6h6M9 13h6M9 17h4" /></svg>
+                          Open {b.vendor}&apos;s ledger<span className="chev">›</span>
+                        </button>
+                      )}
+                    </>
+                  )}
+                  <div className="meta">
+                    {b.ref.kind === 'consolidated'
+                      ? <span>{fmtDate(b.periodFrom ?? null)} – {fmtDate(b.periodTo ?? null)}</span>
+                      : <>
+                          <span>Bill <b>{b.billNo || '—'}</b></span><span className="dot" />
+                          {edit === 'date' ? (
+                            <span className="editrow">
+                              <input type="date" value={val} autoFocus onChange={e => setVal(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') saveDate(); }} />
+                              <button className="ed-ok" disabled={saving} onClick={saveDate}><Ok /></button>
+                              <button className="ed-x" onClick={() => setEdit(null)}><Ex /></button>
+                            </span>
+                          ) : (
+                            <span className="ef">{fmtDate(b.billDate)}{editable && <button className="editpen" title="Change the bill date" onClick={() => { setVal(b.billDate ? String(b.billDate).slice(0, 10) : ''); setEdit('date'); }}><Pen /></button>}</span>
+                          )}
+                        </>}
+                    {edit === 'project' ? (
+                      <span className="editrow">
+                        <select value={val} autoFocus onChange={e => setVal(e.target.value)}>
+                          <option value="">No site</option>
+                          {(projectOpts as any[]).map(p => <option key={p.project_id} value={p.project_id}>{p.name}</option>)}
+                        </select>
+                        <button className="ed-ok" disabled={saving} onClick={() => saveField({ projectId: val || null }, 'Site updated')}><Ok /></button>
+                        <button className="ed-x" onClick={() => setEdit(null)}><Ex /></button>
+                      </span>
+                    ) : b.site ? (
+                      <span className="site ef"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" /><circle cx="12" cy="10" r="2.5" /></svg>{b.site}{editParty
+                        ? <button className="editpen" title="Change the site" onClick={() => { setVal(b.projectId || ''); setEdit('project'); }}><Pen /></button>
+                        : poId ? <em className="frompo">from order</em> : null}</span>
+                    ) : (editParty ? (
+                      <button className="addsite" onClick={() => { setVal(''); setEdit('project'); }}><Pen />Add site</button>
+                    ) : null)}
+                  </div>
+                  {/* The PO is how this order is tracked — the chip says so plainly (and implies, without
+                      spelling it out, that any order becomes trackable once it's on a purchase order). */}
+                  {poId && (
+                    <button className="pochip" onClick={() => navigate(`/purchase-orders/${poId}`)} title="Open the purchase order tracking this bill">
+                      <svg viewBox="0 0 24 24"><path d="m9 11 3 3L22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></svg>
+                      Tracked by <b>{poId}</b><span className="go">›</span>
+                    </button>
+                  )}
+                </div>
+                <button className="x" onClick={onClose} aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" /></svg></button>
+              </div>
+
+              <div className="body">
+                {/* the money story — the amount, how much is settled, and the actual payments that make
+                    up "paid", all in one place (payments are the settlement, not a loose "reference"). */}
+                <div className="hero">
+                  <div className="row">
+                    <div className="amt"><span className="cur">₹</span>{Number(b.amount || 0).toLocaleString('en-IN')}</div>
+                    <div className={`pill ${b.status}`}>{statusLabel}</div>
+                  </div>
+                  <div className="track"><div className="fill" style={{ width: `${pct}%` }} /></div>
+                  <div className="lg">
+                    <span><b>{inr(b.paid)}</b> paid</span>
+                    <span><b>{inr(remaining)}</b> {remaining > 0.5 ? 'still to pay' : 'settled'}</span>
+                  </div>
+                  <div className="pays">
+                    {b.payments.length > 0 ? (
+                      <>
+                        {b.payments.map(p => (
+                          <button className="pay" key={p.txnId} onClick={() => navigate(`/ledger/${p.txnId}`, { state: { backTo: '/bills', backLabel: b.vendor } })}>
+                            <span className="pk"><span className="pdot" />{p.mode || 'Payment'}<span className="pd">· {fmtDate(p.date)}</span></span>
+                            <span className="pa">{inr(p.amount)} <span className="go">›</span></span>
+                          </button>
+                        ))}
+                        {remaining > 0.5 && b.vendorId && <button className="paylink" onClick={() => setLinkOpen(true)}>+ Link another payment</button>}
+                      </>
+                    ) : remaining > 0.5 && b.vendorId ? (
+                      <button className="paynone" onClick={() => setLinkOpen(true)}>
+                        <span>Nothing paid yet — <b>{inr(remaining)}</b> owed</span>
+                        <span className="mini">Link a payment ›</span>
+                      </button>
+                    ) : b.payments.length === 0 && remaining <= 0.5 ? (
+                      <div className="paysettled">Settled — no balance remains.</div>
+                    ) : null}
+                  </div>
+                </div>
+
+                {/* did it reach site — once received, a quiet "at site" line with the date, and a subtle
+                    "Details" that unfolds what actually came (items, challan, multiple deliveries). */}
+                {b.stockReceivedAt ? (
+                  <div className={`recv ok${showReceipt ? ' open' : ''}`}>
+                    <div className="rhead">
+                      <div className="ic"><svg viewBox="0 0 24 24"><path d="m5 12 4.5 4.5L19 7" /></svg></div>
+                      <div className="t"><b>At site</b><span>Received{b.stockReceivedAt ? ` · ${fmtDate(String(b.stockReceivedAt).slice(0, 10))}` : ''}{b.receipt && b.receipt.receipts > 1 ? ` · ${b.receipt.receipts} deliveries` : ''}</span></div>
+                      {b.receipt && b.receipt.items.length > 0 && (
+                        <button className="rmore" onClick={() => setShowReceipt(v => !v)}>{showReceipt ? 'Hide' : 'Details'}<span className="chev">{showReceipt ? '‹' : '›'}</span></button>
+                      )}
+                    </div>
+                    {showReceipt && b.receipt && (
+                      <div className="rdetail">
+                        {(b.receipt.dcNumber || b.receipt.vehicleNumber) && (
+                          <div className="rmeta">{[b.receipt.dcNumber ? `Challan ${b.receipt.dcNumber}` : null, b.receipt.vehicleNumber].filter(Boolean).join(' · ')}</div>
+                        )}
+                        {b.receipt.items.map((it, i) => (
+                          <div className="rit" key={i}>
+                            <span className="rin">{it.name}{it.condition && it.condition !== 'ok' ? <em> · {it.condition}</em> : null}</span>
+                            <span className="riq">{it.qty}{it.unit ? ` ${it.unit}` : ''}</span>
+                          </div>
+                        ))}
+                        {poId && <button className="ropen" onClick={() => navigate(`/purchase-orders/${poId}`)}>Full receipt on the order ›</button>}
+                      </div>
+                    )}
+                  </div>
+                ) : canReceive ? (
+                  <button className="recv go" disabled={receiving} onClick={openReceive}>
+                    <div className="ic"><svg viewBox="0 0 24 24"><path d="m3 8 9-4 9 4-9 4-9-4Z" /><path d="M3 8v8l9 4 9-4V8" /><path d="M12 12v8" /></svg></div>
+                    <div className="t"><b>{receiving ? 'Opening…' : 'Reached site?'}</b><span>Confirm the delivery to add these goods to stock</span></div>
+                    <span className="go-arrow">›</span>
+                  </button>
+                ) : null}
+
+                {/* the paper */}
+                <div className="card">
+                  <div className="ch">Document {b.docUrl && <span className="aside">click to enlarge</span>}</div>
+                  {b.docUrl ? (
+                    <div className="doc">
+                      <DocThumb stored={b.docUrl} onImageClick={setLightbox} w={84} h={108} label="Bill document" />
+                      <div className="meta2">
+                        <b>{b.billNo ? `Bill ${b.billNo}` : 'Bill document'}</b>
+                        <span>{[b.vendor, b.site].filter(Boolean).join(' · ')}</span>
+                        <button className="open" onClick={() => preview(b.docUrl!)}><svg viewBox="0 0 24 24"><path d="M15 3h6v6" /><path d="M10 14 21 3" /><path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5" /></svg>Open full size</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="empty">
+                      <div className="ei"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" /><path d="M14 2v6h6" /></svg></div>
+                      <b>No paper attached</b>
+                      <p>This bill was recorded without a scanned document — common for PO-recorded bills.</p>
+                      {poId && (
+                        <button className="act ghost" onClick={() => navigate(`/purchase-orders/${poId}`)}>
+                          <svg viewBox="0 0 24 24"><path d="M15 3h6v6" /><path d="M10 14 21 3" /><path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5" /></svg>Open the order
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* lines — lot-aware (never a false "qty × rate" on a lump line), an unread amount shows
+                    "—" not ₹0, and a footer reconciles the itemised subtotal + tax/charges to the total. */}
+                <div className="card">
+                  <div className="ch">Lines {b.lines.length > 0 && <span className="aside">as on the bill</span>}</div>
+                  {b.lines.length > 0 ? (
+                    <>
+                      {b.lines.map((l, i) => {
+                        const perUnit = l.basis !== 'lot' && l.qty > 0 && l.rate > 0;
+                        const editingThis = edit && typeof edit === 'object' && edit.line === i;
+                        return (
+                          <div className="ln" key={i}>
+                            <div className="nm">{l.name}{l.spec ? <span className="sp">{l.spec}</span> : null}
+                              {perUnit
+                                ? <div className="qt">{l.qty}{l.unit ? ' ' + l.unit : ''} × {inr(l.rate)}</div>
+                                : l.qty > 0 ? <div className="qt">{l.qty}{l.unit ? ' ' + l.unit : ''} · lot price</div> : (l.basis === 'lot' ? <div className="qt">lot price</div> : null)}
+                            </div>
+                            {editingThis ? (
+                              <span className="editrow tight">
+                                <span className="cur">₹</span>
+                                <input inputMode="decimal" value={val} autoFocus placeholder="0" onChange={e => setVal(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') saveLineAmount(i, val); }} />
+                                <button className="ed-ok" disabled={saving} onClick={() => saveLineAmount(i, val)}><Ok /></button>
+                                <button className="ed-x" onClick={() => setEdit(null)}><Ex /></button>
+                              </span>
+                            ) : editable ? (
+                              <button className={`lr lrval${l.amountRead ? '' : ' unread'}`} title={l.amountRead ? 'Change this price' : 'Add the price'} onClick={() => { setVal(l.amountRead ? String(Math.round(l.amount)) : ''); setEdit({ line: i }); }}>
+                                {l.amountRead ? inr(l.amount) : '—'}<span className="editpen sm"><Pen /></span>
+                              </button>
+                            ) : (
+                              <div className={`lr${l.amountRead ? '' : ' unread'}`}>{l.amountRead ? inr(l.amount) : '—'}</div>
+                            )}
+                          </div>
+                        );
+                      })}
+                      {(() => {
+                        const subtotal = b.lines.reduce((s, l) => s + (l.amountRead ? l.amount : 0), 0);
+                        const charges = Math.round(b.amount - subtotal);
+                        const allRead = b.lines.every(l => l.amountRead);
+                        if (subtotal <= 0) return null;
+                        return (
+                          <div className="tot">
+                            <div className="tr"><span>Subtotal{allRead ? '' : ' (of read lines)'}</span><span className="v">{inr(subtotal)}</span></div>
+                            {charges > 1 && <div className="tr"><span>Tax &amp; other charges</span><span className="v">{inr(charges)}</span></div>}
+                            {charges < -1 && <div className="tr warn"><span>Lines exceed the bill total</span><span className="v">{inr(charges)}</span></div>}
+                            <div className="tr grand"><span>Bill total</span><span className="v">{inr(b.amount)}</span></div>
+                          </div>
+                        );
+                      })()}
+                    </>
+                  ) : (
+                    <div className="empty">
+                      <div className="ei"><svg viewBox="0 0 24 24"><path d="M8 6h13" /><path d="M8 12h13" /><path d="M8 18h13" /><path d="M3 6h.01M3 12h.01M3 18h.01" /></svg></div>
+                      <b>No itemised lines</b>
+                      <p>The amount is recorded as a single figure of <b style={{ fontFamily: 'var(--mono)', fontWeight: 500 }}>{inr(b.amount)}</b>, not broken into items.{b.docUrl ? ' Open the paper to read the breakdown.' : ''}</p>
+                      {b.docUrl && (
+                        <button className="act ghost" onClick={() => preview(b.docUrl!)}>
+                          <svg viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" /><circle cx="12" cy="12" r="3" /></svg>View the bill
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="foot">
+                <button className="g" onClick={() => { onClose(); navigate(`/bills/${encodeURIComponent(id)}`); }} title="Open the full bill page">
+                  <svg viewBox="0 0 24 24"><path d="M15 3h6v6" /><path d="M10 14 21 3" /><path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5" /></svg>
+                  Full page
+                </button>
+                {remaining > 0.5 && b.vendorId && (
+                  <button className="g pri" onClick={() => setLinkOpen(true)}>
+                    <svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1" /><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1" /></svg>
+                    Link a payment
+                  </button>
+                )}
+                <button className="g del" disabled={deleting} onClick={onDelete}>{deleting ? 'Deleting…' : 'Delete'}</button>
+              </div>
+            </>
+          )}
+        </aside>
+      </div>
+
+      <ImageLightbox url={lightbox} title="Bill document" onClose={() => setLightbox(null)} />
+      {linkOpen && b && b.vendorId && (
+        <div className="blx bpk-scope">
+          <DeskLinker
+            bill={b}
+            need={remaining}
+            orgId={orgId}
+            onClose={() => setLinkOpen(false)}
+            onDone={(msg) => {
+              setLinkOpen(false);
+              show(msg);
+              qc.invalidateQueries({ queryKey: ['bill', id] });
+              qc.invalidateQueries({ queryKey: ['bills'] });
+              qc.invalidateQueries({ queryKey: ['party_ledger'] });
+              qc.invalidateQueries({ queryKey: ['weekly_payments'] });
+              qc.invalidateQueries({ queryKey: ['po_detail'] });
+              qc.invalidateQueries({ queryKey: ['po_list_sheet'] });
+              qc.invalidateQueries({ queryKey: ['po_paid_rollup'] });
+              qc.invalidateQueries({ queryKey: ['purchase_orders_enhanced'] });
+            }}
+            onFail={(m) => show(m, { type: 'error' })}
+          />
+        </div>
+      )}
+      {b && (
+        <BillReceivePanel
+          open={billRcvOpen}
+          onClose={() => setBillRcvOpen(false)}
+          orgId={orgId}
+          bill={{ id: rawId, bill_no: b.billNo, vendor: b.vendor, site: b.site, project_id: b.projectId, lines: (b.lines ?? []).map((l) => ({ name: l.name, unit: l.unit, qty: Number(l.qty) || 0, rate: l.rate })) }}
+          onReceived={afterReceive}
+        />
+      )}
+      <ReceiveDeliveryPanel open={!!poRcv} onClose={() => setPoRcv(null)} orgId={orgId} po={poRcv} onReceived={afterReceive} />
+    </>,
+    document.body,
   );
 }
 

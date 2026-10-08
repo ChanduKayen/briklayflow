@@ -13,7 +13,7 @@ const sumCells = (cells: Cell[]) => cells.reduce((s, c) => s + ((c && c !== 'off
 
 export interface AttDetail {
   period: string;
-  days: string[];                                  // Mon…Sat labels
+  days: string[];                                  // the pay week's day labels (start day → end)
   cats: { name: string; rate: number; cells: (number | null)[] }[];
   ledger: [string, number][];
   sum: number;
@@ -49,8 +49,11 @@ const inrShort = (n: number) => '₹' + Math.round(n).toLocaleString('en-IN');
 export async function loadWeeklyPayments(monday: Date): Promise<WeeklyPayments> {
   const { sites } = await loadWeek(monday);
   const dates = weekDates(monday);
-  const dayLabels = dates.slice(0, 6).map(d => new Date(d).toLocaleString('en-US', { weekday: 'short' }));
-  const period = `${new Date(dates[0]).toLocaleString('en-US', { month: 'short', day: 'numeric' })} – ${new Date(dates[5]).toLocaleString('en-US', { month: 'short', day: 'numeric' })}`;
+  // The pay week may start on any weekday and its off-day may be any day (or none), so the detail spans
+  // all seven days of the window; a day nobody worked simply reads blank. The wage itself sums every
+  // worked cell (sumCells), off-day included if someone was actually marked that day.
+  const dayLabels = dates.map(d => new Date(d).toLocaleString('en-US', { weekday: 'short' }));
+  const period = `${new Date(dates[0]).toLocaleString('en-US', { month: 'short', day: 'numeric' })} – ${new Date(dates[6]).toLocaleString('en-US', { month: 'short', day: 'numeric' })}`;
 
   const sections: PaySection[] = sites.map(site => {
     const rows: PayRow[] = [];
@@ -86,7 +89,7 @@ export async function loadWeeklyPayments(monday: Date): Promise<WeeklyPayments> 
           stage: { readings, ledger: [['Certified so far', priorEarned + thisWeekEarned], ['Paid so far', -paid]], sum: (priorEarned + thisWeekEarned) - paid },
         });
       } else {
-        const cats = crew.cats.map(cat => ({ name: cat.n, rate: cat.rate, cells: cat.cells.slice(0, 6).map(c => (c && c !== 'off') ? c.v : null) }));
+        const cats = crew.cats.map(cat => ({ name: cat.n, rate: cat.rate, cells: cat.cells.map(c => (c && c !== 'off') ? c.v : null) }));
         const wage = crew.cats.reduce((s, cat) => s + sumCells(cat.cells) * cat.rate, 0);
         if (wage <= 0) return;
         const ledger = crew.cats.map(cat => [`${sumCells(cat.cells)} × ${inrShort(cat.rate)}`, sumCells(cat.cells) * cat.rate] as [string, number]).filter(l => l[1] > 0);
@@ -111,7 +114,7 @@ export async function loadWeeklyPayments(monday: Date): Promise<WeeklyPayments> 
         key: `d${site.site}-${wi}`, projectId: site.site, projectName: site.label,
         stakeholderId: w.stakeholderId, party: w.n, trade: w.cat || 'Direct',
         kind: 'wages', basis: 'attendance', thisWeek: wage, balanceBf: 0, woId: null, milestoneId: null,
-        att: { period, days: dayLabels, cats: [{ name: w.cat, rate: w.rate, cells: w.cells.slice(0, 6).map(c => (c && c !== 'off') ? c.v : null) }], ledger: [[`${days} × ${inrShort(w.rate)}`, wage]], sum: wage },
+        att: { period, days: dayLabels, cats: [{ name: w.cat, rate: w.rate, cells: w.cells.map(c => (c && c !== 'off') ? c.v : null) }], ledger: [[`${days} × ${inrShort(w.rate)}`, wage]], sum: wage },
       });
     });
 

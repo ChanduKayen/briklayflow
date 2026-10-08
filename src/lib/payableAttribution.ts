@@ -16,6 +16,7 @@ import type { QueryClient } from '@tanstack/react-query';
 import { supabase } from './supabase';
 import { loadUnpaidBillsForVendor, saveBillAllocations, loadLinkablePayments, type BillPick, type LinkablePayment } from './billsApi';
 import { loadWeeklyPayments } from './weeklyPaymentsApi';
+import { weekStartOf } from './attendanceApi';
 
 export type PayeeType = 'Vendor' | 'Worker' | null | undefined;
 export type PayableTag = 'this_week' | 'past' | 'advance' | 'other';
@@ -43,10 +44,8 @@ export type AttributionTargets =
 
 const num = (v: unknown) => Number(v) || 0;
 
-function mondayOf(d: Date): Date {
-  const x = new Date(d); const day = (x.getDay() + 6) % 7; // 0 = Monday
-  x.setDate(x.getDate() - day); x.setHours(0, 0, 0, 0); return x;
-}
+// The pay week follows the org preference — weekStartOf reads the configured start day (attendanceApi).
+const mondayOf = (d: Date): Date => weekStartOf(d);
 
 /** The worker's engagement on this site. ANY crew with a wo_id is "on a contract" — in either format:
  *  work-done (accrual_basis !== 'day') or wages-set-off (accrual_basis === 'day', wagesMode). Returns

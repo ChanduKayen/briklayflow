@@ -14,7 +14,7 @@ import { addStakeholderAlias } from '../lib/stakeholderMerge';
 import { fileRoughEntry, fileRoughEntrySplit } from './day-book/fileEntry';
 import { getCostCode, searchGenHeads, isCompanyHead } from '../lib/costCodes';
 import { PayablePicker } from './payables/PayablePicker';
-import { applyAttribution, type Selection } from '../lib/payableAttribution';
+import { applyAttribution, attrTargetsKey, loadAttributionTargets, type Selection, type PayeeType } from '../lib/payableAttribution';
 
 // ── Walnut-ledger palette (mirrors NewTransaction.tsx) ──────────────────────────
 // Warm cream canvas, walnut ink, terracotta accent for money-out, sage for money-in.
@@ -901,6 +901,27 @@ export function ResolvePopup({ entry, onClose, onUpdated, only }: Props) {
     onUpdated({ ...updatedEntry, status: 'POSTED' } as RoughEntry);
     onClose();
   }, [qc, onUpdated, onClose]);
+
+  // PRELOAD "Towards which payable?" — warm the exact cache the picker reads, the moment a payee + site +
+  // amount are in hand, so Approve opens the picker INSTANTLY instead of fetching (loadAttributionTargets
+  // pulls the whole weekly run, which is the lag). Subtlety: the targets depend on live balances this
+  // payment will shift, and the loader adds `selfPaid` back to reconstruct what was owed BEFORE it — so the
+  // PRE-file value computed at selfPaid=0 equals the POST-file value at selfPaid=amount (the key the picker
+  // uses, PayableOptions). We therefore warm that amount-keyed entry with the selfPaid=0 computation; when
+  // the picker mounts post-file it finds fresh, correct data and never shows a spinner.
+  useEffect(() => {
+    if (splitMode || isGeneral || topUp) return;
+    if (!payeeId || !projectId || !(Number(amount) > 0)) return;
+    const payeeType = stakeholders.find((s: any) => s.stakeholder_id === payeeId)?.type;
+    const type: PayeeType = payeeType === 'Vendor' ? 'Vendor' : 'Worker';
+    const target = { id: payeeId, type };
+    const date = ai.date ?? null;
+    void qc.prefetchQuery({
+      queryKey: attrTargetsKey(target, projectId, date, Number(amount)),
+      queryFn: () => loadAttributionTargets(target, projectId, date, 0),
+      staleTime: 60_000,
+    });
+  }, [payeeId, projectId, amount, isGeneral, topUp, splitMode, stakeholders, ai.date, qc]);
 
   const handleApprove = useCallback(async () => {
     if (posting || !canFile) return;

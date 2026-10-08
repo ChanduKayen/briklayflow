@@ -8,6 +8,10 @@ export type MembershipContext = {
   role:         'principal' | 'management' | 'supervisor' | 'accountant'
   status:       'active' | 'pending' | 'suspended'
   joinedAt:     string | null
+  /** The org's pay week (migration 20260929000000). Day = JS getDay() convention (0 = Sun … 6 = Sat).
+   *  weekStartDay defaults to Monday; weeklyOffDay is the default day-off, or null for "no weekly off". */
+  weekStartDay: number
+  weeklyOffDay: number | null
 }
 
 export type AuthRoute =
@@ -24,6 +28,8 @@ type MembershipContextRow = {
   role: MembershipContext['role']
   status: MembershipContext['status']
   joined_at: string | null
+  week_start_day: number | null
+  weekly_off_day: number | null
 }
 
 type InviteRow = { token: string; org_name: string }
@@ -54,6 +60,10 @@ export async function resolveAuthDestination(
         role:         ctx.role,
         status:       ctx.status,
         joinedAt:     ctx.joined_at,
+        // DB default is Monday start / Sunday off; a null week_start_day (pre-migration RPC) falls back
+        // to Monday so behaviour is unchanged. weekly_off_day null is meaningful ("no weekly off").
+        weekStartDay: typeof ctx.week_start_day === 'number' ? ctx.week_start_day : 1,
+        weeklyOffDay: ctx.weekly_off_day === undefined ? 0 : ctx.weekly_off_day,
       },
     }
   }

@@ -28,6 +28,7 @@ import {
 } from '@tabler/icons-react';
 import { supabase } from '../../lib/supabase';
 import { clearPersistedCache } from '../../lib/queryClient';
+import { warmRoute } from '../../lib/routeChunks';
 import { SITE_DESK_ENABLED } from '../../lib/desk/flag';
 import { useAuth } from '../../lib/auth/AuthProvider';
 import { useUserProfile } from '../../App';
@@ -102,7 +103,8 @@ function RailItem({ item, active, open, onNavigate }: { item: Item; active: bool
   const labelColor = (active || hov) ? N.text : N.textSoft;
   return (
     <Link to={item.route} onClick={onNavigate} title={item.label}
-      onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
+      onPointerDown={() => warmRoute(item.route)}
+      onMouseEnter={() => { setHov(true); warmRoute(item.route); }} onMouseLeave={() => setHov(false)}
       className="w-full flex items-center"
       style={{
         position: 'relative',

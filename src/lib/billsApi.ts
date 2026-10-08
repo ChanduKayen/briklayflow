@@ -46,8 +46,20 @@ export interface BillRow {
   lines?: BillLine[];
 }
 
-export interface BillLine { name: string; spec: string | null; unit: string | null; qty: number; rate: number; amount: number }
+// `basis` distinguishes a per-unit line (amount = qty × rate) from a lot/bulk/lump line (the printed
+// price is for the whole line regardless of qty) — read by the extractor's rate_basis, kept so the
+// detail never renders a misleading "qty × rate" on a lot line. `amount: null` means the paper's line
+// total could not be read (common on handwritten chits) — shown as "—", not ₹0.
+export interface BillLine { name: string; spec: string | null; unit: string | null; qty: number; rate: number; amount: number; basis?: 'per_unit' | 'lot' | null; amountRead?: boolean; poLineItemId?: string }
 export interface BillPayment { txnId: string; date: string | null; mode: string | null; amount: number }
+// What actually reached site — the goods receipt behind "at site". For a PO-tracked bill this is the
+// PO's GRN(s); a bill can have several partial receipts, so items are aggregated and `receipts` counts them.
+export interface BillReceipt {
+  date: string | null;
+  dcNumber?: string | null; vehicleNumber?: string | null; remarks?: string | null;
+  receipts: number;
+  items: { name: string; unit: string | null; qty: number; condition?: string | null }[];
+}
 export interface BillDetail extends BillRow {
   lines: BillLine[];
   payments: BillPayment[];
@@ -55,9 +67,23 @@ export interface BillDetail extends BillRow {
   poProjectId: string | null;
   periodFrom?: string; periodTo?: string; note?: string;
   stockReceivedAt?: string | null;
+  receipt?: BillReceipt | null;
 }
 
 const num = (v: any) => Number(v) || 0;
+
+// One reader for a stored bill-line (jsonb), tolerant of the older shape (no basis/amountRead) and of
+// the extractor's raw keys. A lot line keeps its printed whole-line price; a per-unit line falls back
+// to qty × rate only when it genuinely has both. `amountRead` says whether the paper's line total was
+// actually captured — so an unread handwritten amount shows as "—", never a false ₹0.
+function readLine(l: any): BillLine {
+  const basis: 'per_unit' | 'lot' | null = l.basis === 'lot' || l.rate_basis === 'lot' ? 'lot'
+    : l.basis === 'per_unit' || l.rate_basis === 'per_unit' ? 'per_unit' : null;
+  const qty = num(l.qty), rate = num(l.rate), printed = num(l.amount);
+  const amount = basis === 'lot' ? printed : (printed || qty * rate);
+  const amountRead = l.amountRead != null ? !!l.amountRead : (l.amount != null || (basis !== 'lot' && qty > 0 && rate > 0));
+  return { name: l.name ?? l.item ?? '—', spec: l.spec ?? null, unit: l.unit ?? null, qty, rate, amount, basis, amountRead };
+}
 const statusOf = (amount: number, paid: number): BillStatus =>
   paid >= amount - 0.5 ? 'settled' : paid > 0.5 ? 'part' : 'unpaid';
 
@@ -80,9 +106,21 @@ function invoiceCount(lines: unknown): number {
   return Math.max(1, tags.size);
 }
 
+// The first-class bills read is resilient to a not-yet-applied column: try WITH stock_received_at, and
+// on any error retry WITHOUT it. A swallowed error here once blanked every bl~ bill from the page (and
+// made the peek edit the PO instead of the bill) — a missing column must narrow a feature, never delete
+// the bills. The error is surfaced (thrown) if even the minimal read fails, rather than silently empty.
+const BILLS_BASE_COLS = 'id, stakeholder_id, project_id, po_id, bill_no, bill_date, amount, created_at, doc_url, lines';
+async function fetchFirstClassBills(): Promise<any[]> {
+  let r = await supabase.from('bills').select(`${BILLS_BASE_COLS}, stock_received_at`);
+  if (r.error) r = await supabase.from('bills').select(BILLS_BASE_COLS);   // column not migrated yet → read without it
+  if (r.error) throw r.error;
+  return (r.data ?? []) as any[];
+}
+
 export async function loadBills(): Promise<BillRow[]> {
-  const [billsR, poR, stkR, projR, cbR, grnR] = await Promise.all([
-    supabase.from('bills').select('id, stakeholder_id, project_id, po_id, bill_no, bill_date, amount, created_at, doc_url, lines, stock_received_at'),
+  const [billRowsRaw, poR, stkR, projR, cbR, grnR] = await Promise.all([
+    fetchFirstClassBills(),
     supabase.from('purchase_orders')
       .select(`po_id, stakeholder_id, project_id, vendor_bill_number, vendor_bill_doc_url, vendor_bill_url, ${BILL_DATE_COLUMNS}, status, approval_status`)
       .eq('approval_status', 'APPROVED')
@@ -97,7 +135,7 @@ export async function loadBills(): Promise<BillRow[]> {
   const grnByPo: Record<string, string> = {};
   (grnR.data ?? []).forEach((g: any) => { if (g.po_id && (!grnByPo[g.po_id] || String(g.receipt_date) > String(grnByPo[g.po_id]))) grnByPo[g.po_id] = g.receipt_date ?? 'received'; });
   if (poR.error) throw poR.error;
-  const billRows = (billsR.data ?? []) as any[];   // first-class bills (empty if migration not applied)
+  const billRows = billRowsRaw;   // first-class bills
   // A PO named by a bills row is represented by that bill, not its own PO-bill row — suppress the dup.
   const billedPoIds = new Set(billRows.map(b => b.po_id).filter(Boolean));
   const pos = ((poR.data ?? []) as any[]).filter(p => !billedPoIds.has(p.po_id));
@@ -171,7 +209,7 @@ export async function loadBills(): Promise<BillRow[]> {
       addedAt: b.created_at ? String(b.created_at) : (b.bill_date || null),
       stockReceivedAt: b.stock_received_at ?? (b.po_id ? grnByPo[b.po_id] ?? null : null),
       poId: b.po_id ?? null,
-      lines: Array.isArray(b.lines) ? b.lines.map((l: any) => ({ name: l.name ?? l.item ?? '—', spec: l.spec ?? null, unit: l.unit ?? null, qty: num(l.qty), rate: num(l.rate), amount: num(l.amount) || num(l.qty) * num(l.rate) })) : [],
+      lines: Array.isArray(b.lines) ? b.lines.map((l: any) => readLine(l)) : [],
     });
   }
   for (const p of pos) {
@@ -206,6 +244,33 @@ export async function loadBills(): Promise<BillRow[]> {
 }
 
 // ── detail ───────────────────────────────────────────────────────────────────
+// The receipt(s) behind a PO's "at site" — the latest date as the headline, items aggregated across
+// every partial GRN, and the challan/vehicle shown only when there's a single receipt to attribute it to.
+async function fetchPoReceipt(poId: string): Promise<BillReceipt | null> {
+  const { data: grns } = await supabase.from('po_grn')
+    .select('grn_id, receipt_date, dc_number, vehicle_number, remarks').eq('po_id', poId).order('receipt_date', { ascending: true });
+  const rows = (grns ?? []) as any[];
+  if (!rows.length) return null;
+  const ids = rows.map(g => g.grn_id);
+  const { data: its } = await supabase.from('po_grn_items').select('item_name, unit, qty_received, condition').in('grn_id', ids);
+  const agg = new Map<string, { name: string; unit: string | null; qty: number; condition?: string | null }>();
+  ((its ?? []) as any[]).forEach(it => {
+    const key = String(it.item_name || '').toLowerCase();
+    const e = agg.get(key) ?? { name: it.item_name || '—', unit: it.unit ?? null, qty: 0, condition: it.condition ?? null };
+    e.qty += num(it.qty_received); if (it.condition && it.condition !== 'ok') e.condition = it.condition;
+    agg.set(key, e);
+  });
+  const latest = rows[rows.length - 1];
+  return {
+    date: latest.receipt_date ?? null,
+    dcNumber: rows.length === 1 ? latest.dc_number : null,
+    vehicleNumber: rows.length === 1 ? latest.vehicle_number : null,
+    remarks: rows.length === 1 ? latest.remarks : null,
+    receipts: rows.length,
+    items: [...agg.values()],
+  };
+}
+
 export async function loadBillDetail(id: string): Promise<BillDetail | null> {
   const sep = id.indexOf('~');
   const kind = id.slice(0, sep), ref = id.slice(sep + 1);
@@ -223,9 +288,9 @@ export async function loadBillDetail(id: string): Promise<BillDetail | null> {
       .sort((x, y) => (x.date || '').localeCompare(y.date || ''));
     const amount = num(b.amount);
     const paid = Math.min(amount, payments.reduce((s, x) => s + x.amount, 0));
-    const lines: BillLine[] = Array.isArray(b.lines) ? b.lines.map((l: any) => ({
-      name: l.name ?? l.item ?? '—', spec: l.spec ?? null, unit: l.unit ?? null, qty: num(l.qty), rate: num(l.rate), amount: num(l.amount) || num(l.qty) * num(l.rate),
-    })) : [];
+    const lines: BillLine[] = Array.isArray(b.lines) ? b.lines.map((l: any) => readLine(l)) : [];
+    // "At site" for a PO-tracked bill lives on the PO's GRN, not the bill row — resolve both.
+    const receipt = b.po_id ? await fetchPoReceipt(b.po_id) : null;
     return {
       id, kind: 'po', vendorId: b.stakeholder_id ?? null, vendor: (stk.data as any)?.name || 'Vendor',
       billNo: b.bill_no || null, billDate: b.bill_date || (b.created_at ? String(b.created_at).slice(0, 10) : null),
@@ -234,14 +299,14 @@ export async function loadBillDetail(id: string): Promise<BillDetail | null> {
       docUrl: b.doc_url || null, docCount: invoiceCount(lines),
       addedAt: b.created_at ? String(b.created_at) : (b.bill_date || null),
       lines, payments, poId: b.po_id ?? null, poProjectId: b.project_id ?? null, note: b.note || undefined,
-      stockReceivedAt: b.stock_received_at ?? null,
+      stockReceivedAt: b.stock_received_at ?? receipt?.date ?? null, receipt,
     };
   }
 
   if (kind === 'po') {
     const [poR, liR] = await Promise.all([
       supabase.from('purchase_orders').select(`po_id, stakeholder_id, project_id, vendor_bill_number, vendor_bill_doc_url, vendor_bill_url, ${BILL_DATE_COLUMNS}, status`).eq('po_id', ref).maybeSingle(),
-      supabase.from('po_line_items').select('line_number, item_name, specification, unit, quantity_ordered, unit_rate, total_amount').eq('po_id', ref).order('line_number'),
+      supabase.from('po_line_items').select('id, line_number, item_name, specification, unit, quantity_ordered, unit_rate, total_amount').eq('po_id', ref).order('line_number'),
     ]);
     const p = poR.data as any; if (!p) return null;
     const [stk, proj, alR] = await Promise.all([
@@ -255,9 +320,13 @@ export async function loadBillDetail(id: string): Promise<BillDetail | null> {
     const amount = num(p.vendor_bill_amount);
     const paid = Math.min(amount, payments.reduce((s, x) => s + x.amount, 0));
     const lines: BillLine[] = (liR.data ?? []).map((li: any) => {
-      const qty = num(li.quantity_ordered), rate = num(li.unit_rate);
-      return { name: li.item_name, spec: li.specification ?? null, unit: li.unit ?? null, qty, rate, amount: num(li.total_amount) || qty * rate };
+      const qty = num(li.quantity_ordered), rate = num(li.unit_rate), total = num(li.total_amount);
+      // Infer per-unit vs lot from what was stored: if qty × rate reproduces the line total, it's
+      // per-unit; a total that ignores qty is a lot/lump line.
+      const basis: 'per_unit' | 'lot' | null = qty > 0 && rate > 0 && Math.abs(qty * rate - (total || qty * rate)) <= 1 ? 'per_unit' : total > 0 ? 'lot' : null;
+      return { name: li.item_name, spec: li.specification ?? null, unit: li.unit ?? null, qty, rate, amount: total || qty * rate, basis, amountRead: total > 0 || (qty > 0 && rate > 0), poLineItemId: li.id != null ? String(li.id) : undefined };
     });
+    const receipt = await fetchPoReceipt(p.po_id);
     return {
       id, kind: 'po', vendorId: p.stakeholder_id ?? null, vendor: (stk.data as any)?.name || 'Vendor',
       billNo: p.vendor_bill_number || null, billDate: billDateOf(p), projectId: p.project_id ?? null,
@@ -266,6 +335,7 @@ export async function loadBillDetail(id: string): Promise<BillDetail | null> {
       docUrl: p.vendor_bill_doc_url || p.vendor_bill_url || null, docCount: 1,
       addedAt: billDateOf(p),
       lines, payments, poId: p.po_id, poProjectId: p.project_id ?? null,
+      stockReceivedAt: receipt?.date ?? null, receipt,
     };
   }
 
@@ -402,7 +472,10 @@ export interface ExtractedBill {
   billNo: string | null;
   billDate: string | null;       // ISO if parseable
   amount: number;
-  lines: { name: string; spec: string | null; unit: string | null; qty: number; rate: number; amount: number }[];
+  gst?: number;                  // printed/derived tax, when read (manual-entry callers omit it)
+  billDateRaw?: string | null;                         // the date exactly as written — for the plausibility check
+  dateConfidence?: 'high' | 'medium' | 'low' | null;   // the model's certainty about the date
+  lines: { name: string; spec: string | null; unit: string | null; qty: number; rate: number; amount: number; basis?: 'per_unit' | 'lot' | null; amountRead?: boolean }[];
 }
 
 // Read an uploaded bill (image/PDF) with the existing extract-only AI (reconcile-po-bill).
@@ -410,15 +483,24 @@ export async function extractBill(file: File): Promise<ExtractedBill> {
   const b64 = await fileToBase64(file);
   const r = await readVendorBill(b64, file.type || 'image/jpeg');
   return {
-    vendor: r.vendor, billNo: r.billNo, billDate: normDate(r.billDate), amount: num(r.total),
+    vendor: r.vendor, billNo: r.billNo, billDate: normDate(r.billDate), amount: num(r.total), gst: num(r.gst),
+    billDateRaw: r.billDateRaw ?? null, dateConfidence: r.dateConfidence ?? null,
     // A vendor's "bill" is routinely one PDF holding three tax invoices. Keep which invoice each
     // line came from — otherwise three identical cement lines read as one line entered twice.
-    lines: (r.lines ?? []).map((l: any) => ({
-      name: l.item ?? '—',
-      spec: l.source_doc ? `Bill ${String(l.source_doc).replace(/^bill\s*/i, '')}` : null,
-      unit: l.unit ?? null, qty: num(l.qty), rate: num(l.rate),
-      amount: num(l.amount) || num(l.qty) * num(l.rate),
-    })),
+    lines: (r.lines ?? []).map((l: any) => {
+      const printed = num(l.amount);
+      // Lot lines print the whole-line price regardless of qty — never re-derive it from qty × rate.
+      const basis: 'per_unit' | 'lot' | null = l.rate_basis === 'lot' ? 'lot' : l.rate_basis === 'per_unit' ? 'per_unit' : null;
+      const derived = basis === 'lot' ? printed : (printed || num(l.qty) * num(l.rate));
+      return {
+        name: l.item ?? '—',
+        spec: l.source_doc ? `Bill ${String(l.source_doc).replace(/^bill\s*/i, '')}` : null,
+        unit: l.unit ?? null, qty: num(l.qty), rate: num(l.rate),
+        amount: derived, basis,
+        // Was the line total actually on the paper? (vs. a zero we couldn't read). Drives "—" not ₹0.
+        amountRead: l.amount != null || (basis !== 'lot' && num(l.qty) > 0 && num(l.rate) > 0),
+      };
+    }),
   };
 }
 
@@ -474,6 +556,54 @@ export async function findDuplicateBill(fp: { orgId: string; billNo?: string | n
     if (hit) return toDup(hit, 'amount');
   }
   return null;
+}
+
+// Edit a first-class (`bl~`) bill in place. Only the fields the caller passes are touched. Lines are
+// rewritten wholesale (jsonb) — the caller sends the full corrected array (e.g. an amount filled in on
+// a handwritten line). Project is NOT editable through here for a PO-tracked bill: that bill's site
+// follows its order, and the caller must not offer the change. `amount` recomputes to keep the bill
+// total honest when the itemisation changes — but only when the bill has no separate tax/charges gap
+// we'd otherwise erase (i.e. the old total equalled the old line subtotal); otherwise the header total
+// is left as the paper's figure and the lines simply reconcile under it.
+export async function updateBill(
+  id: string,
+  patch: { billNo?: string | null; billDate?: string | null; projectId?: string | null; stakeholderId?: string; vendorName?: string | null; lines?: BillLine[]; amount?: number },
+): Promise<void> {
+  const sep = id.indexOf('~');
+  const kind = id.slice(0, sep), ref = id.slice(sep + 1);
+
+  // A po~ bill IS the PO's vendor bill: its vendor and site are the order's (not editable here), but the
+  // bill DATE and the LINE prices are — the line price writes straight back to the order's line item, so
+  // a price finally read off a handwritten chit lands on the PO too. The billed total is left untouched.
+  if (kind === 'po') {
+    if (patch.stakeholderId || 'vendorName' in patch || 'projectId' in patch) throw new Error('Vendor and site follow the purchase order.');
+    if ('billDate' in patch || 'billNo' in patch) {
+      const up: Record<string, unknown> = {};
+      if ('billDate' in patch) up.vendor_bill_date = patch.billDate || null;
+      if ('billNo' in patch) up.vendor_bill_number = patch.billNo || null;
+      const { error } = await supabase.from('purchase_orders').update(up).eq('po_id', ref);
+      if (error) throw error;
+    }
+    for (const l of patch.lines ?? []) {
+      if (!l.poLineItemId) continue;
+      const { error } = await supabase.from('po_line_items').update({ total_amount: l.amount, unit_rate: l.rate }).eq('id', l.poLineItemId);
+      if (error) throw error;
+    }
+    return;
+  }
+
+  if (kind !== 'bl') throw new Error('This bill can’t be edited here.');
+  const row: Record<string, unknown> = {};
+  if ('billNo' in patch) row.bill_no = patch.billNo || null;
+  if ('billDate' in patch) row.bill_date = patch.billDate || null;
+  if ('projectId' in patch) row.project_id = patch.projectId || null;
+  if ('stakeholderId' in patch && patch.stakeholderId) row.stakeholder_id = patch.stakeholderId;
+  if ('vendorName' in patch) row.vendor_name = patch.vendorName || null;
+  if ('lines' in patch) row.lines = patch.lines;
+  if ('amount' in patch && patch.amount != null) row.amount = patch.amount;
+  if (!Object.keys(row).length) return;
+  const { error } = await supabase.from('bills').update(row).eq('id', ref);
+  if (error) throw error;
 }
 
 export interface NewBillInput {

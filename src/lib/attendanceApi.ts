@@ -55,39 +55,66 @@ export interface WeekData { sites: SiteRow[]; card: RateCard }
 // which shifted the whole muster week back a day (grid ran Sun…Sat, and the Sunday-off cell at
 // index 6 landed on Saturday). We key attendance by the LOCAL calendar day the site worked.
 const iso = (d: Date) => `${d.getFullYear()}-${`${d.getMonth() + 1}`.padStart(2, '0')}-${`${d.getDate()}`.padStart(2, '0')}`;
-/** Monday (00:00) of the week containing `d`. */
-export function mondayOf(d: Date): Date {
+
+// ── the pay week (configurable) ───────────────────────────────────────────────
+// The org chooses which weekday its labour week starts on and which day is the default
+// weekly off (migration 20260929000000). These module-level values are the single source
+// the whole app's week math reads; AuthProvider sets them from the org preference the moment
+// the membership context is known, so every `weekStartOf()` / `mondayOf()` call app-wide
+// follows the org's week without each caller having to thread the start day. Defaults match
+// the historical behaviour (Monday start, Sunday off) so an org that never changes it is
+// identical to before. Days use the JS getDay() convention: 0 = Sun … 6 = Sat.
+let _weekStart = 1;                 // Monday
+let _weekOff: number | null = 0;    // Sunday
+export function setWeekConfig(c: { startDay?: number | null; offDay?: number | null }): void {
+  if (typeof c.startDay === 'number' && c.startDay >= 0 && c.startDay <= 6) _weekStart = c.startDay;
+  if (c.offDay !== undefined) _weekOff = (typeof c.offDay === 'number' && c.offDay >= 0 && c.offDay <= 6) ? c.offDay : null;
+}
+export function weekStartDayOf(): number { return _weekStart; }
+export function weeklyOffDayOf(): number | null { return _weekOff; }
+
+/** 00:00 of the start of the pay week containing `d` — the week starts on `startDay` (defaults to
+ *  the org's configured start day). Idempotent on a value already at a week start. */
+export function weekStartOf(d: Date, startDay: number = _weekStart): Date {
   const x = new Date(d); x.setHours(0, 0, 0, 0);
-  const dow = (x.getDay() + 6) % 7; // 0 = Monday
-  x.setDate(x.getDate() - dow);
+  const back = (x.getDay() - startDay + 7) % 7;
+  x.setDate(x.getDate() - back);
   return x;
 }
-export function weekDates(monday: Date): string[] {
-  return Array.from({ length: 7 }, (_, i) => { const d = new Date(monday); d.setDate(d.getDate() + i); return iso(d); });
+/** @deprecated name kept for existing call sites — resolves to the configured pay-week start. */
+export const mondayOf = (d: Date): Date => weekStartOf(d);
+
+export function weekDates(weekStart: Date): string[] {
+  return Array.from({ length: 7 }, (_, i) => { const d = new Date(weekStart); d.setDate(d.getDate() + i); return iso(d); });
 }
-export function weekLabel(monday: Date): string {
-  const end = new Date(monday); end.setDate(end.getDate() + 6);
+export function weekLabel(weekStart: Date): string {
+  const end = new Date(weekStart); end.setDate(end.getDate() + 6);
   const m = (d: Date) => d.toLocaleString('en-US', { month: 'short' });
-  const same = monday.getMonth() === end.getMonth();
-  return same ? `${monday.getDate()} – ${end.getDate()} ${m(end)}` : `${monday.getDate()} ${m(monday)} – ${end.getDate()} ${m(end)}`;
+  const same = weekStart.getMonth() === end.getMonth();
+  return same ? `${weekStart.getDate()} – ${end.getDate()} ${m(end)}` : `${weekStart.getDate()} ${m(weekStart)} – ${end.getDate()} ${m(end)}`;
 }
 const timeLabel = (ts: string) => new Date(ts).toLocaleString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }).toLowerCase();
 
-// A fresh 7-day cell array: Sunday (index 6) is a day off, the rest are gaps.
-const emptyCells = (): Cell[] => [null, null, null, null, null, null, 'off'];
+/** A fresh 7-slot default array for the week: the weekly-off day (by its real weekday, wherever it
+ *  falls in the window) is 'off', every other day is a gap. `offDay` null → no off, all gaps. */
+const defaultCells = (dates: string[], offDay: number | null): Cell[] =>
+  dates.map(ds => (offDay != null && new Date(ds).getDay() === offDay) ? ('off' as Cell) : null);
 
 function cellFrom(row: any): Cell {
   return { v: Number(row.value), src: row.source === 'wa' ? 'wa' : 'office', by: row.recorded_by_name || undefined, at: row.recorded_at ? timeLabel(row.recorded_at) : undefined, photo: !!row.photo_url };
 }
 // Build a 7-slot cell array for one subject from its attendance rows (keyed by date).
-function cellsFor(rows: any[], dates: string[]): Cell[] {
+function cellsFor(rows: any[], dates: string[], offDay: number | null): Cell[] {
   const byDate: Record<string, any> = {};
   rows.forEach(r => { byDate[r.work_date] = r; });
-  return dates.map((d, i) => byDate[d] ? cellFrom(byDate[d]) : emptyCells()[i]);
+  const dflt = defaultCells(dates, offDay);
+  return dates.map((d, i) => byDate[d] ? cellFrom(byDate[d]) : dflt[i]);
 }
 
 // ── load one week for every active project ──────────────────────────────────
-export async function loadWeek(monday: Date): Promise<WeekData> {
+// `offDay` defaults to the org's configured weekly-off day; a caller that knows it (the attendance
+// surfaces, which read it from the auth context) passes it so the grid never depends on config timing.
+export async function loadWeek(monday: Date, offDay: number | null = _weekOff): Promise<WeekData> {
   const dates = weekDates(monday);
   const weekStart = dates[0], weekEnd = dates[6];
 
@@ -202,7 +229,7 @@ export async function loadWeek(monday: Date): Promise<WeekData> {
   const sites: SiteRow[] = (projectsR.data ?? []).map((p: any) => {
     const projectCrews = crews.filter((c: any) => c.project_id === p.project_id).map((c: any): CrewRow => {
       const crewCats = cats.filter((k: any) => k.crew_id === c.crew_id).map((k: any): CatRow => ({
-        id: k.id, n: k.category, rate: Number(k.rate) || 0, own: k.own_rate, cells: cellsFor(byCat[k.id] ?? [], dates),
+        id: k.id, n: k.category, rate: Number(k.rate) || 0, own: k.own_rate, cells: cellsFor(byCat[k.id] ?? [], dates, offDay),
       }));
       // Show EVERY phase of the contract, so the sheet's stage dropdown lists them all and the crew can
       // be pointed at any one for the week (labour_crews.stage_ids still governs wages settlement, not
@@ -223,7 +250,7 @@ export async function loadWeek(monday: Date): Promise<WeekData> {
           pending: pendingByMs[m.milestone_id] || 0,
           certified: certByMs[m.milestone_id] || 0,
           certifiedBefore: certBeforeByMs[m.milestone_id] || 0,
-          cells: cellsFor(byStage[m.milestone_id] ?? [], dates),
+          cells: cellsFor(byStage[m.milestone_id] ?? [], dates, offDay),
         };
       });
       return {
@@ -233,11 +260,11 @@ export async function loadWeek(monday: Date): Promise<WeekData> {
         contract: c.is_contract || !!c.wo_id, basis: c.wo_id || c.is_contract ? c.basis : 'labour',
         basisConfirmed: !!c.basis_confirmed, accrualBasis: c.accrual_basis ?? null,
         woId: c.wo_id ?? null, paidThrough: paidThroughIdx(c.paid_through),
-        head: cellsFor(byHead[c.crew_id] ?? [], dates), cats: crewCats, stages: crewStages,
+        head: cellsFor(byHead[c.crew_id] ?? [], dates, offDay), cats: crewCats, stages: crewStages,
       };
     });
     const projectDirect = direct.filter((w: any) => w.project_id === p.project_id).map((w: any): DirectRow => ({
-      id: w.id, n: w.name, d: w.category, cat: w.category, rate: Number(w.rate) || 0, own: w.own_rate, stakeholderId: w.stakeholder_id ?? null, cells: cellsFor(byDirect[w.id] ?? [], dates),
+      id: w.id, n: w.name, d: w.category, cat: w.category, rate: Number(w.rate) || 0, own: w.own_rate, stakeholderId: w.stakeholder_id ?? null, cells: cellsFor(byDirect[w.id] ?? [], dates, offDay),
     }));
     return { site: p.project_id, label: p.name, hint: p.site_location || '', crews: projectCrews, direct: projectDirect };
   });

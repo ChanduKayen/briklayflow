@@ -211,6 +211,18 @@ export const ATMX_CSS = `
 .atmx .sh-done{width:100%; background:var(--ink); color:#FFFDF7; border:0; border-radius:999px; padding:15px 0;
   font-family:var(--sans); font-weight:700; font-size:15px; cursor:pointer}
 .atmx .sh-done:active{transform:scale(.98)}
+/* header gear → settings sheet */
+.atmx .trow-right{display:flex; align-items:center; gap:8px}
+.atmx .wk-gear{width:34px; height:34px; border:0; background:none; color:var(--walnut); display:grid; place-items:center; cursor:pointer; flex:none}
+.atmx .wk-gear:active{transform:scale(.92)}
+/* pay-week pickers (settings sheet) */
+.atmx .pw-row{display:flex; align-items:center; justify-content:space-between; gap:12px; padding:11px 0; border-bottom:1px solid var(--rule)}
+.atmx .pw-row label{font-size:14.5px; font-weight:600; color:var(--ink)}
+.atmx .pw-row select{appearance:none; -webkit-appearance:none; min-width:150px; height:42px; padding:0 34px 0 13px;
+  border:1px solid var(--rule); border-radius:12px; background:var(--card) url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%238B7B6B' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M6 9l6 6 6-6'/></svg>") no-repeat right 11px center;
+  color:var(--ink); font-size:14.5px; font-family:var(--sans)}
+.atmx .pw-row select:disabled{opacity:.55}
+.atmx .pw-note{font-family:var(--mono); font-size:11.5px; color:var(--soft); padding:12px 0 2px}
 .atmx #toast{position:fixed; left:50%; bottom:24px; transform:translate(-50%,16px); background:var(--ink); color:#FFFDF7;
   font-size:13px; border-radius:999px; padding:11px 18px; opacity:0; transition:all .35s cubic-bezier(.2,.9,.3,1.2); z-index:80; white-space:nowrap}
 .atmx #toast.show{opacity:1; transform:translate(-50%,0)}

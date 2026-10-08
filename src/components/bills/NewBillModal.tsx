@@ -17,6 +17,7 @@ import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../../lib/supabase';
 import { useOrgId } from '../../lib/auth/AuthProvider';
 import { extractBill, type ExtractedBill, type DuplicateBill } from '../../lib/billsApi';
+import { assessBillDate } from '../../lib/billDate';
 import { createParty, errMessage } from '../day-book/fileEntry';
 import composerHtml from './addBillComposer.html?raw';
 
@@ -151,7 +152,11 @@ export default function NewBillModal(props: NewBillModalProps) {
           if (!file) { reply({ ok: false, error: 'no file' }); return; }
           const r = await extractBill(file);
           lastExtract.current = r;
-          reply({ ok: true, vendor: r.vendor, billNo: r.billNo, date: r.billDate, amount: r.amount, site: null });
+          // Plausibility net: hand the composer a flag + a suggested correction so a misread date
+          // (a handwritten "12/12/2026" read as Oct 2023) is confirmed, not silently accepted.
+          const da = assessBillDate({ iso: r.billDate, raw: r.billDateRaw, confidence: r.dateConfidence });
+          reply({ ok: true, vendor: r.vendor, billNo: r.billNo, date: r.billDate, amount: r.amount, site: null,
+                  dateFlag: da.flagged, dateReason: da.reason ?? '', dateSuggestion: da.suggestion ?? '' });
         } else if (d.action === 'commit') {
           const p = d.payload || {};
           const vendorId = await resolveVendorId(p.vendorName || lockVendor?.name || '');

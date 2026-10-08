@@ -203,11 +203,11 @@ function EntryRow(p: EntryProps) {
             <span
               role="button"
               tabIndex={0}
-              title={`View ${p.payee}'s ledger`}
+              title={`Open ${p.payee}'s ledger`}
               onClick={(e) => { e.stopPropagation(); p.onPayeeClick!(e); }}
-              className="cursor-pointer hover:underline underline-offset-2 decoration-dotted"
+              className="bk-payee-link"
             >
-              {p.payee}
+              {p.payee}<span className="lgo" aria-hidden>↗</span>
             </span>
           ) : (
             p.payee
@@ -317,6 +317,13 @@ const PAY_LINE_CSS = `
 .pay-verb{color:${V.sys}}
 .pay-ref{padding:0;background:none;border:none;color:${V.inkSoft};font:inherit;cursor:pointer;border-bottom:1px dotted ${V.faint};transition:color .14s ease,border-color .14s ease}
 .pay-ref:hover{color:${V.terra};border-bottom-color:${V.terra}}
+/* the party name is a persistent link to their ledger — a fine dotted underline visible AT REST (so it
+   reads as clickable, not just on hover), a ↗ that surfaces on hover, and terra on hover. Distinct from
+   the row's own tap (open the transaction); the two never look the same. */
+.bk-payee-link{cursor:pointer;text-decoration:underline;text-decoration-style:dotted;text-underline-offset:2px;text-decoration-color:${V.line};transition:color .14s ease,text-decoration-color .14s ease}
+.bk-payee-link:hover{color:${V.terra};text-decoration-color:${V.terra}}
+.bk-payee-link .lgo{margin-left:3px;font-size:.78em;opacity:0;transition:opacity .14s ease}
+.bk-payee-link:hover .lgo{opacity:1}
 `;
 
 /* ---------- empty ledger: teach how it fills, using the day's own spine ---------- */

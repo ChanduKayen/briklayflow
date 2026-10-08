@@ -295,6 +295,8 @@ export interface BillRead {
   vendor: string | null;
   billNo: string | null;
   billDate: string | null;
+  billDateRaw: string | null;                         // the date exactly as written (drives the plausibility check)
+  dateConfidence: 'high' | 'medium' | 'low' | null;   // the model's own certainty about the date reading
   total: number;
   gst: number;
   lines: BillLine[];
@@ -310,6 +312,7 @@ export async function readVendorBill(base64: string, mime: string): Promise<Bill
   if (error) throw new Error(await fnErrorMessage(error, 'Could not read the bill'));
   const d = (data ?? {}) as {
     vendor_name?: string | null; bill_number?: string | null; bill_date?: string | null;
+    bill_date_raw?: string | null; date_confidence?: string | null;
     bill_total_extracted?: number | null; gst_amount?: number | null; tax_amount?: number | null;
     line_items?: BillLine[] | null;
   };
@@ -323,7 +326,9 @@ export async function readVendorBill(base64: string, mime: string): Promise<Bill
   const printedTax = d.gst_amount ?? d.tax_amount;
   const gst = printedTax != null ? Math.round(num(printedTax))
             : (lines.length && total > lineSum ? Math.round(total - lineSum) : 0);
-  return { vendor: d.vendor_name ?? null, billNo: d.bill_number ?? null, billDate: d.bill_date ?? null, total, gst, lines };
+  const conf = String(d.date_confidence ?? '').toLowerCase();
+  const dateConfidence = conf === 'high' || conf === 'medium' || conf === 'low' ? conf : null;
+  return { vendor: d.vendor_name ?? null, billNo: d.bill_number ?? null, billDate: d.bill_date ?? null, billDateRaw: d.bill_date_raw ?? null, dateConfidence, total, gst, lines };
 }
 
 /** Turn a bill's extracted line items into a PO's `items` blob + `po_line_items` rows. The bill is

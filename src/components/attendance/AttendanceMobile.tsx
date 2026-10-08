@@ -17,14 +17,15 @@
  * is, inside a scoped root — the same shape as the desktop AttendanceSheet next door.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import type { Session } from '@supabase/supabase-js';
-import { useOrgId } from '../../lib/auth/AuthProvider';
+import { useOrgId, useAuth, useCan, useWeekStartDay, useWeeklyOffDay } from '../../lib/auth/AuthProvider';
 import { usePullToRefresh } from '../../lib/usePullToRefresh';
 import { useSnackbar } from '../Snackbar';
 import {
-  loadWeek, loadParties, mondayOf, weekDates, weekLabel,
+  loadWeek, loadParties, weekStartOf, weekDates, weekLabel,
   saveCell, addCategory, addDirectWorker, addCrew,
   renameCrew, updateCategory, updateDirectWorker,
   loadWorkOrdersForProject, linkCrewToWorkOrder, promoteDirectToCrew,
@@ -46,6 +47,9 @@ const SITE_DOT = ['#BE3E22', '#6E8260', '#B98A2F', '#5E7A8A'];
 const CYCLE = [1, 1.5, 2, 0];
 
 const inr = (n: number) => '₹' + Math.round(n).toLocaleString('en-IN');
+/** Weekday names, JS getDay() order (0 = Sun) — for the pay-week pickers in the settings sheet. */
+const DOW_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const DOW_LONG = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const esc = (s: string) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
 const hapt = (ms: number | number[]) => { try { navigator.vibrate?.(ms as number); } catch { /* not every phone has it */ } };
 const val = (c: Cell) => (c && c !== 'off') ? c.v : 0;
@@ -127,7 +131,12 @@ const CONTRACT_IC = '<svg viewBox="0 0 24 24"><path d="M7 3h7l4 4v14H7z"/><path 
 
 export default function AttendanceMobile({ session }: { session: Session }) {
   const orgId = useOrgId();
+  const qc = useQueryClient();
   const navigate = useNavigate();
+  const weekStartDay = useWeekStartDay();
+  const weeklyOffDay = useWeeklyOffDay();
+  const { setPayWeek } = useAuth();
+  const canManageWeek = useCan('manage:team');     // owner + management
   const { show: showSnackbar } = useSnackbar();
   const byName = (session.user?.user_metadata?.name as string) || (session.user?.user_metadata?.full_name as string) || session.user?.email || 'Office';
 
@@ -140,9 +149,7 @@ export default function AttendanceMobile({ session }: { session: Session }) {
   const seededRef = useRef(false);
   const pending = useRef<{ sel: number; dir: number } | null>(null);   // a week change mid-swipe
 
-  const [monday, setMonday] = useState<Date>(() => mondayOf(new Date()));
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState<string | null>(null);
+  const [monday, setMonday] = useState<Date>(() => weekStartOf(new Date(), weekStartDay));
   const [certCtx, setCertCtx] = useState<CertifyContext | null>(null);
 
   const dates = weekDates(monday);
@@ -181,31 +188,44 @@ export default function AttendanceMobile({ session }: { session: Session }) {
     toastTimer.current = window.setTimeout(() => el.classList.remove('show'), 2400);
   };
 
-  // ── load a week, then paint ──────────────────────────────────────────────────
-  const load = useCallback(async () => {
-    setLoading(true); setErr(null);
-    try {
-      const [week, parties] = await Promise.all([loadWeek(monday), loadParties()]);
-      let { sites, card } = week;
+  // ── load a week (React Query), then paint ────────────────────────────────────
+  // Cached per (org, week, off-day) so returning to Attendance paints instantly from cache and refetches
+  // in the background, instead of re-fetching with a loading line every time. The imperative strip/list
+  // still render off the DATA/CARD refs — the effect below repaints whenever the query's data changes.
+  const weekQuery = useQuery({
+    queryKey: ['attendance_week', orgId, dates[0], weeklyOffDay],
+    enabled: !!orgId,
+    queryFn: async () => {
+      let [{ sites, card }, parties] = await Promise.all([loadWeek(monday, weeklyOffDay), loadParties()]);
       if (cardIsEmpty(card) && !seededRef.current) {
         seededRef.current = true;
-        try { await seedRateCard(orgId); const r2 = await loadWeek(monday); sites = r2.sites; card = r2.card; } catch { /* best effort */ }
+        try { await seedRateCard(orgId); const r2 = await loadWeek(monday, weeklyOffDay); sites = r2.sites; card = r2.card; } catch { /* best effort */ }
       }
-      DATA.current = sites; CARD.current = card; PARTIES.current = parties;
-      setLoading(false);
-      requestAnimationFrame(() => {
-        const p = pending.current; pending.current = null;
-        selRef.current = p ? p.sel : (TODAY >= 0 ? TODAY : 0);
-        renderStrip(); renderList();
-        if (p) slideIn(p.dir); else resetSlide();
-      });
-    } catch (e) {
-      setErr((e as Error)?.message || 'Could not load attendance'); setLoading(false);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [monday]);
+      return { sites, card, parties };
+    },
+  });
+  const loading = weekQuery.isPending;
+  const err = weekQuery.error ? ((weekQuery.error as { message?: string })?.message || 'Could not load attendance') : null;
+  // Re-fetch after a write / on pull-to-refresh — invalidate the org's weeks; the active one refetches and
+  // the effect below repaints. Returns the invalidation promise so pull-to-refresh can await it.
+  const load = useCallback(() => qc.invalidateQueries({ queryKey: ['attendance_week', orgId] }), [qc, orgId]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    const d = weekQuery.data; if (!d) return;
+    DATA.current = d.sites; CARD.current = d.card; PARTIES.current = d.parties;
+    requestAnimationFrame(() => {
+      const p = pending.current; pending.current = null;
+      selRef.current = p ? p.sel : (TODAY >= 0 ? TODAY : 0);
+      renderStrip(); renderList();
+      if (p) slideIn(p.dir); else resetSlide();
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [weekQuery.data]);
+  // Pay-week start changed (saved here or on another device) → re-anchor to the current week.
+  const startRef = useRef(weekStartDay);
+  useEffect(() => {
+    if (startRef.current !== weekStartDay) { startRef.current = weekStartDay; setMonday(weekStartOf(new Date(), weekStartDay)); }
+  }, [weekStartDay]);
   // Pull the muster down to read the week again (this page loads its own data — `load` IS the refresh).
   const { view: pullView } = usePullToRefresh({ attachTo: rootRef, onRefresh: load });
 
@@ -441,6 +461,38 @@ export default function AttendanceMobile({ session }: { session: Session }) {
   }, []);
 
   const showSheet = () => { sheetEl()?.classList.add('show'); shadeEl()?.classList.add('show'); };
+
+  /* ---------- settings: the pay week ---------- */
+  function openSettingsSheet() {
+    const sheet = sheetEl(); if (!sheet) return;
+    const startOpts = [1, 2, 3, 4, 5, 6, 0];
+    const opt = (v: number | '', label: string, cur: number | '') => `<option value="${v}"${v === cur ? ' selected' : ''}>${label}</option>`;
+    const off = weeklyOffDay;
+    const dis = canManageWeek ? '' : 'disabled';
+    sheet.innerHTML = `<div class="grab"></div>
+      <div class="sh-head"><b>Pay week</b><span>settings</span></div>
+      <div class="sh-src">The labour week this muster and the weekly run count by.</div>
+      <div class="pw-row"><label for="pw-start">Week starts on</label>
+        <select id="pw-start" ${dis}>${startOpts.map(d => opt(d, DOW_LONG[d], weekStartDay)).join('')}</select></div>
+      <div class="pw-row"><label for="pw-off">Weekly off</label>
+        <select id="pw-off" ${dis}>${opt('', 'No weekly off', off == null ? '' : off)}${startOpts.map(d => opt(d, DOW_LONG[d], off == null ? '' : off)).join('')}</select></div>
+      <div class="pw-note" id="pw-note">Weeks run ${DOW_SHORT[weekStartDay]} – ${DOW_SHORT[(weekStartDay + 6) % 7]}.${canManageWeek ? '' : ' Only an owner or manager can change this.'}</div>
+      <div style="height:8px"></div>
+      <button class="sh-done">Done</button>`;
+    showSheet();
+    const startSel = sheet.querySelector('#pw-start') as HTMLSelectElement;
+    const offSel = sheet.querySelector('#pw-off') as HTMLSelectElement;
+    const note = sheet.querySelector('#pw-note') as HTMLElement;
+    const save = async () => {
+      const s = Number(startSel.value);
+      const o = offSel.value === '' ? null : Number(offSel.value);
+      note.textContent = 'Saving…';
+      try { await setPayWeek(s, o); hapt(10); toast('Pay week updated'); note.textContent = `Weeks run ${DOW_SHORT[s]} – ${DOW_SHORT[(s + 6) % 7]}.`; }
+      catch (e) { note.textContent = (e as Error)?.message || 'Could not save'; }
+    };
+    if (canManageWeek) { startSel.addEventListener('change', save); offSel.addEventListener('change', save); }
+    (sheet.querySelector('.sh-done') as HTMLElement).addEventListener('click', closeSheet);
+  }
 
   /* ---------- add worker: pick from parties ---------- */
   function openAddSheet(si: number) {
@@ -981,7 +1033,14 @@ export default function AttendanceMobile({ session }: { session: Session }) {
       <style>{ATMX_CSS}</style>
 
       <div className="top">
-        <div className="trow"><h1>Attendance</h1><span className="wklink">{weekLabel(monday)}</span></div>
+        <div className="trow"><h1>Attendance</h1>
+          <div className="trow-right">
+            <span className="wklink">{weekLabel(monday)}</span>
+            <button className="wk-gear" onClick={openSettingsSheet} aria-label="Attendance settings" title="Settings — pay week">
+              <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>
+            </button>
+          </div>
+        </div>
         <div className="stats">
           <div className="stat"><b id="st-count">0</b><span>on site</span></div>
           <div className="stat"><b id="st-amt">₹0</b><span>accrued</span></div>

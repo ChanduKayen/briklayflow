@@ -34,6 +34,7 @@ import { matchPayee, searchPayees } from '../../lib/payeeSearch';
 import { matchProject } from '../../lib/projectSearch';
 import { CardSplitPanel } from '../day-book/CardSplitPanel';
 import { useSignedDocUrl } from '../../lib/storage';
+import { loadWallets, type WalletBalance } from '../../lib/walletApi';
 
 // resolveEntry's StakeholderLite has no aliases; the daybook query selects them and the fuzzy matchers use
 // them, so carry a widened type (assignable back to StakeholderLite for resolveEntry / CardSplitPanel).
@@ -105,12 +106,36 @@ export default function WhatsAppReviewQueue() {
       return (data ?? []) as ProjectLite[];
     },
   });
+  // Site-cash wallets, loaded once for the whole queue (not per row): the registered WhatsApp numbers
+  // plus every live wallet with its derived balance. walletForEntry() matches a sender's phone → member
+  // → wallet, so a row knows whether its spend can be "cut from {holder}'s wallet" and by how much.
+  const { data: walletCtx } = useQuery({
+    queryKey: ['queue_wallets', orgId],
+    queryFn: async () => {
+      const [regsR, wallets] = await Promise.all([
+        supabase.from('wa_registered_numbers').select('user_id, phone_number').eq('org_id', orgId),
+        loadWallets(orgId).catch(() => [] as WalletBalance[]),
+      ]);
+      return { regs: (regsR.data ?? []) as { user_id: string | null; phone_number: string | null }[], wallets };
+    },
+  });
+  const walletForEntry = useCallback((e: RoughEntry): WalletBalance | null => {
+    if (!walletCtx) return null;
+    const last10 = String(e.sender_number || '').replace(/\D/g, '').slice(-10);
+    if (!last10) return null;
+    const reg = walletCtx.regs.find((r) => r.user_id && String(r.phone_number || '').replace(/\D/g, '').endsWith(last10));
+    if (!reg?.user_id) return null;
+    return walletCtx.wallets.find((w) => w.holderUserId === reg.user_id) ?? null;
+  }, [walletCtx]);
 
   const [openId, setOpenId] = useState<string | null>(null);
   const [menu, setMenu] = useState<MenuState>(null);
   const [splitId, setSplitId] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [filing, setFiling] = useState<Set<string>>(new Set());
+  // Rows whose Approve has been pressed and are now in the SECOND step — "cut from the wallet or company
+  // money?" — shown inline in the same row. Only wallet-holding senders ever enter it (see approve()).
+  const [fundStep, setFundStep] = useState<Set<string>>(new Set());
   const [toast, setToast] = useState('');
   const [lightbox, setLightbox] = useState<string | null>(null);
   // The queue always opens COLLAPSED — a quiet one-line peek that invites a tap (not remembered open, so a
@@ -183,9 +208,45 @@ export default function WhatsAppReviewQueue() {
   }, [qc]);
 
   // ── actions ──
-  const approve = useCallback(async (e: RoughEntry, quiet = false) => {
+  // The write itself. `fundingOverride` is the choice made in the second step (wallet vs company); when
+  // absent it falls back to the draft's funding (auto-defaults inside fileRoughEntry for wallet holders).
+  const doFile = useCallback(async (e: RoughEntry, fundingOverride?: 'wallet' | 'bank', quiet = false) => {
     if (filing.has(e.id)) return;
     const d = draftFor(e);
+    const funding = fundingOverride ?? d.funding;
+    setFiling((s) => new Set(s).add(e.id));
+    try {
+      if (isBillEntry(e)) {
+        const ai = e.ai_extracted!;
+        await fileBill(e, orgId, {
+          vendorId: d.payeeId, projectId: d.projectId || null,
+          amount: Number(ai.bill_total ?? d.amount), paidAmount: ai.payment?.amount ?? null,
+          funding,
+        });
+      } else {
+        const fields: ResolvedFields = {
+          payeeId: d.payeeId, projectId: d.projectId, amount: d.amount, description: d.description, funding,
+        };
+        await fileRoughEntry(e, orgId, fields);
+      }
+      if (!quiet) say('Posted · ' + inr(d.amount) + ' to ' + (d.payeeName || 'party'));
+      setFundStep((s) => { const n = new Set(s); n.delete(e.id); return n; });
+      if (openId === e.id) setOpenId(null);
+      setMenu(null);
+      invalidateAll();
+    } catch (err) {
+      setFundStep((s) => { const n = new Set(s); n.delete(e.id); return n; });
+      say(errMessage(err, "Couldn't file — try again"));
+    } finally {
+      setFiling((s) => { const n = new Set(s); n.delete(e.id); return n; });
+    }
+  }, [filing, draftFor, orgId, openId, say, invalidateAll]);
+
+  // Approve = step one. When the sender holds a wallet, a payment doesn't post yet — it steps into the
+  // "paid from?" chooser in the same row (second step). Everyone else (no wallet) posts straight away as
+  // company money, exactly as before. Bulk "Approve all" always uses the silent wallet default.
+  const approve = useCallback(async (e: RoughEntry, quiet = false) => {
+    if (filing.has(e.id) || fundStep.has(e.id)) return;
     if (!readyOf(e)) {
       // Not ready — wobble the marked fields instead of posting, and name what's missing.
       const d0 = draftFor(e);
@@ -195,31 +256,14 @@ export default function WhatsAppReviewQueue() {
       say('One thing before this posts — ' + miss.join(' and ') + '.');
       return;
     }
-    setFiling((s) => new Set(s).add(e.id));
-    try {
-      if (isBillEntry(e)) {
-        const ai = e.ai_extracted!;
-        await fileBill(e, orgId, {
-          vendorId: d.payeeId, projectId: d.projectId || null,
-          amount: Number(ai.bill_total ?? d.amount), paidAmount: ai.payment?.amount ?? null,
-          funding: d.funding,
-        });
-      } else {
-        const fields: ResolvedFields = {
-          payeeId: d.payeeId, projectId: d.projectId, amount: d.amount, description: d.description, funding: d.funding,
-        };
-        await fileRoughEntry(e, orgId, fields);
-      }
-      if (!quiet) say('Posted · ' + inr(d.amount) + ' to ' + (d.payeeName || 'party'));
-      if (openId === e.id) setOpenId(null);
+    const wallet = walletForEntry(e);
+    if (!quiet && wallet && !isBillEntry(e)) {
       setMenu(null);
-      invalidateAll();
-    } catch (err) {
-      say(errMessage(err, "Couldn't file — try again"));
-    } finally {
-      setFiling((s) => { const n = new Set(s); n.delete(e.id); return n; });
+      setFundStep((s) => new Set(s).add(e.id));   // ask where it was cut from — second step, same row
+      return;
     }
-  }, [filing, draftFor, readyOf, orgId, openId, say, invalidateAll]);
+    await doFile(e, undefined, quiet);
+  }, [filing, fundStep, draftFor, readyOf, walletForEntry, doFile, say]);
 
   const discard = useCallback(async (e: RoughEntry) => {
     setMenu(null);
@@ -323,6 +367,12 @@ export default function WhatsAppReviewQueue() {
               </div>
             </div>
 
+            {/* second step — where was this money cut from? Slides in after Approve, in the same row. */}
+            {fundStep.has(e.id) &&
+              <FundStep wallet={walletForEntry(e)} senderName={e.sender_name || ''} amount={d.amount}
+                busy={isFiling} defaultSel={d.funding ?? 'wallet'}
+                onPick={(f) => doFile(e, f)} onCancel={() => setFundStep((s) => { const n = new Set(s); n.delete(e.id); return n; })} />}
+
             {open &&
               <div className="war-more">
                 {/* no second image — the row's thumbnail (above, still visible) is the one copy; tap it for full size */}
@@ -371,6 +421,48 @@ function EntryPaper({ entry, amount, big, onOpen }: { entry: RoughEntry; amount:
   return (
     <div className={'war-paper' + (big ? ' big' : '')}>
       <span className="rc">{inr(amount).replace('₹', '')}<small>{modeTxt}</small></span>
+    </div>
+  );
+}
+
+// ── the second step: where was this money cut from? (wallet vs company) ───────────────────────────────
+// Shown inline in the row after Approve, only when the sender holds a wallet. The wallet option is the
+// likely truth (a supervisor spends his float), so it leads — carrying the live balance and the draw-down
+// this spend makes, so the choice is informed, not blind. A spend beyond the float is allowed and flagged
+// (spec W8), never blocked. Choose, then Post — a deliberate two-beat for money that is leaving.
+function FundStep({ wallet, senderName, amount, busy, defaultSel, onPick, onCancel }: {
+  wallet: WalletBalance | null; senderName: string; amount: number; busy: boolean;
+  defaultSel: 'wallet' | 'bank'; onPick: (f: 'wallet' | 'bank') => void; onCancel: () => void;
+}) {
+  const hasWallet = !!wallet;
+  const [sel, setSel] = useState<'wallet' | 'bank'>(hasWallet ? defaultSel : 'bank');
+  const name = first(senderName) || 'Supervisor';
+  const bal = wallet?.balance ?? 0;
+  const after = bal - amount;
+  const over = after < 0;
+  return (
+    <div className="war-fund" role="group" aria-label="Where was this money paid from?">
+      <div className="wf-lead"><span className="wf-step">2</span><b>Where was this cut from?</b><span className="wf-sub">This payment has left the company — say which cash it came out of.</span></div>
+      <div className="wf-opts">
+        {hasWallet &&
+          <button type="button" className={'wf-opt wallet' + (sel === 'wallet' ? ' on' : '')} onClick={() => setSel('wallet')} disabled={busy} aria-pressed={sel === 'wallet'}>
+            <span className="wf-av">{initials(wallet!.holderName || name)}</span>
+            <span className="wf-main"><b>{name}’s wallet</b><small>site cash in hand</small></span>
+            <span className="wf-bal"><em>{inr(bal)}</em><small className={over ? 'over' : ''}>{over ? 'goes ' + inr(-after) + ' over' : 'leaves ' + inr(after)}</small></span>
+            <span className="wf-tick" dangerouslySetInnerHTML={{ __html: TICK }} />
+          </button>}
+        <button type="button" className={'wf-opt company' + (sel === 'bank' ? ' on' : '')} onClick={() => setSel('bank')} disabled={busy} aria-pressed={sel === 'bank'}>
+          <span className="wf-ic" dangerouslySetInnerHTML={{ __html: BANK }} />
+          <span className="wf-main"><b>Company money</b><small>paid from the office / bank</small></span>
+          <span className="wf-tick" dangerouslySetInnerHTML={{ __html: TICK }} />
+        </button>
+      </div>
+      <div className="wf-go">
+        <button type="button" className="wf-cancel" onClick={onCancel} disabled={busy}>Back</button>
+        <button type="button" className="wf-post" disabled={busy} onClick={() => onPick(sel)}>
+          {busy ? 'Posting…' : <>Post {inr(amount)} · <b>{sel === 'wallet' ? name + '’s wallet' : 'company'}</b></>}
+        </button>
+      </div>
     </div>
   );
 }
@@ -654,6 +746,43 @@ const CSS = `
 .war .seg button.on{background:var(--paper);color:var(--ink);box-shadow:0 1px 2px rgba(43,33,26,.08),0 0 0 1px #E9E1D6}
 .war .seg button small{font-weight:400;color:var(--ink-3);font-family:'DM Mono',monospace;font-size:12px}
 .war .war-splitwrap{grid-column:1 / -1}
+/* second step — "where was this cut from?" (wallet vs company), slides in under the row after Approve */
+.war .war-fund{margin:0 8px 14px;padding:16px 18px;border-radius:16px;background:linear-gradient(180deg,#FFFDF9,#F6F0E7);border:1px solid var(--card-line);box-shadow:0 12px 32px -22px rgba(43,33,26,.55);animation:war-slidein .32s var(--ease)}
+@keyframes war-slidein{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:none}}
+.war .wf-lead{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:13px}
+.war .wf-step{width:22px;height:22px;border-radius:11px;background:var(--clay);color:#fff;font-family:'DM Mono',monospace;font-size:12px;font-weight:600;display:grid;place-items:center;flex:none}
+.war .wf-lead>b{font-family:var(--serif);font-size:17px;color:var(--ink)}
+.war .wf-lead .wf-sub{font-size:12.5px;color:var(--ink-3)}
+.war .wf-opts{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.war .wf-opt{display:flex;align-items:center;gap:12px;padding:13px 14px;border-radius:14px;border:1.5px solid var(--line-2);background:var(--paper);cursor:pointer;text-align:left;transition:border-color .18s,box-shadow .2s,background .18s,transform .1s}
+.war .wf-opt:hover{border-color:var(--ink-3)}
+.war .wf-opt:active{transform:scale(.99)}
+.war .wf-opt:disabled{cursor:default}
+.war .wf-opt .wf-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.war .wf-opt .wf-main b{font-size:15px;font-weight:600;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.war .wf-opt .wf-main small{font-size:12px;color:var(--ink-3)}
+.war .wf-av{width:38px;height:38px;border-radius:19px;background:#EBE3D6;color:var(--ink-2);display:grid;place-items:center;font-weight:700;font-size:13px;flex:none;transition:background .18s,color .18s}
+.war .wf-ic{width:38px;height:38px;border-radius:19px;background:var(--wash);display:grid;place-items:center;flex:none}
+.war .wf-ic svg{width:19px;height:19px;fill:none;stroke:var(--ink-2);stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.war .wf-bal{display:flex;flex-direction:column;align-items:flex-end;flex:none;text-align:right}
+.war .wf-bal em{font-style:normal;font-family:'DM Mono',monospace;font-size:14.5px;font-weight:500;color:var(--ink)}
+.war .wf-bal small{font-size:11px;color:var(--ink-3)}
+.war .wf-bal small.over{color:var(--clay)}
+.war .wf-tick{width:20px;height:20px;border-radius:10px;border:1.5px solid var(--line-2);display:grid;place-items:center;flex:none;color:transparent;transition:background .16s,border-color .16s,color .16s}
+.war .wf-tick svg{width:11px;height:11px}
+.war .wf-opt.on{box-shadow:0 8px 24px -16px rgba(43,33,26,.5)}
+.war .wf-opt.wallet.on{border-color:var(--sage);background:linear-gradient(180deg,#F2F7EF,#FBFDF9)}
+.war .wf-opt.company.on{border-color:var(--ink-2);background:#FFFDF9}
+.war .wf-opt.wallet.on .wf-tick{background:var(--sage);border-color:var(--sage);color:#fff}
+.war .wf-opt.company.on .wf-tick{background:var(--ink);border-color:var(--ink);color:#fff}
+.war .wf-opt.wallet.on .wf-av{background:var(--sage);color:#fff}
+.war .wf-go{display:flex;align-items:center;justify-content:flex-end;gap:10px;margin-top:14px}
+.war .wf-cancel{height:38px;padding:0 14px;border-radius:19px;border:0;background:none;color:var(--ink-3);font-size:13.5px;font-weight:500;cursor:pointer}
+.war .wf-cancel:hover{color:var(--ink)}
+.war .wf-post{height:40px;padding:0 20px;border-radius:20px;border:0;background:var(--clay);color:#fff;font-size:14.5px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.war .wf-post b{font-weight:700}
+.war .wf-post:hover{background:#D4633E}
+.war .wf-post:disabled{opacity:.6;cursor:default}
 /* menu */
 .war .war-menu{position:absolute;z-index:30;top:calc(100% + 6px);left:0;background:var(--paper);border:1px solid var(--line-2);border-radius:14px;box-shadow:0 18px 40px -20px rgba(43,33,26,.5);padding:6px;min-width:230px;max-height:320px;overflow:auto}
 .war .war-menu.inform{left:0;right:0;min-width:0}
@@ -696,6 +825,6 @@ const CSS = `
 .war .war-lb{position:fixed;inset:0;z-index:80;background:rgba(21,16,12,.78);display:grid;place-items:center;padding:32px;cursor:zoom-out;animation:war-fade .2s ease}
 .war .war-lb img{max-width:min(92vw,900px);max-height:90vh;border-radius:10px;box-shadow:0 30px 80px -20px rgba(0,0,0,.7)}
 @keyframes war-fade{from{opacity:0}to{opacity:1}}
-@media (max-width:1100px){.war .war-more{grid-template-columns:1fr}.war .war-form{border-left:0;padding-left:0}.war .war-bar-sub .pv{display:none}}
+@media (max-width:1100px){.war .war-more{grid-template-columns:1fr}.war .war-form{border-left:0;padding-left:0}.war .war-bar-sub .pv{display:none}.war .wf-opts{grid-template-columns:1fr}}
 @media (prefers-reduced-motion:reduce){.war *{transition:none!important;animation:none!important}}
 `;

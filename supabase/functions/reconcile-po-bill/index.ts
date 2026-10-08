@@ -109,8 +109,23 @@ FOUR THINGS MATTER, and nearly every such paper carries them under some name:
                 rounding the paper itself applies. Whatever it calls it: amount payable, net
                 payable, grand total, total due, balance, or a figure circled by hand.
   WHEN          the date the paper carries as its own — invoice date, bill date, reading date, the
-                date written by hand. Not the due date, unless that is the only date on it.
+                date written by hand. Not the due date, unless that is the only date on it. Read it
+                with care — see READING THE DATE below.
   WHAT FOR      whatever the paper itemises, in the paper's own words.
+
+READING THE DATE — the field most often misread, so read it deliberately:
+  · The date locale is INDIA — dates are DAY/MONTH/YEAR (DD/MM/YYYY). "15/03/2026" is 15 March, never
+    3 February. Never swap day and month.
+  · TODAY'S DATE is given at the end of this task. Vendor bills are RECENT — almost always within the
+    last few weeks, sometimes a few months. A year that is not the current or the previous year is
+    almost certainly a MISREAD of the current year (a handwritten 6 taken for a 3, a smudged digit).
+    Prefer the reading that puts the bill in the recent past; do not accept a date years away unless
+    the paper plainly and legibly says so.
+  · The photo may be ROTATED, and the date is often written VERTICALLY along an edge (cash vouchers,
+    receipt books). Read it in whatever orientation it sits.
+  · If you cannot read the date confidently, return null for bill_date — do NOT invent a plausible one.
+  · Also report bill_date_raw (the exact characters you see, e.g. "12/12/2026", "15-3-26") and
+    date_confidence ("high" / "medium" / "low") for how sure you are of the reading.
 
 WHAT COUNTS AS AN ITEM
 Any priced line the document lists. Often that is goods with a quantity and a rate. Just as often it
@@ -156,6 +171,8 @@ you can read, the answer is this object, with null wherever you could not read:
   "bill_number": "the paper's own reference, or null",
   "reference_kind": "what that reference is called on the paper (invoice no, consumer no, receipt no, …), or null",
   "bill_date": "YYYY-MM-DD, or null",
+  "bill_date_raw": "the date exactly as written on the paper, or null",
+  "date_confidence": "high | medium | low",
   "period": "the period it covers, if it states one, else null",
   "bill_total_extracted": number or null,
   "tax_amount": number or null,
@@ -389,7 +406,7 @@ serve(async (req) => {
           'Read the attached vendor quotation — every page — and return the JSON described above: a rate per requested line (matched by meaning), the offer\'s terms, and any extra priced lines not in this list.',
         ].join('\n')
       : extractOnly
-      ? 'Read the attached document — every page of it — and return the JSON described above: who is to be paid, the amount payable, the date, and whatever it itemises.'
+      ? `Read the attached document — every page of it — and return the JSON described above: who is to be paid, the amount payable, the date, and whatever it itemises.\n\nTODAY'S DATE is ${new Date().toISOString().slice(0, 10)} — use it as described under READING THE DATE (the bill is recent; a far-off year is almost certainly a misread).`
       : [
           `PO Reference: ${po_id ?? 'unknown'}`,
           bill_total ? `PO Grand Total: ₹${bill_total}` : null,

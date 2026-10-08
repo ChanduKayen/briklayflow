@@ -7,11 +7,12 @@
 // the contract crew's certify flow (the artifact CertifyDialog / PutOnContractDialog). The grid render
 // stays imperative (a faithful port of the reference) inside a scoped `.atdx` root.
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Session } from '@supabase/supabase-js';
-import { useOrgId } from '../../lib/auth/AuthProvider';
+import { useOrgId, useAuth, useCan, useWeekStartDay, useWeeklyOffDay } from '../../lib/auth/AuthProvider';
 import { useSnackbar } from '../Snackbar';
 import {
-  loadWeek, loadParties, mondayOf, weekDates, weekLabel,
+  loadWeek, loadParties, weekStartOf, weekDates, weekLabel,
   saveCell, saveRate, setCategoryRate, setDirectRate, setCrewBasis, addCrew,
   accruedDayWagesForCrew, accruedDayWagesForDirect, removeCrew, removeDirectWorker,
   cardIsEmpty, seedRateCard, SUPERVISOR_KEY, autoSettleCrewWages, addCategory,
@@ -32,7 +33,10 @@ const fmtQ = (n: number) => (+n || 0).toLocaleString('en-IN', { maximumFractionD
 const SITE_DOT = ['#C4552D', '#6F7F5E', '#B9892E', '#4F6B8A'];
 /** The pills carry a short name — drop a trailing "Apartments"/"Residence" like the artifact. */
 const shortSite = (label: string) => label.replace(/ (Apartments|Residence)$/, '');
-const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+/** Weekday short names, JS getDay() order (0 = Sun). Column labels are read off each day's real date so
+ *  they always match the configured pay-week start, whatever weekday it begins on. */
+const DOW_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const DOW_LONG = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 // LOCAL date, not UTC — matches attendanceApi's `iso` so today's column lines up with the muster week.
 const isoOf = (d: Date) => `${d.getFullYear()}-${`${d.getMonth() + 1}`.padStart(2, '0')}-${`${d.getDate()}`.padStart(2, '0')}`;
 
@@ -50,8 +54,48 @@ type WorkerRow = { id: string; siteId: string; name: string; trade: string; line
 const wagesContractName = (crew: CrewRow | undefined) => crew?.stages[0]?.n || crew?.woId || 'the contract';
 type ContractRow = { id: string; siteId: string; crew: CrewRow; si: number; ci: number };
 
+/** The pay-week settings block inside the Settings drawer. Two day pickers — the week's start day and
+ *  its default off day (or none) — auto-saved on change through set_pay_week. Read-only for roles that
+ *  cannot manage the org (the selects disable and a line says who can). */
+function PayWeekSettings({ startDay, offDay, canEdit, onSave }: {
+  startDay: number; offDay: number | null; canEdit: boolean;
+  onSave: (startDay: number, offDay: number | null) => Promise<void>;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const change = async (nextStart: number, nextOff: number | null) => {
+    setSaving(true); setErr(null);
+    try { await onSave(nextStart, nextOff); } catch (e: any) { setErr(e?.message || 'Could not save'); } finally { setSaving(false); }
+  };
+  const range = `${DOW_SHORT[startDay]} – ${DOW_SHORT[(startDay + 6) % 7]}`;
+  return (
+    <div className="payweek">
+      <div className="rcd-section-h">Pay week <span>The labour week this muster and the weekly run count by.</span></div>
+      <div className="pw-row">
+        <label htmlFor="pw-start">Week starts on</label>
+        <select id="pw-start" value={startDay} disabled={!canEdit || saving} onChange={e => change(Number(e.target.value), offDay)}>
+          {[1, 2, 3, 4, 5, 6, 0].map(d => <option key={d} value={d}>{DOW_LONG[d]}</option>)}
+        </select>
+      </div>
+      <div className="pw-row">
+        <label htmlFor="pw-off">Weekly off</label>
+        <select id="pw-off" value={offDay == null ? '' : offDay} disabled={!canEdit || saving} onChange={e => change(startDay, e.target.value === '' ? null : Number(e.target.value))}>
+          <option value="">No weekly off</option>
+          {[1, 2, 3, 4, 5, 6, 0].map(d => <option key={d} value={d}>{DOW_LONG[d]}</option>)}
+        </select>
+      </div>
+      <p className="pw-note">Weeks run {range}.{!canEdit && ' Only an owner or manager can change this.'}{saving && ' Saving…'}{err && ` · ${err}`}</p>
+    </div>
+  );
+}
+
 export default function AttendanceSheet({ session }: { session: Session }) {
   const orgId = useOrgId();
+  const qc = useQueryClient();
+  const weekStartDay = useWeekStartDay();          // org's pay-week start (0=Sun … 6=Sat)
+  const weeklyOffDay = useWeeklyOffDay();          // default day-off, or null for none
+  const { setPayWeek } = useAuth();
+  const canManageWeek = useCan('manage:team');     // owner + management
   const { show: showSnackbar } = useSnackbar();
   const byName = (session.user?.user_metadata?.name as string) || (session.user?.user_metadata?.full_name as string) || session.user?.email || 'Office';
 
@@ -67,10 +111,8 @@ export default function AttendanceSheet({ session }: { session: Session }) {
   // party is minted, so it is never created without one.
   const addState = useRef<{ site: string | null; picked: any | null; exp: boolean; newName: string | null; newTrade: string; newOther: string }>({ site: null, picked: null, exp: false, newName: null, newTrade: '', newOther: '' });
 
-  const [monday, setMonday] = useState<Date>(() => mondayOf(new Date()));
-  const [rcOpen, setRcOpen] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState<string | null>(null);
+  const [monday, setMonday] = useState<Date>(() => weekStartOf(new Date(), weekStartDay));
+  const [rcOpen, setRcOpen] = useState(false);   // the Settings drawer (pay week + rate card)
   const [certCtx, setCertCtx] = useState<CertifyCrewCtx | null>(null);
   const [pocCtx, setPocCtx] = useState<PocCtx | null>(null);
   // The one question a wages engagement leaves open — asked only when the party actually holds a
@@ -81,8 +123,20 @@ export default function AttendanceSheet({ session }: { session: Session }) {
   const todayISO = isoOf(new Date());
   const TODAY = todayISO > dates[6] ? 6 : todayISO < dates[0] ? -1 : dates.indexOf(todayISO);
   // A fully-passed week is SETTLED — its wages are netted and paid; freeze its cells (read-only).
-  const locked = isoOf(monday) < isoOf(mondayOf(new Date()));
-  const isThisWeek = isoOf(monday) === isoOf(mondayOf(new Date()));
+  const thisWeekStart = weekStartOf(new Date(), weekStartDay);
+  const locked = isoOf(monday) < isoOf(thisWeekStart);
+  const isThisWeek = isoOf(monday) === isoOf(thisWeekStart);
+  // A column is the default day-off when its real weekday is the org's off day (so it lands correctly
+  // wherever the off day falls in a window that may start on any weekday).
+  const isOffCol = useCallback((i: number) => weeklyOffDay != null && new Date(dates[i]).getDay() === weeklyOffDay, [dates, weeklyOffDay]);
+  const dowOf = (i: number) => DOW_SHORT[new Date(dates[i]).getDay()];
+
+  // The pay-week start changed (another device, or just saved here) → re-anchor to the current week so
+  // the grid's boundaries follow it. Guarded so ordinary week navigation is untouched.
+  const startRef = useRef(weekStartDay);
+  useEffect(() => {
+    if (startRef.current !== weekStartDay) { startRef.current = weekStartDay; setMonday(weekStartOf(new Date(), weekStartDay)); }
+  }, [weekStartDay]);
 
   // ── rate helpers (read the live CARD) ────────────────────────────────────────
   const rateFor = useCallback((trade: string | null, cat: string): number => {
@@ -102,26 +156,35 @@ export default function AttendanceSheet({ session }: { session: Session }) {
   }, []);
   const resolveTrade = useCallback((category: string | null): string | null => cardTradeOf(category), []);
 
-  // ── load a week + render ──────────────────────────────────────────────────────
-  const load = useCallback(async () => {
-    setLoading(true); setErr(null);
-    try {
-      let [{ sites, card }, parties] = await Promise.all([loadWeek(monday), loadParties()]);
+  // ── load a week (React Query) ──────────────────────────────────────────────────
+  // Cached per (org, week, off-day): returning to Attendance paints instantly from cache and refetches in
+  // the background, instead of a full-page skeleton on every visit. The imperative grid still renders off
+  // DATA/CARD refs — the effect below seeds them whenever the query's data changes.
+  const weekQuery = useQuery({
+    queryKey: ['attendance_week', orgId, isoOf(monday), weeklyOffDay],
+    enabled: !!orgId,
+    queryFn: async () => {
+      let [{ sites, card }, parties] = await Promise.all([loadWeek(monday, weeklyOffDay), loadParties()]);
       if (cardIsEmpty(card) && !seededRef.current) {
         seededRef.current = true;
-        try { await seedRateCard(orgId); const r2 = await loadWeek(monday); sites = r2.sites; card = r2.card; } catch { /* best-effort */ }
+        try { await seedRateCard(orgId); const r2 = await loadWeek(monday, weeklyOffDay); sites = r2.sites; card = r2.card; } catch { /* best-effort */ }
       }
-      DATA.current = sites; CARD.current = card; PARTIES.current = parties;
-      deriveRates();
-      setLoading(false);
-      requestAnimationFrame(() => { render(); if (rcOpen) renderCard(); });
-    } catch (e: any) {
-      setErr(e?.message || 'Could not load attendance'); setLoading(false);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [monday]);
+      return { sites, card, parties };
+    },
+  });
+  const loading = weekQuery.isPending;
+  const err = weekQuery.error ? ((weekQuery.error as { message?: string })?.message || 'Could not load attendance') : null;
+  // Re-fetch after a write — invalidate the org's weeks so the active one refetches and the effect repaints.
+  const load = useCallback(() => qc.invalidateQueries({ queryKey: ['attendance_week', orgId] }), [qc, orgId]);
 
-  useEffect(() => { load(); }, [load]);
+  // Seed the imperative refs + paint whenever the query data lands (first load or a background refetch).
+  useEffect(() => {
+    const d = weekQuery.data; if (!d) return;
+    DATA.current = d.sites; CARD.current = d.card; PARTIES.current = d.parties;
+    deriveRates();
+    requestAnimationFrame(() => { render(); if (rcOpen) renderCard(); });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [weekQuery.data]);
   useEffect(() => { if (!loading && rcOpen) renderCard(); // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rcOpen, loading]);
 
@@ -208,10 +271,10 @@ export default function AttendanceSheet({ session }: { session: Session }) {
     WROWS.current.clear(); CROWS.current.clear();
     const filter = filterRef.current;
 
-    thead.innerHTML = `<tr><th>Worker</th>${DAYS.map((d, i) => {
-      const dt = new Date(dates[i]);
-      const fillable = !locked && i < TODAY && i !== 6;
-      return `<th class="${i === TODAY ? 'today ' : ''}${fillable ? 'fillable' : ''}"${fillable ? ` data-fill="${i}"` : ''}>${d}<span class="d">${dt.getDate()}</span></th>`;
+    thead.innerHTML = `<tr><th>Worker</th>${dates.map((ds, i) => {
+      const dt = new Date(ds);
+      const fillable = !locked && i < TODAY && !isOffCol(i);
+      return `<th class="${i === TODAY ? 'today ' : ''}${fillable ? 'fillable' : ''}"${fillable ? ` data-fill="${i}"` : ''}>${dowOf(i)}<span class="d">${dt.getDate()}</span></th>`;
     }).join('')}<th class="tot">Days</th><th class="tot">This week</th><th></th></tr>`;
 
     grid.querySelectorAll('tbody').forEach(b => b.remove());
@@ -229,7 +292,7 @@ export default function AttendanceSheet({ session }: { session: Session }) {
       totD += sd; totM += sm;
       // gaps: past working days a labour row left unmarked
       workers.forEach(r => {
-        for (let i = 0; i < TODAY; i++) { if (i === 6) continue; if (dayVal(r, i) <= 0) gaps++; }
+        for (let i = 0; i < TODAY; i++) { if (isOffCol(i)) continue; if (dayVal(r, i) <= 0) gaps++; }
       });
 
       let html = `<tr class="group"><th colspan="11" style="--c:${dot}"><div class="g"><span class="dot"></span><span class="name">${escapeHtml(site.label)}</span>${site.hint ? `<span class="place">${escapeHtml(site.hint)}</span>` : ''}</div></th></tr>`;
@@ -245,7 +308,7 @@ export default function AttendanceSheet({ session }: { session: Session }) {
           ? `<span class="wtag" title="${escapeHtml(WAGES_ASK.chipTitle(wagesContractName(r.crew)))}">${escapeHtml(WAGES_ASK.chip)}</span>` : '';
         html += `<tr class="worker" data-row="${r.id}"><td class="who"><span class="n">${escapeHtml(r.name)}</span><span class="t">${escapeHtml(r.trade)}</span>${wtag}</td>`;
         for (let i = 0; i < 7; i++) {
-          const isFuture = i > TODAY || i === 6;
+          const isFuture = i > TODAY || isOffCol(i);
           const val = dayVal(r, i);
           let cls = 'cell', inner = '';
           if (!isFuture) {
@@ -257,7 +320,7 @@ export default function AttendanceSheet({ session }: { session: Session }) {
               if (dayWa(r, i)) inner += '<span class="src"></span>';
             } else if (i < TODAY) cls += ' gap';
           }
-          const title = val > 0 ? `${inr(dayWage(r, i))} · ${DAYS[i]} ${new Date(dates[i]).getDate()}` : '';
+          const title = val > 0 ? `${inr(dayWage(r, i))} · ${dowOf(i)} ${new Date(dates[i]).getDate()}` : '';
           const editable = !isFuture && !locked;
           html += `<td class="day ${i === TODAY ? 'today' : ''} ${isFuture ? 'future' : ''}"><div class="${cls}" ${editable ? `tabindex="0" data-w="${r.id}" data-i="${i}"` : ''} title="${title}">${inner}</div></td>`;
         }
@@ -476,7 +539,7 @@ export default function AttendanceSheet({ session }: { session: Session }) {
     const dt = new Date(dates[i]);
     const pos = { t: el.style.top, l: el.style.left };
     const lines = editorLines(r);
-    el.innerHTML = `<div class="hd"><b>${escapeHtml(r.name)}</b><span>${DAYS[i]} ${dt.getDate()}</span></div>` +
+    el.innerHTML = `<div class="hd"><b>${escapeHtml(r.name)}</b><span>${dowOf(i)} ${dt.getDate()}</span></div>` +
       lines.map((l, j) => `<div class="cat${l.own ? '' : ' offer'}"><span><span class="k">${escapeHtml(l.label)}</span><span class="r">${inr(l.rate)}${l.own ? '' : ' · not on this crew yet'}</span></span><span class="step"><button data-j="${j}" data-d="-1">−</button><input data-j="${j}" value="${l.own ? lineVal(l.own, i) : 0}" inputmode="decimal"><button data-j="${j}" data-d="1">+</button></span></div>`).join('') +
       `<div class="ft"><span>${dayVal(r, i) ? `<span class="amt">${inr(dayWage(r, i))}</span> for the day` : 'nobody yet'}</span><button data-clear>clear</button></div><div class="hint">Saves as you go · Esc to close</div>`;
     el.classList.add('open');
@@ -782,10 +845,12 @@ export default function AttendanceSheet({ session }: { session: Session }) {
               <button aria-label="Previous week" onClick={() => setMonday(m => { const d = new Date(m); d.setDate(d.getDate() - 7); return d; })}>‹</button>
               <span className="range">{weekLabel(monday)}</span>
               <button aria-label="Next week" onClick={() => setMonday(m => { const d = new Date(m); d.setDate(d.getDate() + 7); return d; })}>›</button>
-              <button className="now" onClick={() => setMonday(mondayOf(new Date()))} disabled={isThisWeek}>{isThisWeek ? 'this week' : 'jump to now'}</button>
+              <button className="now" onClick={() => setMonday(weekStartOf(new Date(), weekStartDay))} disabled={isThisWeek}>{isThisWeek ? 'this week' : 'jump to now'}</button>
             </div>
             {locked && <span className="lockchip" title="This week is settled — its wages are already netted in the ledger and paid.">🔒 Settled</span>}
-            <button className="link" onClick={() => setRcOpen(true)}>Rate card</button>
+            <button className="gearbtn" onClick={() => setRcOpen(true)} aria-label="Attendance settings" title="Settings — pay week & rate card">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>
+            </button>
           </div>
         </header>
 
@@ -835,13 +900,20 @@ export default function AttendanceSheet({ session }: { session: Session }) {
       <div className="rowmenu" id="rowmenu" />
       <div className="toast" id="toast" />
 
-      {/* rate card — slides in from the right */}
+      {/* settings — slides in from the right: the pay week, then the rate card */}
       <div className={`rcdrawer${rcOpen ? ' open' : ''}`} aria-hidden={!rcOpen}>
         <div className="rcd-scrim" onClick={() => setRcOpen(false)} />
-        <aside className="rcd-panel" role="dialog" aria-label="Rate card">
-          <div className="rcd-head"><div><b>Rate card</b><span>Daily rates by worker type — change from today; earlier weeks keep the old rate.</span></div><button className="rcd-x" onClick={() => setRcOpen(false)} aria-label="Close">×</button></div>
-          <div className="rcd-body"><table id="atdxRcTable" /></div>
-          <div className="rcd-foot"><button onClick={addDepartment}>+ Add department</button></div>
+        <aside className="rcd-panel" role="dialog" aria-label="Attendance settings">
+          <div className="rcd-head"><div><b>Settings</b><span>How this muster counts the week, and what each worker type earns a day.</span></div><button className="rcd-x" onClick={() => setRcOpen(false)} aria-label="Close">×</button></div>
+          <div className="rcd-body">
+            <PayWeekSettings
+              startDay={weekStartDay} offDay={weeklyOffDay} canEdit={canManageWeek}
+              onSave={async (s, o) => { await setPayWeek(s, o); toast('Pay week updated'); }}
+            />
+            <div className="rcd-section-h">Rate card <span>Daily rates by worker type — change from today; earlier weeks keep the old rate.</span></div>
+            <table id="atdxRcTable" />
+            <div className="rcd-section-foot"><button onClick={addDepartment}>+ Add department</button></div>
+          </div>
         </aside>
       </div>
     </div>
@@ -1138,6 +1210,27 @@ const ATDX_CSS = `
 .atdx .rcd-foot{padding:14px 22px;box-shadow:inset 0 1px var(--hair)}
 .atdx .rcd-foot button{color:var(--walnut);font-weight:500;font-size:13.5px}
 .atdx .rcd-foot button:hover{color:var(--ink)}
+
+/* settings gear (header) */
+.atdx .gearbtn{width:36px;height:36px;border-radius:999px;color:var(--walnut);display:grid;place-items:center;transition:background .15s var(--ease),color .15s}
+.atdx .gearbtn:hover{color:var(--ink);background:var(--paper)}
+
+/* a section heading inside the settings drawer */
+.atdx .rcd-section-h{padding:18px 22px 8px;font-family:"Playfair Display",Georgia,serif;font-size:16px;color:var(--ink)}
+.atdx .rcd-section-h span{display:block;font-family:inherit;font-weight:400;font-size:12.5px;color:var(--mute);margin-top:2px;font-style:normal}
+.atdx .rcd-body>.rcd-section-h{box-shadow:inset 0 1px var(--hair);margin-top:6px}
+.atdx .rcd-section-foot{padding:14px 22px}
+.atdx .rcd-section-foot button{color:var(--walnut);font-weight:500;font-size:13.5px}
+.atdx .rcd-section-foot button:hover{color:var(--ink)}
+
+/* pay week pickers */
+.atdx .payweek{padding:4px 0 10px}
+.atdx .pw-row{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:9px 22px}
+.atdx .pw-row label{font-size:14px;color:var(--ink)}
+.atdx .pw-row select{appearance:none;-webkit-appearance:none;min-width:168px;height:38px;padding:0 34px 0 12px;border:1px solid var(--hair-2);border-radius:9px;background:var(--paper) url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236E5F51' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M6 9l6 6 6-6'/></svg>") no-repeat right 10px center;color:var(--ink);font-size:14px;font-family:inherit;cursor:pointer}
+.atdx .pw-row select:focus{outline:none;border-color:var(--walnut)}
+.atdx .pw-row select:disabled{opacity:.6;cursor:default}
+.atdx .pw-note{padding:4px 22px 2px;font-size:12px;color:var(--mute)}
 
 @keyframes atdx-pop{from{opacity:0;transform:translateY(-4px) scale(.97)}to{opacity:1;transform:none}}
 
