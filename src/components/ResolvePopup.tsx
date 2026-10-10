@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabase';
 import type { RoughEntry } from '../types';
 import { useSnackbar } from './Snackbar';
 import { useOrgId } from '../lib/auth/AuthProvider';
+import { useIsMobile } from '../lib/useIsMobile';
 import { walletForSender, loadWalletsWithParty, type WalletBalance } from '../lib/walletApi';
 import { loadTeamCandidates, resolveTeammateParty, type TeamCandidate } from '../lib/teamPayees';
 import { ImageLightbox } from './ImageLightbox';
@@ -511,6 +512,10 @@ export function ResolvePopup({ entry, onClose, onUpdated, only }: Props) {
   const qc = useQueryClient();
   const { show: showSnackbar } = useSnackbar();
   const orgId = useOrgId();
+  // Render ONE copy of the heavy editor, not both — the desktop modal and the mobile sheet used to be
+  // mounted together (one hidden by CSS), doubling every render (and putting two #resolve-amount-input in
+  // the DOM). 767px is the exact complement of Tailwind's `md` (≥768 = desktop), so the switch lines up.
+  const isMobile = useIsMobile(767);
 
   /** Confirm mode asks ONLY what is missing. Edit mode asks everything. */
   const confirmMode = !!only;
@@ -784,8 +789,6 @@ export function ResolvePopup({ entry, onClose, onUpdated, only }: Props) {
   }, [onClose]);
 
   // ── Derived ────────────────────────────────────────────────────────────────
-  const filteredPayees = searchPayees(stakeholders, payeeSearch);
-
   // THE REMARK IS NOT MANDATORY. Payee + site + amount is a complete transaction — who, where, how
   // much. The remark is a note ON it, and a ledger that refuses to record a payment because nobody
   // typed "cement" is a ledger arguing with its own owner.
@@ -1043,7 +1046,7 @@ export function ResolvePopup({ entry, onClose, onUpdated, only }: Props) {
     setPayeeId, setPayeeName, setPayeeSearch,
     showPayeeDrop, setShowPayeeDrop,
     genHead, genName, setGenHead, setGenName,
-    stakeholders, orgId, teamAll, filteredPayees,
+    stakeholders, orgId, teamAll,
     amount, setAmount,
     description, setDescription,
     projectId, setProjectId, projectRef, projects,
@@ -1070,7 +1073,8 @@ export function ResolvePopup({ entry, onClose, onUpdated, only }: Props) {
         onClick={onClose}
       />
 
-      {/* Desktop: centered modal */}
+      {/* Desktop: centered modal — mounted only on desktop widths (see isMobile) */}
+      {!isMobile && (
       <div className="hidden md:flex fixed inset-0 z-[61] items-center justify-center p-4 pointer-events-none">
         <div
           className="resolve-editor pointer-events-auto w-full max-w-[480px] max-h-[88vh] flex flex-col rounded-2xl shadow-[0_20px_60px_rgba(0,0,0,0.2)] overflow-hidden"
@@ -1080,8 +1084,10 @@ export function ResolvePopup({ entry, onClose, onUpdated, only }: Props) {
           <PopupContents {...sharedProps} />
         </div>
       </div>
+      )}
 
-      {/* Mobile: bottom sheet (swipe up → full height, swipe down → dismiss) */}
+      {/* Mobile: bottom sheet (swipe up → full height, swipe down → dismiss) — mounted only on phones */}
+      {isMobile && (
       <div
         ref={sheetRef}
         className="resolve-editor md:hidden fixed left-0 right-0 z-[61] flex flex-col rounded-t-[20px] shadow-2xl overflow-hidden"
@@ -1106,6 +1112,7 @@ export function ResolvePopup({ entry, onClose, onUpdated, only }: Props) {
         </div>
         <PopupContents {...sharedProps} />
       </div>
+      )}
 
       <style>{`
         @keyframes popupIn {
@@ -1160,7 +1167,6 @@ interface ContentProps {
   genHead: string; genName: string; setGenHead: (v: string) => void; setGenName: (v: string) => void;
   stakeholders: any[];
   orgId: string | null; teamAll: TeamCandidate[];
-  filteredPayees: any[];
   amount: number | ''; setAmount: (v: number | '') => void;
   description: string; setDescription: (v: string) => void;
   projectId: string; setProjectId: (v: string) => void; projectRef: React.RefObject<HTMLSelectElement | null>;
@@ -1313,16 +1319,22 @@ function PopupContents({
   // The heads are offered before a letter is typed, as they are on the phone: not every payment has a
   // payee, and somebody who has never typed "hamali" has no way to learn the list exists. An empty
   // query answers with the common few (searchGenHeads); typing filters all seventeen.
-  const genMatches = searchGenHeads(payeeSearch);
+  // These are full-list fuzzy searches/sorts; memoise them so typing in an UNRELATED field (amount, note)
+  // — which re-renders this component — does not re-run them. They recompute only when their own inputs
+  // change. (Before, every keystroke anywhere ran all of these over the whole stakeholder list, which is
+  // what made the panel feel heavy and lag behind the cursor.)
+  const genMatches = useMemo(() => searchGenHeads(payeeSearch), [payeeSearch]);
   // Teammates without a linked party yet — offered as a "Team" group so paying one reuses their single
   // record instead of creating a duplicate. A teammate WITH a linked party already shows as that party.
-  const teamMatches = searchPayees(teamAll.filter((m) => !m.stakeholderId), payeeSearch);
+  const teamMatches = useMemo(() => searchPayees(teamAll.filter((m) => !m.stakeholderId), payeeSearch), [teamAll, payeeSearch]);
 
   // Payee search list. TWO different questions, and they were tangled: with NO typed text the ordering
   // question is "who did the AI hear?" (sort by similarity to payee_raw); the moment he types, the question
   // is "who is he looking for?" and searchPayees ranks by THAT — his query, not the AI's guess.
-  const sortedPayees = sortByPayeeSimilarity(stakeholders, ai.payee_raw || '');
-  const searchedPayees = payeeSearch ? searchPayees(stakeholders, payeeSearch) : sortedPayees;
+  const sortedPayees = useMemo(() => sortByPayeeSimilarity(stakeholders, ai.payee_raw || ''), [stakeholders, ai.payee_raw]);
+  const searchedPayees = useMemo(() => (payeeSearch ? searchPayees(stakeholders, payeeSearch) : sortedPayees), [payeeSearch, stakeholders, sortedPayees]);
+  // The "add as another name for an existing contact" picker's list (only non-empty when its box has text).
+  const aliasList = useMemo(() => (aliasQ ? searchPayees(stakeholders, aliasQ) : stakeholders), [aliasQ, stakeholders]);
   // The name the owner typed (or what the AI heard) — used to personalise the "Add …" CTA.
   const typedName = (payeeSearch.trim() || ai.payee_raw || '').trim();
 
@@ -1652,7 +1664,7 @@ function PopupContents({
                         className="w-full text-[13px] px-2.5 py-2 rounded-lg outline-none"
                         style={{ border: `1px solid ${VOICE.line}`, background: VOICE.surface, color: VOICE.user }} />
                     </div>
-                    {(aliasQ ? searchPayees(stakeholders, aliasQ) : stakeholders).slice(0, 8).map((s: any) => (
+                    {aliasList.slice(0, 8).map((s: any) => (
                       <button key={s.stakeholder_id} type="button"
                         onMouseDown={(e) => { e.preventDefault(); learnAlias(s, typedName); }}
                         className="w-full flex items-start gap-2.5 px-3 py-2 text-left transition-colors hover:bg-black/[0.025]"
@@ -1663,7 +1675,7 @@ function PopupContents({
                         </div>
                       </button>
                     ))}
-                    {(aliasQ ? searchPayees(stakeholders, aliasQ) : stakeholders).length === 0 && (
+                    {aliasList.length === 0 && (
                       <p className="px-3 py-3 text-[12px]" style={{ color: VOICE.systemFaint }}>No contact by that name.</p>
                     )}
                   </div>
