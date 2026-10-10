@@ -909,6 +909,9 @@ export function ResolvePopup({ entry, onClose, onUpdated, only }: Props) {
   // PRE-file value computed at selfPaid=0 equals the POST-file value at selfPaid=amount (the key the picker
   // uses, PayableOptions). We therefore warm that amount-keyed entry with the selfPaid=0 computation; when
   // the picker mounts post-file it finds fresh, correct data and never shows a spinner.
+  // DEBOUNCED — amount changes on every keystroke, and loadAttributionTargets pulls the whole weekly run,
+  // so firing it per character froze the typing. Wait for a ~500ms pause before warming; the picker only
+  // opens on Approve, long after the user has stopped editing, so a brief debounce costs nothing.
   useEffect(() => {
     if (splitMode || isGeneral || topUp) return;
     if (!payeeId || !projectId || !(Number(amount) > 0)) return;
@@ -916,11 +919,15 @@ export function ResolvePopup({ entry, onClose, onUpdated, only }: Props) {
     const type: PayeeType = payeeType === 'Vendor' ? 'Vendor' : 'Worker';
     const target = { id: payeeId, type };
     const date = ai.date ?? null;
-    void qc.prefetchQuery({
-      queryKey: attrTargetsKey(target, projectId, date, Number(amount)),
-      queryFn: () => loadAttributionTargets(target, projectId, date, 0),
-      staleTime: 60_000,
-    });
+    const amt = Number(amount);
+    const t = window.setTimeout(() => {
+      void qc.prefetchQuery({
+        queryKey: attrTargetsKey(target, projectId, date, amt),
+        queryFn: () => loadAttributionTargets(target, projectId, date, 0),
+        staleTime: 60_000,
+      });
+    }, 500);
+    return () => window.clearTimeout(t);
   }, [payeeId, projectId, amount, isGeneral, topUp, splitMode, stakeholders, ai.date, qc]);
 
   const handleApprove = useCallback(async () => {
