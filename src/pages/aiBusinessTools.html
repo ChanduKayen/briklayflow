@@ -454,13 +454,31 @@ footer p{color:var(--ink-2);font-size:.95rem;margin-top:10px;max-width:34em}
 .sw{display:flex;flex-wrap:wrap;gap:12px;padding:4px 2px}
 .swb{width:40px;height:40px;border-radius:50%;background:var(--c);box-shadow:inset 0 0 0 3px #fff,0 0 0 1px var(--rule);transition:box-shadow .12s}
 .swb[aria-pressed="true"]{box-shadow:inset 0 0 0 3px #fff,0 0 0 3px var(--ink)}
-.chaps{list-style:none;display:grid;gap:8px;margin-top:24px}
-.chaps button{display:grid;grid-template-columns:2.2em minmax(0,1fr) auto;align-items:center;gap:0 4px;width:100%;padding:12px 14px;border-radius:14px;box-shadow:inset 0 0 0 1px var(--rule);min-height:60px;transition:box-shadow .12s}
-.chaps button:hover{box-shadow:inset 0 0 0 1.5px var(--ink)}
-.chaps .n{grid-row:1/3;font-family:var(--display);font-weight:800;font-size:1.5rem;color:var(--blue);line-height:1}
-.chaps b{font-weight:600;font-size:1.02rem}
-.chaps small{grid-column:2;color:var(--ink-2);font-size:.86rem}
-.chaps button::after{content:"↓";grid-column:3;grid-row:1/3;color:var(--ink-3)}
+/* chapter cards: three of exactly the same shape, each on its own quiet pattern */
+.chaps{list-style:none;display:grid;gap:10px;margin-top:24px}
+.chaps li{display:flex}
+.chaps button{position:relative;isolation:isolate;overflow:hidden;display:grid;grid-template-columns:2.4em minmax(0,1fr) 1.2em;grid-template-rows:auto auto;align-content:center;align-items:center;column-gap:6px;width:100%;height:84px;padding:0 16px;border-radius:16px;background:#fff;box-shadow:inset 0 0 0 1px var(--ink);transition:transform .12s,box-shadow .12s}
+.chaps button::before{content:"";position:absolute;inset:0;z-index:-1;-webkit-mask-image:linear-gradient(100deg,transparent 30%,#000 100%);mask-image:linear-gradient(100deg,transparent 30%,#000 100%)}
+.chaps li:nth-child(1) button::before{background:radial-gradient(rgba(27,69,245,.34) 1.2px,transparent 1.5px) 0 0/11px 11px,var(--tint)}
+.chaps li:nth-child(2) button::before{background:repeating-linear-gradient(135deg,rgba(27,69,245,.2) 0 1px,transparent 1px 8px),var(--tint)}
+.chaps li:nth-child(3) button::before{background:linear-gradient(rgba(27,69,245,.2) 1px,transparent 1px) 0 0/100% 13px,linear-gradient(90deg,rgba(27,69,245,.2) 1px,transparent 1px) 0 0/13px 100%,var(--tint)}
+.chaps button:hover{box-shadow:inset 0 0 0 2px var(--blue)}
+.chaps button:active{transform:scale(.99)}
+.chaps .n{grid-row:1/3;font-family:var(--display);font-weight:800;font-size:1.9rem;color:var(--blue);line-height:1}
+.chaps b{font-weight:700;font-size:1.04rem;align-self:end;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chaps small{grid-column:2;color:var(--ink-2);font-size:.86rem;align-self:start;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chaps button::after{content:"↓";grid-column:3;grid-row:1/3;color:var(--ink);font-weight:700}
+/* parts of a prompt the owner can type into */
+.edhint{display:flex;gap:10px;align-items:flex-start;margin:18px 0 10px;padding:10px 12px;border-radius:10px;background:var(--mark-soft);font-size:.92rem;font-weight:500}
+.edhint > span:first-child{font-size:1.05rem;line-height:1.3}
+mark.ed{cursor:text;outline:0;border-bottom:1.5px dashed rgba(16,21,31,.6);transition:background .15s,box-shadow .15s}
+mark.ed::after{content:" ✎";font-size:.78em;opacity:.6}
+mark.ed:hover{background:#ffd500}
+mark.ed.ph:hover{background:var(--mark)}
+mark.ed:focus{background:#fff;color:var(--ink);border-bottom-color:transparent;box-shadow:0 0 0 2px var(--blue);border-radius:4px}
+mark.ed:focus::after{content:""}
+.prompt dt:first-of-type + dd mark.ed{animation:nudgeEd 1.6s ease 1 .5s}
+@keyframes nudgeEd{0%,100%{box-shadow:0 0 0 0 rgba(27,69,245,0)}40%{box-shadow:0 0 0 5px rgba(27,69,245,.35)}}
 .viewall{display:flex;align-items:center;gap:12px;width:100%;margin-top:12px;padding:14px 16px;border-radius:14px;box-shadow:inset 0 0 0 1.5px var(--ink);min-height:62px}
 .viewall span{flex:1}
 .viewall b{display:block;font-weight:600;font-size:1.05rem}
@@ -472,7 +490,12 @@ footer p{color:var(--ink-2);font-size:.95rem;margin-top:10px;max-width:34em}
 /* sample tool cards */
 .tcards{display:grid;gap:12px;margin-top:22px}
 .tc{border:1px solid var(--ink);border-radius:16px;overflow:hidden;background:#fff}
-.tch{display:grid;gap:12px;width:100%;padding:16px}
+.tch{position:relative;isolation:isolate;display:grid;gap:12px;width:100%;padding:16px}
+.tch::before{content:"";position:absolute;inset:0;z-index:-1;-webkit-mask-image:linear-gradient(205deg,#000 0%,transparent 52%);mask-image:linear-gradient(205deg,#000 0%,transparent 52%)}
+.tc:nth-child(1) .tch::before{background:radial-gradient(rgba(16,21,31,.3) 1.2px,transparent 1.5px) 0 0/11px 11px,#F3E7D6}
+.tc:nth-child(2) .tch::before{background:linear-gradient(rgba(16,21,31,.16) 1px,transparent 1px) 0 0/100% 13px,linear-gradient(90deg,rgba(16,21,31,.16) 1px,transparent 1px) 0 0/13px 100%,#E5ECFD}
+.tc:nth-child(3) .tch::before{background:repeating-linear-gradient(135deg,rgba(16,21,31,.17) 0 1px,transparent 1px 8px),#FDEFD3}
+.tc:nth-child(4) .tch::before{background:repeating-linear-gradient(0deg,rgba(16,21,31,.15) 0 1px,transparent 1px 9px),#E3F0D6}
 .tch .tg{font-family:var(--mono);font-size:10.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--blue)}
 .tch h3{font-size:1.25rem;margin-top:4px}
 .tch p{color:var(--ink-2);font-size:.95rem;margin-top:4px}
@@ -492,9 +515,15 @@ footer p{color:var(--ink-2);font-size:.95rem;margin-top:10px;max-width:34em}
   .lr{grid-template-columns:minmax(0,1fr) auto;align-items:center}
 }
 @media(min-width:700px){
-  .chaps{grid-template-columns:repeat(3,1fr)}
+  .chaps{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .chaps button{grid-template-columns:minmax(0,1fr) auto;grid-template-rows:auto auto 1fr;align-content:start;height:156px;padding:16px 16px 14px;row-gap:2px}
+  .chaps .n{grid-row:1;grid-column:1;margin-bottom:8px}
+  .chaps button::after{grid-row:1;grid-column:2;align-self:start}
+  .chaps b{grid-column:1/3;white-space:normal;align-self:start}
+  .chaps small{grid-column:1/3;white-space:normal}
   .tcards{grid-template-columns:1fr 1fr;align-items:start}
   .tch{grid-template-columns:1fr}
+  .tch > span:first-child{min-height:7.6em}
   .hfacts{grid-template-columns:repeat(4,1fr)}
   .homead .scrim{background:linear-gradient(to top,rgba(9,12,18,.94) 0%,rgba(9,12,18,.7) 34%,rgba(9,12,18,.1) 70%),linear-gradient(to right,rgba(9,12,18,.72) 0%,rgba(9,12,18,0) 62%)}
   .homead .hin{padding-top:260px;padding-bottom:48px}
@@ -537,6 +566,7 @@ footer p{color:var(--ink-2);font-size:.95rem;margin-top:10px;max-width:34em}
   .sc.on .a,.sc.on .post{animation:none;opacity:1}
   .sc.on .pre,.sc.on .tap,.sc.on .p-pop{animation:none;opacity:0}
   .sc.on .c-think .spark,.sc.on .shim{animation:none}
+  .prompt dt:first-of-type + dd mark.ed{animation:none}
   .shim{color:var(--c-mute);background:none}
   .how.playing .step[aria-current="step"] .bar{animation:none}
 }
@@ -728,7 +758,8 @@ footer p{color:var(--ink-2);font-size:.95rem;margin-top:10px;max-width:34em}
       <p class="note" id="dashNote"></p>
     </div>
 
-    <dl class="prompt" id="dashPrompt" style="margin-top:18px"></dl>
+    <p class="edhint"><span aria-hidden="true">✎</span><span>Everything in <mark>yellow</mark> is yours. Tap it and type to change it.</span></p>
+    <dl class="prompt" id="dashPrompt"></dl>
     <div class="after" style="margin-top:12px"><button class="btn blue full" type="button" id="dashCopy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy the dashboard prompt</span></button></div>
 
     <ol class="dsteps">
@@ -1320,23 +1351,23 @@ function rowsFor(tool, bizSentence, o){
   var sheet = o.fmt === 'sheet';
   var cust = (o.who || tool.w) === 'c' && !sheet;   // a spreadsheet is used by the owner, never opened by the public
   var who = WHO[tool.trade] || ['customers','customer'], own = tool.id === 'own';
-  var biz = val(bizSentence, 'your business'), town = val(o.town, 'your town');
+  var biz = val(bizSentence, 'your business'), town = val(o.town, 'your town'); biz.f = 'biz'; town.f = 'town';
   var task = val(o.task !== undefined ? o.task : tool.t, 'what the tool should work out');
   if (!task.ph) task.t = lowerFirst(task.t);
-  var inputs = val(o.inputs !== undefined ? o.inputs : tool.i, 'the 3 to 5 things that get typed in');
+  var inputs = val(o.inputs !== undefined ? o.inputs : tool.i, 'the 3 to 5 things that get typed in'); task.f = 'task'; inputs.f = 'inputs';
   if (!inputs.ph) inputs.t = lowerFirst(inputs.t);
   var rulesText = String(o.rules !== undefined ? o.rules : tool.r).trim().replace(/\s+/g, ' ');
-  var rules = rulesText ? { t:rulesText.replace(/[.。]+$/, ''), ph:false } : ph('your rates, formula and GST');
+  var rules = rulesText ? { t:rulesText.replace(/[.。]+$/, ''), ph:false } : ph('your rates, formula and GST'); rules.f = 'rules';
   var calc = !has(tool, 'x');
   var job = clean(o.job);
-  var wa = (has(tool, 'w') && cust) ? val(o.wanum, 'your WhatsApp number') : null;
+  var wa = (has(tool, 'w') && cust) ? val(o.wanum, 'your WhatsApp number') : null; if (wa) wa.f = 'wa';
   var rows = [
     ['Context', [['I run a ', biz, ' in ', town, '.']]],
     ['Task', [[(sheet ? 'Build me a simple spreadsheet. ' : 'Build me a simple tool that works on a phone. ') + (own ? 'This is what I need it to do: ' : 'It should '), task, '. ' + (cust ? 'My ' + who[0] + ' will open it from a link I share on WhatsApp.' : sheet ? 'My staff and I will use it ourselves.' : has(tool, 'm') ? 'It will be used on one phone, mine or the one at the counter.' : 'Only my staff and I will use it, on our phones.')]]],
     ['Ask first', [[calc ? ASK_FIRST : ASK_FIRST_LIST]], 'key'],
     ['Inputs', [[(cust ? 'The ' + who[1] + ' will enter: ' : 'I will enter: '), inputs, '.']]],
     ['Rules', [[(calc ? 'Calculate it like this: ' : 'Make it work like this: '), rules, '. ' + (calc ? 'These are my starting numbers. Confirm each one with me before you build.' : 'Confirm the details with me before you build.')]]],
-    ['Check', [job ? ['Check your work with this job: ', { t:job, ph:false }, '. If your tool gives a different answer, fix it before you show me.']
+    ['Check', [job ? ['Check your work with this job: ', { t:job, ph:false, f:'job' }, '. If your tool gives a different answer, fix it before you show me.']
                    : ['Before you finish, work through one example with my numbers and ask me if the answer is right.']]]
   ].concat(specRows(tool, o.theme || THEMES.plain, { fmt:o.fmt, cust:cust, who:who, wa:wa, te:o.te, colour:o.colour }));
   var blanks = [biz, town, task, inputs, rules].concat(wa ? [wa] : []).filter(function(x){ return x.ph; }).length;
@@ -1352,8 +1383,12 @@ function plainOf(p){
 }
 /* in the preview, a colour code gets a dot of that colour beside it, so an owner can see what #6B1D24 is */
 function swatches(html){ return html.replace(/#[0-9A-F]{6}\b/g, function(h){ return '<span class="hex"><i style="background:' + h + '"></i>' + h + '</span>'; }); }
-function htmlOf(p){
-  function line(l){ return l.map(function(x){ return typeof x === 'string' ? swatches(esc(x)) : '<mark' + (x.ph ? ' class="ph"' : '') + '>' + esc(x.t) + '</mark>'; }).join(''); }
+function htmlOf(p, editable){
+  function line(l){ return l.map(function(x){
+    if (typeof x === 'string') return swatches(esc(x));
+    var ed = editable && x.f;
+    return '<mark class="' + (x.ph ? 'ph' : '') + (ed ? ' ed' : '') + '"' + (ed ? ' contenteditable="true" spellcheck="false" role="textbox" aria-label="Edit this part" data-f="' + x.f + '"' : '') + '>' + esc(x.t) + '</mark>';
+  }).join(''); }
   return p.rows.map(function(r){
     var body = r[2] === 'list' ? '<ul>' + r[1].map(function(l){ return '<li>' + line(l) + '</li>'; }).join('') + '</ul>' : r[1].map(line).join('<br>');
     return '<dt>' + r[0] + '</dt><dd' + (r[2] === 'key' ? ' class="key"' : '') + '>' + body + '</dd>';
@@ -1366,19 +1401,20 @@ function bizOf(tradeId, other){ return tradeId === 'other' ? clean(other) : (TRA
 function libraryPrompt(tool, tradeId){ return plainOf(rowsFor(tool, bizOf(tradeId, ''), { fmt:W.lfmt, theme:themeOf(tradeId) })); }
 
 /* ------------------------------------------------------------------ wizard state */
-var W = { step:1, trade:'', other:'', size:0, tool:'', town:'', wanum:'', te:false, edits:{}, more:false, lfmt:'phone', colour:'', dkind:'sales', dwhere:'page' };
+var W = { step:1, trade:'', other:'', size:0, tool:'', town:'', wanum:'', te:false, edits:{}, more:false, lfmt:'phone', colour:'', dkind:'sales', dwhere:'page', dbiz:null, dsee:'' };
 try { var sv = JSON.parse(load('bk-aitools-2') || 'null');
   if (sv && typeof sv === 'object') ['trade','other','size','tool','town','wanum','te','edits','colour'].forEach(function(k){ if (k in sv && typeof sv[k] === typeof W[k]) W[k] = sv[k]; });
   if (W.trade && W.trade !== 'other' && !TRADES[W.trade]) { W.trade = ''; W.tool = ''; }
   if (W.tool && !TOOLS_BY_ID[W.tool]) W.tool = '';
 } catch(e){}
-function save(){ if ($('dashPrompt')) renderDash(); store('bk-aitools-2', JSON.stringify({ trade:W.trade, other:W.other, size:W.size, tool:W.tool, town:W.town, wanum:W.wanum, te:W.te, edits:W.edits, colour:W.colour })); syncResume(); }
+function save(){ if ($('dashPrompt')) renderDash(); persist(); }
+function persist(){ store('bk-aitools-2', JSON.stringify({ trade:W.trade, other:W.other, size:W.size, tool:W.tool, town:W.town, wanum:W.wanum, te:W.te, edits:W.edits, colour:W.colour })); syncResume(); }
 function tradeName(){ return W.trade === 'other' ? (clean(W.other) || 'Your business') : (TRADES[W.trade] ? TRADES[W.trade].n : ''); }
 function edit(){ if (!W.edits[W.tool]) W.edits[W.tool] = {}; return W.edits[W.tool]; }
 function currentPrompt(){
   var tool = TOOLS_BY_ID[W.tool], e = W.edits[W.tool] || {};
   /* a tool that every business shares still speaks as this owner's trade */
-  return rowsFor(tool, bizOf(W.trade, W.other), { town:W.town, wanum:W.wanum, te:W.te, rules:e.rules, job:e.job, task:e.task, inputs:e.inputs, fmt:e.fmt, theme:themeOf(W.trade), colour:W.colour });
+  return rowsFor(tool, e.biz !== undefined ? e.biz : bizOf(W.trade, W.other), { town:W.town, wanum:W.wanum, te:W.te, rules:e.rules, job:e.job, task:e.task, inputs:e.inputs, fmt:e.fmt, theme:themeOf(W.trade), colour:W.colour });
 }
 function syncResume(){
   var ok = !!(W.tool && TOOLS_BY_ID[W.tool] && W.trade);
@@ -1451,7 +1487,8 @@ function renderWizard(){
             return '<button type="button" class="swb" data-colour="' + c[1] + '" aria-pressed="' + (W.colour === c[1]) + '" aria-label="' + c[0] + '" title="' + c[0] + '" style="--c:' + (c[1] || themeOf(W.trade).main) + '"></button>'; }).join('') + '</div><span class="hint">The header and buttons of your tool use this colour. The first is our suggestion for your trade.</span></div>' +
         '<label class="check"><input type="checkbox" id="e-te"' + (W.te ? ' checked' : '') + '><span>Telugu and English labels</span></label>' +
       '</div></details>' +
-      '<dl class="prompt" id="wizPrompt" style="margin-top:18px"></dl>' +
+      '<p class="edhint"><span aria-hidden="true">✎</span><span>Everything in <mark>yellow</mark> is yours. Tap it and type to change it.</span></p>' +
+      '<dl class="prompt" id="wizPrompt"></dl>' +
       '<p class="note">Copy with the blue button below. Or copy and open an assistant in one tap:</p>' +
       '<div class="paste" style="margin-top:10px"><a class="btn line sm" data-open="chatgpt" target="_blank" rel="noopener" href="#">ChatGPT</a><a class="btn line sm" data-open="claude" target="_blank" rel="noopener" href="#">Claude</a><a class="btn line sm" data-open="gemini" target="_blank" rel="noopener" href="#">Gemini</a></div>' +
       '<div class="after"><button class="btn line full" type="button" id="wizHow">Show me how to use it</button><button class="btn line full" type="button" id="wizAnother">Pick another problem</button></div>' + briklaySlot(W.trade) + '</div>';
@@ -1488,8 +1525,9 @@ var DKINDS = [
 function dashRows(){
   var k = DKINDS.filter(function(x){ return x.id === W.dkind; })[0] || DKINDS[0], tab = W.dwhere === 'tab';
   var th = themeOf(W.trade), main = W.colour || th.main;
-  var biz = val(bizOf(W.trade, W.other), 'your business'), town = val(W.town, 'your town');
-  var see = k.see ? k.see.map(function(x){ return [x]; }) : [[ph('what you want to see at a glance, in your own words')]];
+  var biz = val(W.dbiz !== null ? W.dbiz : bizOf(W.trade, W.other), 'your business'), town = val(W.town, 'your town'); biz.f = 'dbiz'; town.f = 'town';
+  var mine = val(W.dsee, 'what you want to see at a glance, in your own words'); mine.f = 'dsee';
+  var see = k.see ? k.see.map(function(x){ return [x]; }) : [[mine]];
   var D = [], F = [], A = [];
   if (!tab) {
     D.push(['Style: ' + th.name + '. Page background ' + th.bg + '. Cards are white with a 1px ' + th.line + ' border and 14px rounded corners. Text ' + th.ink + ', small labels ' + th.mute + '.']);
@@ -1531,7 +1569,7 @@ function dashRows(){
 function renderDash(){
   all('[data-dkind]').forEach(function(b){ b.setAttribute('aria-pressed', String(b.dataset.dkind === W.dkind)); });
   all('[data-dwhere]').forEach(function(b){ b.setAttribute('aria-pressed', String(b.dataset.dwhere === W.dwhere)); });
-  $('dashPrompt').innerHTML = htmlOf(dashRows());
+  $('dashPrompt').innerHTML = htmlOf(dashRows(), true);
   $('dashNote').textContent = W.dwhere === 'tab'
     ? 'A Dashboard tab inside your own Excel or Google Sheet. It updates by itself as you add rows.'
     : 'A page you open on your phone. It shows the data as it was in the file you attached.';
@@ -1542,7 +1580,7 @@ function refreshPrompt(){
     ? 'A spreadsheet with your rates on one tab and formulas you can see and change.' + (tool.w === 'c' ? ' Your customers cannot open a sheet, so you would use it yourself.' : ' Good if you already work in Excel.')
     : 'A small app that opens from a link. ' + (tool.w === 'c' ? 'Your customers open it on their phone.' : has(tool, 'm') ? 'The list stays on one phone. If several people must update it, choose the sheet and keep it in Google Sheets.' : 'You and your staff open it on your phones.');
   var p = currentPrompt(), text = plainOf(p), q = encodeURIComponent(text);
-  $('wizPrompt').innerHTML = htmlOf(p);
+  $('wizPrompt').innerHTML = htmlOf(p, true);
   var urls = { chatgpt:'https://chatgpt.com/?q=' + q, claude:'https://claude.ai/new?q=' + q, gemini:'https://gemini.google.com/app' };
   all('#wizMount a[data-open]').forEach(function(a){ a.href = urls[a.dataset.open]; });
 }
@@ -1895,6 +1933,7 @@ if ('IntersectionObserver' in window && !HOW.reduced) {
 /* ------------------------------------------------------------------ wiring */
 document.addEventListener('input', function(e){
   var t = e.target, d = t.dataset;
+  if (isEd(t)) { t.classList.remove('ph'); applyEd(t); return; }
   if (t.id === 'tq') {
     var q = clean(t.value).toLowerCase(), any = false;
     all('#tlist [data-grp]').forEach(function(g){
@@ -1915,7 +1954,38 @@ document.addEventListener('input', function(e){
     all('[data-pick="disq"] button').forEach(function(b){ b.setAttribute('aria-pressed', String(b.dataset.v === String(num(dis.d)))); }); return; }
   if (d.be) { be[d.be] = t.value; $('beOut').innerHTML = beOut(); return; }
 });
+var ED_FORM = { town:'e-town', wa:'e-wa', rules:'e-rules', job:'e-job', task:'e-task', inputs:'e-inputs' };
+function isEd(t){ return t && t.nodeType === 1 && t.matches && t.matches('mark.ed'); }
+function applyEd(m){
+  var f = m.dataset.f, v = m.textContent.replace(/\s+/g, ' ');
+  if (m.closest('#dashPrompt')) {                      // the dashboard prompt keeps its own business line and wish
+    if (f === 'town') W.town = v; else W[f] = v;
+    persist(); return;
+  }
+  if (f === 'town') W.town = v; else if (f === 'wa') W.wanum = v; else edit()[f] = v;
+  var box = ED_FORM[f] && $(ED_FORM[f]); if (box) box.value = v;
+  persist();
+  var q = encodeURIComponent(plainOf(currentPrompt()));
+  all('#wizMount a[data-open]').forEach(function(a){ a.href = a.dataset.open === 'chatgpt' ? 'https://chatgpt.com/?q=' + q : a.dataset.open === 'claude' ? 'https://claude.ai/new?q=' + q : a.href; });
+}
+document.addEventListener('focusin', function(e){
+  var m = e.target; if (!isEd(m)) return;
+  m.classList.add('on');
+  if (m.classList.contains('ph')) { var r = document.createRange(); r.selectNodeContents(m); var sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r); }
+});
+document.addEventListener('focusout', function(e){
+  var m = e.target; if (!isEd(m)) return;
+  var dash = !!m.closest('#dashPrompt');
+  setTimeout(function(){ if (isEd(document.activeElement)) return; if (dash) renderDash(); else if ($('wizPrompt')) { refreshPrompt(); renderDash(); } }, 0);
+});
+document.addEventListener('paste', function(e){
+  if (!isEd(e.target) && !(e.target.parentNode && isEd(e.target.parentNode))) return;
+  e.preventDefault();
+  var text = ((e.clipboardData || window.clipboardData).getData('text') || '').replace(/\s+/g, ' ');
+  try { document.execCommand('insertText', false, text); } catch(err){}
+});
 document.addEventListener('keydown', function(e){
+  if (e.key === 'Enter' && isEd(e.target)) { e.preventDefault(); e.target.blur(); return; }
   if (e.key === 'Escape') { if ($('sheet').classList.contains('on')) closeTool(); else if ($('wiz').classList.contains('on')) closeWizard(); }
   if (e.key === 'Enter' && e.target.id === 'otherBiz') { e.preventDefault(); $('otherGo').click(); }
 });
