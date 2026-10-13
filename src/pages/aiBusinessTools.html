@@ -210,6 +210,8 @@ mark.ok{background:#c9f2e4}
 .tcard .r b{font-weight:600}
 .tcard .tot{display:flex;justify-content:space-between;align-items:baseline;padding-top:8px;border-top:1px solid var(--rule)}
 .tcard .tot b{font-family:var(--display);font-size:20px;letter-spacing:-.02em}
+.tcard .tot.col{display:block}
+.tcard .tot.col b{display:block;font-size:16px;margin-top:1px}
 .fix{align-self:center;background:var(--mark);padding:6px 10px;border-radius:8px;font-weight:600;text-align:center}
 /* scene choreography: .a enters, .pre leaves, .post arrives, .tap pulses, each at its own --d */
 .sc.on .a{animation:a-in .45s cubic-bezier(.2,.8,.3,1) both;animation-delay:var(--d,0s)}
@@ -306,11 +308,92 @@ footer p{color:var(--ink-2);font-size:.95rem;margin-top:10px;max-width:34em}
 .toast{position:fixed;left:50%;bottom:calc(84px + env(safe-area-inset-bottom, 0px));transform:translate(-50%,20px);background:var(--ink);color:#fff;padding:10px 16px;border-radius:999px;font-size:.92rem;font-weight:500;opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;z-index:80;max-width:calc(100vw - 32px);text-align:center}
 .toast.on{opacity:1;transform:translate(-50%,0)}
 
+/* the prompt from the talk, first thing on the page */
+.tut{margin-top:26px}
+.tut h2{font-size:1.45rem;margin-top:8px}
+.tut > p{color:var(--ink-2);margin-top:6px}
+.tut .raw{margin-top:14px}
+.tut .raw pre{max-height:104px;overflow:hidden}
+.tut .raw.open pre{max-height:none}
+.tut .raw:not(.open) pre{-webkit-mask-image:linear-gradient(#000 55%,transparent);mask-image:linear-gradient(#000 55%,transparent)}
+.lnk{margin-top:8px;font-size:.9rem;color:var(--ink-2);padding:6px 0;border-bottom:1px solid var(--rule)}
+.lnk:hover{color:var(--blue);border-color:var(--blue)}
+.entry{margin-top:30px}
+/* phone tool or spreadsheet */
+.seg{display:grid;grid-template-columns:1fr 1fr;border:1px solid var(--ink);border-radius:10px;overflow:hidden}
+.seg button{min-height:48px;padding:8px 10px;font-weight:600;font-size:.95rem;background:#fff;text-align:center;line-height:1.2}
+.seg button + button{border-left:1px solid var(--ink)}
+.seg button[aria-pressed="true"]{background:var(--ink);color:#fff}
+.seg button i{display:block;font-style:normal;font-family:var(--mono);font-size:9.5px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--blue);margin-top:2px}
+.seg button[aria-pressed="true"] i{color:var(--mark)}
+.fmt{margin-top:20px}
+.fmt .lab{display:block;font-weight:600;font-size:.95rem;margin-bottom:6px}
+.fmt .note{min-height:2.9em}
+.lfmt{margin-top:16px}
+/* Briklay's own slot: the one dark block */
+.bk{margin-top:30px;padding:22px 20px 20px;border-radius:18px;background:var(--ink);color:#fff}
+.bk .k{color:#93a6ff;display:block}
+.bk h3{font-size:1.5rem;line-height:1.12;margin-top:10px;letter-spacing:-.025em;text-wrap:balance}
+.bk p{color:rgba(255,255,255,.76);font-size:.95rem;margin-top:10px}
+.bk p b{color:#fff;font-weight:600}
+.bkrow{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
+.bk .btn{background:#fff;color:var(--ink);min-height:46px;padding:10px 16px;font-size:.95rem}
+.bk .btn:hover{background:var(--mark)}
+.bk .btn.ghost{background:transparent;color:#fff;box-shadow:inset 0 0 0 1px rgba(255,255,255,.4)}
+.bk .btn.ghost:hover{background:rgba(255,255,255,.1)}
+/* the demo screens in the phone, drawn in the look of the Claude app */
+.cl{--c-bg:#faf9f5;--c-ink:#1f1e1d;--c-mute:#77756e;--c-line:#e6e3da;--c-user:#efece3;--c-or:#d97757;background:var(--c-bg);color:var(--c-ink)}
+.c-top{flex:none;display:flex;align-items:center;justify-content:space-between;padding:10px 12px 8px;font-weight:600;font-size:12px}
+.c-top i{width:16px;height:12px;font-style:normal;border-top:1.6px solid var(--c-ink);border-bottom:1.6px solid var(--c-ink);opacity:.75}
+.c-top i + span + i,.c-top i.sq{height:14px;width:14px;border:1.6px solid var(--c-ink);border-radius:4px}
+.c-home{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:0 18px;text-align:center;font-family:ui-serif,Georgia,"Times New Roman",serif;font-size:17px;line-height:1.25}
+.spark{width:26px;height:26px;flex:none}
+.spark path{stroke:var(--c-or);stroke-width:2.7;stroke-linecap:round;fill:none}
+.c-chat{flex:1;display:flex;flex-direction:column;justify-content:flex-end;gap:9px;padding:6px 12px 10px;min-height:0;overflow:hidden}
+.c-me{align-self:flex-end;max-width:86%;background:var(--c-user);padding:8px 11px;border-radius:14px;border-bottom-right-radius:5px}
+.c-me.long{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.c-ai{font-family:ui-serif,Georgia,"Times New Roman",serif;font-size:13.5px;line-height:1.4;max-width:94%}
+.c-ai b{font-weight:700}
+.c-comp{position:relative;flex:none;margin:0 9px 10px;padding:10px 11px 8px;border-radius:17px;background:#fff;box-shadow:inset 0 0 0 1px var(--c-line),0 4px 14px -8px rgba(0,0,0,.25)}
+.c-comp .txt{position:relative;min-height:34px;display:block}
+.c-comp .hold{position:absolute;left:0;top:0;color:var(--c-mute)}
+.c-comp .rowx{display:flex;justify-content:space-between;align-items:center;margin-top:6px}
+.c-comp .plus{width:24px;height:24px;border-radius:8px;box-shadow:inset 0 0 0 1px var(--c-line);display:grid;place-items:center;color:var(--c-mute);font-size:15px;line-height:1}
+.c-send{position:relative;width:28px;height:28px;border-radius:9px;background:var(--c-or);color:#fff;display:grid;place-items:center;font-weight:700;font-size:14px}
+.c-think{display:flex;align-items:center;gap:8px;font-family:ui-serif,Georgia,serif;font-size:13.5px}
+.c-think .spark{width:20px;height:20px}
+.sc.on .c-think .spark{animation:c-spin 2.4s linear infinite}
+.shim{background:linear-gradient(90deg,var(--c-mute) 30%,var(--c-ink) 50%,var(--c-mute) 70%);background-size:220% 100%;-webkit-background-clip:text;background-clip:text;color:transparent}
+.sc.on .shim{animation:c-shim 1.6s linear infinite}
+@keyframes c-spin{to{transform:rotate(360deg)}}
+@keyframes c-shim{from{background-position:120% 0}to{background-position:-100% 0}}
+.c-todo{list-style:none;display:grid;gap:5px;font-size:11.5px;color:var(--c-mute);padding-left:2px}
+.c-todo li{display:flex;gap:7px;align-items:flex-start}
+.c-todo li::before{content:"";flex:none;width:11px;height:6px;margin-top:3px;border-left:1.8px solid var(--c-or);border-bottom:1.8px solid var(--c-or);transform:rotate(-45deg)}
+.c-art{position:relative;display:flex;align-items:center;gap:9px;padding:9px 10px;border-radius:12px;background:#fff;box-shadow:inset 0 0 0 1px var(--c-line)}
+.c-art u{text-decoration:none;flex:none;width:30px;height:36px;border-radius:6px;background:var(--c-user);box-shadow:inset 0 0 0 1px var(--c-line);display:grid;place-items:center;font-family:var(--mono);font-size:8px;color:var(--c-mute)}
+.c-art b{display:block;font-weight:600;font-size:12.5px}
+.c-art small{color:var(--c-mute);font-size:10.5px}
+.c-arttop{flex:none;display:flex;align-items:center;gap:8px;padding:9px 10px;border-bottom:1px solid var(--c-line);font-weight:600;font-size:12px;background:var(--c-bg)}
+.c-arttop span{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.c-arttop i{font-style:normal;color:var(--c-mute)}
+.c-share{position:relative;font-style:normal;background:var(--c-ink);color:#fff;padding:5px 11px;border-radius:8px;font-size:11px}
+.c-artbody{flex:1;background:#fff;padding:12px;display:flex;flex-direction:column;gap:9px;min-height:0;font-family:var(--body);color:var(--ink)}
+.c-sheet{position:absolute;left:0;right:0;bottom:0;background:var(--c-bg);border-radius:16px 16px 0 0;padding:14px 12px 16px;box-shadow:0 -10px 30px -10px rgba(0,0,0,.35);display:grid;gap:9px}
+.c-sheet b{font-size:13px}
+.c-link{padding:8px 10px;border-radius:9px;background:#fff;box-shadow:inset 0 0 0 1px var(--c-line);font-family:var(--mono);font-size:10px;color:var(--c-mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.c-sheet .p-btn{background:var(--c-ink);border-radius:10px}
+.c-wa{position:absolute;inset:0;background:#efe9df;display:flex;flex-direction:column}
+.c-wa .p-chat{gap:8px}
+.bub.in{align-self:flex-start;background:#fff;border-radius:10px;border-top-left-radius:2px;box-shadow:0 1px 0 rgba(0,0,0,.08)}
+.bub.wab u{color:#0b63c9;overflow-wrap:anywhere}
+.demonote{margin-top:14px;font-size:.84rem;color:var(--ink-3);text-align:center}
 @media(min-width:560px){
   .tgrid{grid-template-columns:repeat(3,1fr)}
   .lr{grid-template-columns:minmax(0,1fr) auto;align-items:center}
 }
 @media(min-width:860px){
+  .demonote{text-align:left}
   .how{grid-template-columns:300px minmax(0,1fr);grid-template-areas:"phone text" "phone ctl";gap:18px 56px;align-items:start}
   .phone{margin:0;grid-area:phone}
   .howtext{grid-area:text}
@@ -319,7 +402,7 @@ footer p{color:var(--ink-2);font-size:.95rem;margin-top:10px;max-width:34em}
 @media(max-width:859px){
   .how{gap:16px}
   .howtext{order:-1}
-  .steps{grid-template-columns:repeat(5,1fr);gap:6px;border-top:0}
+  .steps{grid-template-columns:repeat(6,1fr);gap:5px;border-top:0}
   .steps li{border:0}
   .step{display:block;padding:11px 0 13px;text-align:center;opacity:1;border-radius:9px;background:var(--wash);overflow:hidden}
   .step .n{padding:0;font-size:13px;color:var(--ink-2)}
@@ -342,6 +425,8 @@ footer p{color:var(--ink-2);font-size:.95rem;margin-top:10px;max-width:34em}
   .entry .go,.wstep{animation:none}
   .sc.on .a,.sc.on .post{animation:none;opacity:1}
   .sc.on .pre,.sc.on .tap,.sc.on .p-pop{animation:none;opacity:0}
+  .sc.on .c-think .spark,.sc.on .shim{animation:none}
+  .shim{color:var(--c-mute);background:none}
   .how.playing .step[aria-current="step"] .bar{animation:none}
 }
 </style>
@@ -357,10 +442,24 @@ footer p{color:var(--ink-2);font-size:.95rem;margin-top:10px;max-width:34em}
   <header class="hero">
     <span class="k b">From the card you are holding</span>
     <h1>Get the AI prompt for your business.</h1>
-    <p class="lead">Tell us your trade and what eats your time. You get a prompt to paste into ChatGPT, Claude or Gemini, and the AI builds the tool for you.</p>
+    <p class="lead">Start with the one from the talk. Then build one for your own trade.</p>
+
+    <div class="tut" id="talk">
+      <span class="k">01 · The prompt from the talk</span>
+      <h2>Customer estimator</h2>
+      <p>Customers answer three questions, see a price range, and send you the enquiry on WhatsApp.</p>
+      <div class="raw" id="stageRaw">
+        <pre id="stagePre"></pre>
+        <div class="bar">
+          <button class="btn sm" type="button" data-copy="estimator"><span>Copy this prompt</span></button>
+          <button class="btn line sm" type="button" data-tool="estimator">Try the tool</button>
+        </div>
+      </div>
+      <button class="lnk" type="button" data-more="stageRaw">Read the full prompt</button>
+    </div>
 
     <button class="entry" id="entry" type="button">
-      <span class="k">Start here</span>
+      <span class="k">02 · Now one for you</span>
       <span class="et">Build my prompt</span>
       <span class="es">3 questions. About 30 seconds.</span>
       <span class="trail"><i>Your trade</i><i>Your size</i><i>Your problem</i><b>Your prompt</b></span>
@@ -380,83 +479,100 @@ footer p{color:var(--ink-2);font-size:.95rem;margin-top:10px;max-width:34em}
 <section id="howto">
   <div class="wrap wide">
     <span class="k b">How to use it</span>
-    <h2>Five steps. No software skills.</h2>
-    <p class="sub">Watch it once. Tap a number to see that step again.</p>
+    <h2>Six steps. No software skills.</h2>
+    <p class="sub">Watch it once with the prompt from the talk. Tap a number to see that step again.</p>
     <div class="how" id="how">
       <div class="phone" aria-hidden="true">
-        <!-- 1 copy -->
+        <!-- 1 copy, on this page -->
         <div class="sc on" data-s="0">
           <div class="p-bar">briklay.app</div>
           <div class="p-pad">
             <div class="mini a" style="--d:.1s">
-              <i>Context</i><span>I run a catering service in <mark class="ph">[your town]</mark>.</span>
-              <i>Task</i><span>Build me a simple tool that shows a price per plate.</span>
+              <i>Context</i><span>I run a home interiors studio in Kakinada.</span>
+              <i>Task</i><span>Build me a cost estimator my customers open on their phone.</span>
               <i>Ask first</i><span><b>Ask me questions before you build.</b></span>
-              <i>Rules</i><span><mark>Veg ₹220 per plate, non-veg ₹320.</mark></span>
-              <i>Format</i><span>One HTML file, made for a phone.</span>
+              <i>Rules</i><span><mark>2 BHK kitchen ₹1,60,000. Premium x1.35.</mark></span>
+              <i>Format</i><span>Send on WhatsApp to <mark class="ph">[your number]</mark>.</span>
             </div>
-            <div class="p-btn a" style="--d:.5s">Copy my prompt<span class="post" style="--d:2s">Copied</span><span class="tap" style="--d:1.6s"></span></div>
+            <div class="p-btn a" style="--d:.5s">Copy this prompt<span class="post" style="--d:2s">Copied</span><span class="tap" style="--d:1.6s"></span></div>
           </div>
         </div>
-        <!-- 2 paste and fix -->
-        <div class="sc" data-s="1">
-          <div class="p-bar">AI assistant</div>
-          <div class="p-chat"><div class="bub a" style="--d:.1s">Hi. What can I help you build?</div></div>
-          <div class="p-comp">
-            <span class="p-pop" style="--d:.4s">Paste</span>
-            <span class="a" style="--d:1.3s;display:block">I run a catering service in <span class="swap"><mark class="ph pre" style="--d:2.7s">[your town]</mark><mark class="ok post" style="--d:2.9s">Kakinada</mark></span><br>Build me a simple tool that works on a phone…</span>
-            <span class="p-send">↑<span class="tap" style="--d:4.2s"></span></span>
+        <!-- 2 paste into the assistant and fix the details -->
+        <div class="sc cl" data-s="1">
+          <div class="c-top"><i></i><span>Claude</span><i class="sq"></i></div>
+          <div class="c-home"><svg class="spark" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5v19M2.5 12h19M5.3 5.3l13.4 13.4M18.7 5.3 5.3 18.7M8.4 3.2l7.2 17.6M15.6 3.2 8.4 20.8"/></svg><span>How can I help you today?</span></div>
+          <div class="c-comp">
+            <span class="p-pop" style="--d:.5s">Paste</span>
+            <span class="txt"><span class="hold pre" style="--d:1.3s">Reply to Claude</span><span class="a" style="--d:1.5s;display:block">I run a home interiors studio in Kakinada. Build me a simple cost estimator… Send on WhatsApp to<br><span class="swap"><mark class="ph pre" style="--d:3s">[your number]</mark><mark class="ok post" style="--d:3.2s">98480 12345</mark></span></span></span>
+            <span class="rowx"><span class="plus">+</span><span class="c-send">↑<span class="tap" style="--d:4.5s"></span></span></span>
           </div>
         </div>
-        <!-- 3 answer -->
-        <div class="sc" data-s="2">
-          <div class="p-bar">AI assistant</div>
-          <div class="p-chat">
-            <div class="bub a" style="--d:.2s">What do you charge per plate for veg?</div>
-            <div class="bub me a" style="--d:1.2s">₹220</div>
-            <div class="bub a" style="--d:2.1s">And for non-veg?</div>
-            <div class="bub me a" style="--d:3s">₹320</div>
-            <div class="bub a" style="--d:3.9s">One service person for how many guests?</div>
-            <div class="bub me a" style="--d:4.8s">25</div>
+        <!-- 3 it asks, you answer -->
+        <div class="sc cl" data-s="2">
+          <div class="c-top"><i></i><span>Interiors estimator</span><i class="sq"></i></div>
+          <div class="c-chat">
+            <div class="c-me a" style="--d:.1s">I run a home interiors studio in Kakinada. Build me a simple cost estimator…</div>
+            <div class="c-ai a" style="--d:.9s">I have a few questions before I build.</div>
+            <div class="c-ai a" style="--d:1.8s"><b>1.</b> What name goes at the top?</div>
+            <div class="c-me a" style="--d:2.8s">Sample Interiors</div>
+            <div class="c-ai a" style="--d:3.7s"><b>2.</b> Is ₹1,60,000 right for a 2 BHK kitchen?</div>
+            <div class="c-me a" style="--d:4.7s">Yes</div>
+            <div class="c-ai a" style="--d:5.6s">Thank you. That is all I need.</div>
+          </div>
+          <div class="c-comp"><span class="txt" style="min-height:0"><span style="color:var(--c-mute)">Reply to Claude</span></span><span class="rowx"><span class="plus">+</span><span class="c-send">↑</span></span></div>
+        </div>
+        <!-- 4 it builds -->
+        <div class="sc cl" data-s="3">
+          <div class="c-top"><i></i><span>Interiors estimator</span><i class="sq"></i></div>
+          <div class="c-chat">
+            <div class="c-me a" style="--d:.1s">Yes</div>
+            <div class="c-think a" style="--d:.5s"><svg class="spark" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5v19M2.5 12h19M5.3 5.3l13.4 13.4M18.7 5.3 5.3 18.7M8.4 3.2l7.2 17.6M15.6 3.2 8.4 20.8"/></svg><span class="shim">Building your estimator…</span></div>
+            <ul class="c-todo">
+              <li class="a" style="--d:1.3s">Writing the calculator</li>
+              <li class="a" style="--d:2.2s">Adding the Send on WhatsApp button</li>
+              <li class="a" style="--d:3.1s">Checking: 2 BHK, Premium is ₹3,65,000 to ₹4,45,000</li>
+            </ul>
+            <div class="c-art a" style="--d:4.2s"><u>&lt;/&gt;</u><span><b>Interiors estimator</b><small>Your tool · Tap to open</small></span><span class="tap" style="--d:5.2s"></span></div>
           </div>
         </div>
-        <!-- 4 get the tool -->
-        <div class="sc" data-s="3">
-          <div class="p-bar">AI assistant</div>
-          <div class="p-chat">
-            <div class="bub a" style="--d:.2s">Your tool is ready. Open it and try a job you know.</div>
-            <div class="filec a" style="--d:1s"><u></u><span><b>catering-estimate.html</b><small>Tap to open</small></span><span class="tap" style="--d:2s"></span></div>
-            <div class="tcard a" style="--d:2.6s">
-              <h4>Your Catering, Kakinada</h4>
-              <div class="r"><span>Guests</span><b>200</b></div>
-              <div class="r"><span>Menu</span><b>Veg, regular</b></div>
-              <div class="tot"><span>Estimate</span><b>₹50,400</b></div>
+        <!-- 5 open it and check -->
+        <div class="sc cl" data-s="4">
+          <div class="c-arttop"><i>✕</i><span>Interiors estimator</span><em class="c-share">Share</em></div>
+          <div class="c-artbody">
+            <div class="tcard a" style="--d:.2s">
+              <h4>Sample Interiors, Kakinada</h4>
+              <div class="r"><span>Home</span><b>2 BHK</b></div>
+              <div class="r"><span>Need</span><b>Kitchen, wardrobes</b></div>
+              <div class="r"><span>Finish</span><b>Premium</b></div>
+              <div class="tot col"><span>Estimate</span><b>₹3,65,000 to ₹4,45,000</b></div>
+              <div class="p-btn g">Send on WhatsApp</div>
             </div>
+            <div class="fix a" style="--d:1.8s">Try a job you know. Wrong figure? Tell it, and it corrects it.</div>
           </div>
         </div>
-        <!-- 5 check and use -->
-        <div class="sc" data-s="4">
-          <div class="p-bar wa">WhatsApp</div>
-          <div class="p-chat">
-            <div class="tcard a" style="--d:.1s">
-              <h4>Your Catering, Kakinada</h4>
-              <div class="r"><span>Guests</span><b>200</b></div>
-              <div class="tot"><span>Estimate</span><b>₹50,400</b></div>
-              <div class="p-btn g">Send on WhatsApp<span class="tap" style="--d:1.3s"></span></div>
+        <!-- 6 share the link -->
+        <div class="sc cl" data-s="5">
+          <div class="c-arttop"><i>✕</i><span>Interiors estimator</span><em class="c-share">Share<span class="tap" style="--d:.6s"></span></em></div>
+          <div class="c-artbody"><div class="tcard"><h4>Sample Interiors, Kakinada</h4><div class="r"><span>Home</span><b>2 BHK</b></div><div class="tot col"><span>Estimate</span><b>₹3,65,000 to ₹4,45,000</b></div></div></div>
+          <div class="c-sheet a" style="--d:1.1s"><b>Share your tool</b><div class="c-link">claude.ai/…/interiors-estimator</div><div class="p-btn">Copy link<span class="post" style="--d:2.5s;background:var(--wa)">Link copied</span><span class="tap" style="--d:2.1s"></span></div></div>
+          <div class="c-wa a" style="--d:3.4s">
+            <div class="p-bar wa">WhatsApp</div>
+            <div class="p-chat">
+              <div class="bub wab a" style="--d:3.8s">Check your interiors cost here:<br><u>claude.ai/…/interiors-estimator</u><small>Delivered</small></div>
+              <div class="bub in a" style="--d:5s">Enquiry: 2 BHK, kitchen and wardrobes, Premium. Estimate ₹3,65,000 to ₹4,45,000.</div>
             </div>
-            <div class="bub wab a" style="--d:2s">Enquiry: 200 guests, veg, regular menu. Estimate ₹50,400.<small>Delivered</small></div>
-            <div class="fix a" style="--d:3.3s">Wrong figure? Tell the AI. It fixes it.</div>
           </div>
         </div>
       </div>
 
       <div class="howtext">
         <ol class="steps" id="steps">
-          <li><button class="step" type="button" data-step="0" aria-current="step"><span class="n">01</span><b>Copy your prompt</b><p>Build it above, then tap the blue Copy button.</p><span class="bar"></span></button></li>
-          <li><button class="step" type="button" data-step="1"><span class="n">02</span><b>Paste it, and fix the details</b><p>Open ChatGPT, Claude or Gemini. Press and hold, Paste. Change anything in [brackets] to yours.</p><span class="bar"></span></button></li>
-          <li><button class="step" type="button" data-step="2"><span class="n">03</span><b>Answer its questions</b><p>It asks about your rates, one at a time. Reply the way you would on WhatsApp.</p><span class="bar"></span></button></li>
-          <li><button class="step" type="button" data-step="3"><span class="n">04</span><b>Get your tool</b><p>It gives you one file or a link. Open it on your phone.</p><span class="bar"></span></button></li>
-          <li><button class="step" type="button" data-step="4"><span class="n">05</span><b>Check it, then use it</b><p>Try a job you already billed. If the answer is wrong, say so and it corrects it.</p><span class="bar"></span></button></li>
+          <li><button class="step" type="button" data-step="0" aria-current="step"><span class="n">01</span><b>Copy your prompt</b><p>The one from the talk, or the one you build for your trade.</p><span class="bar"></span></button></li>
+          <li><button class="step" type="button" data-step="1"><span class="n">02</span><b>Paste it, and fix the details</b><p>Open Claude, ChatGPT or Gemini. Press and hold, Paste. Change anything in [brackets] to yours.</p><span class="bar"></span></button></li>
+          <li><button class="step" type="button" data-step="2"><span class="n">03</span><b>Answer its questions</b><p>It says it has a few questions before it builds. Reply the way you would on WhatsApp.</p><span class="bar"></span></button></li>
+          <li><button class="step" type="button" data-step="3"><span class="n">04</span><b>Wait while it builds</b><p>About a minute. It writes the tool and checks its own maths.</p><span class="bar"></span></button></li>
+          <li><button class="step" type="button" data-step="4"><span class="n">05</span><b>Open it and check</b><p>Try a job you already billed. If the figure is wrong, say so and it corrects it.</p><span class="bar"></span></button></li>
+          <li><button class="step" type="button" data-step="5"><span class="n">06</span><b>Share the link</b><p>Tap Share to get a link and send it on WhatsApp. If you chose Excel, you get a file to download instead.</p><span class="bar"></span></button></li>
         </ol>
         <div class="cap" id="cap"><b></b><p></p></div>
       </div>
@@ -465,6 +581,7 @@ footer p{color:var(--ink-2);font-size:.95rem;margin-top:10px;max-width:34em}
         <button class="btn blue sm" type="button" data-wiz="1">Build my prompt</button>
       </div>
     </div>
+    <p class="demonote">The chat screens are drawn to look like Claude. ChatGPT and Gemini work the same way.</p>
   </div>
 </section>
 
@@ -485,8 +602,10 @@ footer p{color:var(--ink-2);font-size:.95rem;margin-top:10px;max-width:34em}
     <h2><span data-count="tools"></span> prompts for <span data-count="trades"></span> kinds of business.</h2>
     <p class="sub">Find your trade, open it, and copy any prompt. Every one asks the AI to question you first and to confirm your rates.</p>
     <div class="f lfind"><label for="lq">Search by trade or problem</label><input id="lq" type="search" autocomplete="off" placeholder="gold, cement, clinic, wages…"></div>
+    <div class="lfmt"><div class="seg" role="group" aria-label="Copy the prompts as"><button type="button" data-lfmt="phone" aria-pressed="true">Phone tool</button><button type="button" data-lfmt="sheet" aria-pressed="false">Excel or Google Sheet</button></div></div>
     <p class="lcount" id="lcount" role="status"></p>
     <div id="lib"></div>
+    <div id="libBk"></div>
   </div>
 </section>
 
@@ -497,13 +616,18 @@ footer p{color:var(--ink-2);font-size:.95rem;margin-top:10px;max-width:34em}
     <h2>Where this works, and where it stops.</h2>
     <p class="sub">AI is good at tools where numbers go in and an answer comes out. It is weak where data must be saved and shared by many people every day.</p>
     <div class="split">
+      <div><h3>Ask for a phone tool</h3><ul><li>Opens from a link, like an app</li><li>Customers and staff can use it</li><li>Big buttons, nothing to break</li></ul></div>
+      <div><h3>Ask for Excel or a Google Sheet</h3><ul><li>You see and change every formula</li><li>Right for lists and ledgers that grow</li><li>Works in the Excel you already use</li></ul></div>
+    </div>
+    <p class="note" style="margin-top:14px">Every prompt here can be copied either way. You choose on the last step.</p>
+    <div class="split" style="margin-top:30px">
       <div><h3>Build yourself</h3><ul><li>Price estimators</li><li>Quote makers</li><li>Daily calculators</li><li>Checklists and reminders</li></ul></div>
       <div class="buy"><h3>Keep buying</h3><ul><li>Accounts and GST billing</li><li>Inventory</li><li>Tools many staff share</li></ul></div>
     </div>
     <ol class="tips">
       <li><span class="n">A</span><span><b>The rates in these prompts are samples.</b> <span>Every prompt tells the AI to confirm each number with you. Give it your real ones.</span></span></li>
       <li><span class="n">B</span><span><b>Only share numbers you are happy to make public.</b> <span>Your competitors can open the same link your customers do.</span></span></li>
-      <li><span class="n">C</span><span><b>To put the tool on your phone,</b> <span>ask the AI: "How do I share this as a link?" Most assistants can publish it for you.</span></span></li>
+      <li><span class="n">C</span><span><b>Cannot find the Share button?</b> <span>Ask the AI: "How do I share this as a link?" It will tell you where it is.</span></span></li>
     </ol>
   </div>
 </section>
@@ -928,20 +1052,26 @@ function rowsFor(tool, bizSentence, o){
   var rules = rulesText ? { t:rulesText.replace(/[.。]+$/, ''), ph:false } : ph('your rates, formula and GST');
   var calc = !has(tool, 'x');
   var job = clean(o.job);
-  var fmt = [['Give me ONE complete HTML file that opens in any browser. Nothing to install, no login, no database.'],
-             ['Made for a phone: big buttons, large text, amounts in Indian format like ₹1,25,000.']];
+  var sheet = o.fmt === 'sheet';
+  if (sheet) cust = false;                       // a spreadsheet is used by the owner, never opened by the public
+  var fmt = sheet
+    ? [['Give me an Excel file (.xlsx) that I can download and that also opens in Google Sheets. If you cannot make a file, give me the layout and every formula so I can type it into Google Sheets myself.'],
+       ['One tab called Entry, with the cells I type in coloured yellow. One tab called Rates, with all my rates and rules in one place, so I can change them later without touching a formula.'],
+       ['Use formulas for every result, never typed-in numbers. Amounts in Indian format like ₹1,25,000.']]
+    : [['Give me ONE complete HTML file that opens in any browser. Nothing to install, no login, no database.'],
+       ['Made for a phone: big buttons, large text, amounts in Indian format like ₹1,25,000.']];
   if (has(tool, 'r')) fmt.push(['Show a price range, not one exact figure, with the line "Final quote after we talk."']);
   var wa = null;
-  if (has(tool, 'w')) {
+  if (has(tool, 'w') && !sheet) {
     if (cust) { wa = val(o.wanum, 'your WhatsApp number'); fmt.push(['Add a "Send on WhatsApp" button that opens WhatsApp to ', wa, ' with the ' + who[1] + '\'s details and the answer already typed.']); }
     else fmt.push(['Add a "Send on WhatsApp" button that opens WhatsApp with the result already typed, so I can choose who to send it to.']);
   }
-  if (has(tool, 'm')) fmt.push(['Save what I enter on this phone, so it is still there tomorrow.']);
+  if (has(tool, 'm')) fmt.push([sheet ? 'Keep one row for each entry, so the list grows as I add to it, with totals at the top.' : 'Save what I enter on this phone, so it is still there tomorrow.']);
   if (o.te) fmt.push(['Labels in Telugu and English.']);
   fmt.push(['Put my business name at the top.']);
   var rows = [
     ['Context', [['I run a ', biz, ' in ', town, '.']]],
-    ['Task', [['Build me a simple tool that works on a phone. ' + (own ? 'This is what I need it to do: ' : 'It should '), task, '. ' + (cust ? 'My ' + who[0] + ' will open it from a link I share on WhatsApp.' : 'Only my staff and I will use it, on our phones.')]]],
+    ['Task', [[(sheet ? 'Build me a simple spreadsheet. ' : 'Build me a simple tool that works on a phone. ') + (own ? 'This is what I need it to do: ' : 'It should '), task, '. ' + (cust ? 'My ' + who[0] + ' will open it from a link I share on WhatsApp.' : sheet ? 'My staff and I will use it ourselves.' : 'Only my staff and I will use it, on our phones.')]]],
     ['Ask first', [[ASK_FIRST]], 'key'],
     ['Inputs', [[(cust ? 'The ' + who[1] + ' will enter: ' : 'I will enter: '), inputs, '.']]],
     ['Rules', [[(calc ? 'Calculate it like this: ' : 'Make it work like this: '), rules, '. ' + (calc ? 'These are my starting numbers. Confirm each one with me before you build.' : 'Confirm the details with me before you build.')]]],
@@ -968,10 +1098,10 @@ function htmlOf(p){
 }
 function bizOf(tradeId, other){ return tradeId === 'other' ? clean(other) : (TRADES[tradeId] ? TRADES[tradeId].s : ''); }
 /* the prompt for a library row: no personal details filled in */
-function libraryPrompt(tool, tradeId){ return plainOf(rowsFor(tool, bizOf(tradeId, ''), {})); }
+function libraryPrompt(tool, tradeId){ return plainOf(rowsFor(tool, bizOf(tradeId, ''), { fmt:W.lfmt })); }
 
 /* ------------------------------------------------------------------ wizard state */
-var W = { step:1, trade:'', other:'', size:0, tool:'', town:'', wanum:'', te:false, edits:{}, more:false };
+var W = { step:1, trade:'', other:'', size:0, tool:'', town:'', wanum:'', te:false, edits:{}, more:false, lfmt:'phone' };
 try { var sv = JSON.parse(load('bk-aitools-2') || 'null');
   if (sv && typeof sv === 'object') ['trade','other','size','tool','town','wanum','te','edits'].forEach(function(k){ if (k in sv && typeof sv[k] === typeof W[k]) W[k] = sv[k]; });
   if (W.trade && W.trade !== 'other' && !TRADES[W.trade]) { W.trade = ''; W.tool = ''; }
@@ -983,7 +1113,7 @@ function edit(){ if (!W.edits[W.tool]) W.edits[W.tool] = {}; return W.edits[W.to
 function currentPrompt(){
   var tool = TOOLS_BY_ID[W.tool], e = W.edits[W.tool] || {};
   /* a tool that every business shares still speaks as this owner's trade */
-  return rowsFor(tool, bizOf(W.trade, W.other), { town:W.town, wanum:W.wanum, te:W.te, rules:e.rules, job:e.job, task:e.task, inputs:e.inputs });
+  return rowsFor(tool, bizOf(W.trade, W.other), { town:W.town, wanum:W.wanum, te:W.te, rules:e.rules, job:e.job, task:e.task, inputs:e.inputs, fmt:e.fmt });
 }
 function syncResume(){
   var ok = !!(W.tool && TOOLS_BY_ID[W.tool] && W.trade);
@@ -1044,6 +1174,7 @@ function renderWizard(){
     var tool = TOOLS_BY_ID[W.tool], e = W.edits[W.tool] || {}, cust = tool.w === 'c', own = tool.id === 'own';
     html = '<div class="wstep"><span class="ready">Your prompt is ready</span><h2 class="wq" style="margin-top:12px">' + esc(own ? 'Your own tool' : tool.n) + '</h2>' +
       '<p class="wsub">' + (own ? 'Fill the three boxes below and the prompt writes itself.' : 'For a ' + esc(bizOf(W.trade, W.other) || 'business') + '. Copy it as it is, or make it yours first.') + '</p>' +
+      '<div class="fmt"><span class="lab" id="fmtLab">Build it as</span><div class="seg" role="group" aria-labelledby="fmtLab"><button type="button" data-fmt="phone" aria-pressed="' + (e.fmt !== 'sheet') + '">Phone tool</button><button type="button" data-fmt="sheet" aria-pressed="' + (e.fmt === 'sheet') + '">Excel or Google Sheet' + (has(tool, 'm') ? '<i>Suits a list like this</i>' : '') + '</button></div><p class="note" id="fmtNote"></p></div>' +
       '<details class="yours" id="yours"' + (own ? ' open' : '') + '><summary><span>Make it yours<small>Your town, your rates. Optional.</small></span></summary><div class="in">' +
         (own ? '<div class="f"><label for="e-task">What do you need the tool to do?</label><textarea id="e-task" rows="2" data-edit="task" placeholder="For example: work out the price of a borewell by depth">' + esc(e.task || '') + '</textarea></div>' +
                '<div class="f"><label for="e-inputs">What gets typed in?</label><textarea id="e-inputs" rows="2" data-edit="inputs" placeholder="Three to five things">' + esc(e.inputs || '') + '</textarea></div>' : '') +
@@ -1056,13 +1187,27 @@ function renderWizard(){
       '<dl class="prompt" id="wizPrompt" style="margin-top:18px"></dl>' +
       '<p class="note">Copy with the blue button below. Or copy and open an assistant in one tap:</p>' +
       '<div class="paste" style="margin-top:10px"><a class="btn line sm" data-open="chatgpt" target="_blank" rel="noopener" href="#">ChatGPT</a><a class="btn line sm" data-open="claude" target="_blank" rel="noopener" href="#">Claude</a><a class="btn line sm" data-open="gemini" target="_blank" rel="noopener" href="#">Gemini</a></div>' +
-      '<div class="after"><button class="btn line full" type="button" id="wizHow">Show me how to use it</button><button class="btn line full" type="button" id="wizAnother">Pick another problem</button></div></div>';
+      '<div class="after"><button class="btn line full" type="button" id="wizHow">Show me how to use it</button><button class="btn line full" type="button" id="wizAnother">Pick another problem</button></div>' + briklaySlot(W.trade) + '</div>';
   }
   m.innerHTML = html;
   $('wizBody').scrollTop = 0;
   if (s === 4) refreshPrompt();
 }
+/* Briklay's own slot. It appears under every prompt, whatever the trade: builders get it as theirs,
+   everyone else gets it as something to pass on. */
+function briklaySlot(tradeId){
+  var mine = tradeId === 'builder' || tradeId === 'contractor';
+  var share = 'https://wa.me/?text=' + encodeURIComponent('Briklay: an AI site engineer and accountant that works inside WhatsApp. Made by a builder in Kakinada, for builders. https://briklay.app');
+  return '<aside class="bk"><span class="k">' + (mine ? 'One more thing, since you build' : 'One more thing') + '</span>' +
+    '<h3>' + (mine ? 'You build. So this one is already built for you.' : 'Builders do not need a prompt. They have Briklay.') + '</h3>' +
+    '<p><b>An AI site engineer and accountant, inside WhatsApp.</b> Supervisors text the way they always do. Briklay writes down the work, the materials and every rupee.</p>' +
+    '<div class="bkrow"><a class="btn" href="https://briklay.app/" target="_top">See Briklay</a><a class="btn ghost" href="' + share + '" target="_blank" rel="noopener">' + (mine ? 'Send it to my partner' : 'Send it to a builder you know') + '</a></div></aside>';
+}
 function refreshPrompt(){
+  var tool = TOOLS_BY_ID[W.tool], sheet = (W.edits[W.tool] || {}).fmt === 'sheet', note = $('fmtNote');
+  if (note) note.textContent = sheet
+    ? 'A spreadsheet with your rates on one tab and formulas you can see and change.' + (tool.w === 'c' ? ' Your customers cannot open a sheet, so you would use it yourself.' : ' Good if you already work in Excel.')
+    : 'A small app that opens from a link. ' + (tool.w === 'c' ? 'Your customers open it on their phone.' : 'You and your staff open it on your phones.');
   var p = currentPrompt(), text = plainOf(p), q = encodeURIComponent(text);
   $('wizPrompt').innerHTML = htmlOf(p);
   var urls = { chatgpt:'https://chatgpt.com/?q=' + q, claude:'https://claude.ai/new?q=' + q, gemini:'https://gemini.google.com/app' };
@@ -1081,7 +1226,7 @@ function closeWizard(){ $('wiz').classList.remove('on'); lock(false); if (wizFoc
 function wizGo(step){ W.step = step; save(); renderWizard(); }
 
 /* ------------------------------------------------------------------ how to use: the animated phone */
-var HOW = { i:0, n:5, dur:[3600, 5600, 6200, 4800, 5400], timer:null, playing:false, seen:false,
+var HOW = { i:0, n:6, dur:[3600, 5800, 7000, 6400, 4600, 6800], timer:null, playing:false, seen:false,
             reduced: !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) };
 function howShow(i){
   HOW.i = i;
@@ -1388,6 +1533,8 @@ $('toolList').innerHTML = DEMOS.map(function(t, i){
 }).join('');
 $('askLink').href = 'https://wa.me/' + OWNER_WA + '?text=' + encodeURIComponent('Hi Chandu, I am trying the AI business tools page and I am stuck on my prompt.');
 renderLibrary('');
+$('stagePre').textContent = PROMPTS.estimator;
+$('libBk').innerHTML = briklaySlot('');
 syncResume();
 howShow(0);
 if (HOW.reduced) $('howPlay').hidden = true;
@@ -1449,6 +1596,8 @@ document.addEventListener('click', function(e){
   if (d.size) { W.size = +d.size; W.more = false; wizGo(3); return; }
   if (b.id === 'moreProblems') { W.more = true; var y = $('wizBody').scrollTop; renderWizard(); $('wizBody').scrollTop = y; return; }
   if (d.toolPick) { W.tool = d.toolPick; wizGo(4); return; }
+  if (d.fmt) { edit().fmt = d.fmt; save(); all('#wizMount [data-fmt]').forEach(function(x){ x.setAttribute('aria-pressed', String(x.dataset.fmt === d.fmt)); }); refreshPrompt(); return; }
+  if (d.lfmt) { W.lfmt = d.lfmt; all('[data-lfmt]').forEach(function(x){ x.setAttribute('aria-pressed', String(x.dataset.lfmt === d.lfmt)); }); toast(d.lfmt === 'sheet' ? 'Copy now gives the Excel version.' : 'Copy now gives the phone tool version.'); return; }
   if (b.id === 'wizCopy') { copyFrom(b, plainOf(currentPrompt())); return; }
   if (d.open) { copy(plainOf(currentPrompt())).then(function(ok){ if (ok) toast('Prompt copied. Paste it if the box is empty.'); }); return; }
   if (b.id === 'wizHow') { closeWizard(); setTimeout(function(){ go('howto'); }, 60); return; }
@@ -1460,7 +1609,7 @@ document.addEventListener('click', function(e){
 
   /* live tools */
   if (d.copy) { copyFrom(b, PROMPTS[d.copy]); return; }
-  if (d.more) { var r = $(d.more), on = r.classList.toggle('open'); b.textContent = on ? 'Show less' : 'Show all'; return; }
+  if (d.more) { var r = $(d.more), on = r.classList.toggle('open'); b.textContent = b.classList.contains('lnk') ? (on ? 'Show less' : 'Read the full prompt') : (on ? 'Show less' : 'Show all'); return; }
   if (d.tool) { openTool(d.tool); return; }
   if (b.id === 'sheetClose') { closeTool(); return; }
   if (b.id === 'toolCopy') { copyFrom(b, PROMPTS[current]); return; }

@@ -8,9 +8,10 @@
  * the app. It needs nothing from the app: no session, no Supabase, no router state.
  * Public: rendered before every auth gate (see App.tsx), like /privacy and /demo.
  *
- * What is on the page: a three-question prompt builder (trade, business size, problem), an
- * animated "how to use it" walkthrough, four working sample tools with their prompts, and
- * the full prompt library by trade. All content lives in the .html: the library is the
+ * What is on the page: the estimator prompt from the talk, a three-question prompt builder
+ * (trade, business size, problem) whose result can be copied as a phone tool or as an
+ * Excel / Google Sheet, an animated "how to use it" walkthrough, four working sample tools,
+ * and the full prompt library by trade. All content lives in the .html: the library is the
  * GROUPS / COMMON data at the top of its script, and the demo WhatsApp number is OWNER_WA.
  */
 import { useEffect } from 'react';
