@@ -388,6 +388,11 @@ footer p{color:var(--ink-2);font-size:.95rem;margin-top:10px;max-width:34em}
 .bub.in{align-self:flex-start;background:#fff;border-radius:10px;border-top-left-radius:2px;box-shadow:0 1px 0 rgba(0,0,0,.08)}
 .bub.wab u{color:#0b63c9;overflow-wrap:anywhere}
 .demonote{margin-top:14px;font-size:.84rem;color:var(--ink-3);text-align:center}
+.hex{white-space:nowrap}
+.hex i{display:inline-block;width:.78em;height:.78em;border-radius:50%;margin-right:.28em;vertical-align:-.05em;box-shadow:inset 0 0 0 1px rgba(16,21,31,.25)}
+.sw{display:flex;flex-wrap:wrap;gap:12px;padding:4px 2px}
+.swb{width:40px;height:40px;border-radius:50%;background:var(--c);box-shadow:inset 0 0 0 3px #fff,0 0 0 1px var(--rule);transition:box-shadow .12s}
+.swb[aria-pressed="true"]{box-shadow:inset 0 0 0 3px #fff,0 0 0 3px var(--ink)}
 @media(min-width:560px){
   .tgrid{grid-template-columns:repeat(3,1fr)}
   .lr{grid-template-columns:minmax(0,1fr) auto;align-items:center}
@@ -492,7 +497,7 @@ footer p{color:var(--ink-2);font-size:.95rem;margin-top:10px;max-width:34em}
               <i>Task</i><span>Build me a cost estimator my customers open on their phone.</span>
               <i>Ask first</i><span><b>Ask me questions before you build.</b></span>
               <i>Rules</i><span><mark>2 BHK kitchen ₹1,60,000. Premium x1.35.</mark></span>
-              <i>Format</i><span>Send on WhatsApp to <mark class="ph">[your number]</mark>.</span>
+              <i>Design</i><span>Walnut and brass. The total counts up.</span>
             </div>
             <div class="p-btn a" style="--d:.5s">Copy this prompt<span class="post" style="--d:2s">Copied</span><span class="tap" style="--d:1.6s"></span></div>
           </div>
@@ -600,7 +605,7 @@ footer p{color:var(--ink-2);font-size:.95rem;margin-top:10px;max-width:34em}
   <div class="wrap">
     <span class="k b">The full list</span>
     <h2><span data-count="tools"></span> prompts for <span data-count="trades"></span> kinds of business.</h2>
-    <p class="sub">Find your trade, open it, and copy any prompt. Every one asks the AI to question you first and to confirm your rates.</p>
+    <p class="sub">Find your trade, open it, and copy any prompt. Each one spells out the rules, the colours, the layout and the motion, and tells the AI to question you first.</p>
     <div class="f lfind"><label for="lq">Search by trade or problem</label><input id="lq" type="search" autocomplete="off" placeholder="gold, cement, clinic, wages…"></div>
     <div class="lfmt"><div class="seg" role="group" aria-label="Copy the prompts as"><button type="button" data-lfmt="phone" aria-pressed="true">Phone tool</button><button type="button" data-lfmt="sheet" aria-pressed="false">Excel or Google Sheet</button></div></div>
     <p class="lcount" id="lcount" role="status"></p>
@@ -856,7 +861,7 @@ var GROUPS = [
 { g:"Functions and food", trades:[
   { id:"hall", n:"Function hall", s:"function hall", tools:[
     { n:"Booking quote", p:"Every caller asks for the hall rent, and then the real total.", t:"give a customer the total cost of booking the hall", i:"date, muhurtham date yes or no, event type, AC or non-AC, full day or half day, number of rooms, hours of generator", r:"Rent for a full day: non-AC ₹60,000, AC ₹1,10,000. Half day is 60%. Muhurtham dates add 25%. Rooms ₹2,000 each. Generator ₹1,500 per hour. Cleaning ₹5,000. GST at my rate. Advance 30%.", w:"c", z:[1,2,3], f:"rw" },
-    { n:"Date diary", p:"Which date is on hold, for whom, with what advance: it is all in one register.", t:"keep enquiries, holds and confirmed dates in one place", i:"date, customer name and number, event, advance paid, status (enquiry, hold, confirmed)", r:"A hold without advance lapses after 3 days. Show the month as a calendar with three colours. Remind me on day 2 of every hold, with a message for the customer.", w:"s", z:[1,2,3], f:"xwm" },
+    { n:"Date diary", p:"Which date is on hold, for whom, with what advance: it is all in one register.", t:"keep enquiries, holds and confirmed dates in one place", i:"date, customer name and number, event, advance paid, status (enquiry, hold, confirmed)", r:"One booking per date. A hold without advance lapses 3 days after it was made and the date becomes free again. A hold becomes confirmed when the advance is paid. Show the month as a calendar: enquiry grey, hold amber, confirmed green. On day 2 of every hold, show it at the top with a ready message for the customer.", w:"s", z:[1,2,3], f:"xwm" },
     { n:"After-event final bill", p:"After the event, units, extra hours and breakages turn into a fight.", t:"make the final bill after an event", i:"meter reading before and after, extra hours, extra rooms, damages, advance paid, rent", r:"Power = units x ₹12. Extra hour ₹8,000. Extra room ₹2,000 each. Final = rent + power + extra hours + rooms + damages - advance. Show every line.", w:"s", z:[1,2,3], f:"w" }
   ]},
   { id:"catering", n:"Catering", s:"catering service", tools:[
@@ -974,7 +979,8 @@ var COMMON = [
 
 /* ------------------------------------------------------------------ config */
 var OWNER_WA = '918330972705';          // where "Send on WhatsApp" in the demo estimator and "Stuck?" go
-var ASK_FIRST = 'Before you build anything, ask me questions about my business, one at a time, until you understand how I price and work. Then build.';
+var ASK_FIRST = 'Before you build anything, ask me questions about my business, one at a time and in simple words. Start with my business name and phone number. Then read my rates back to me and ask which ones to change. Ask no more than six questions, then build.';
+var ASK_FIRST_LIST = 'Before you build anything, ask me questions about my business, one at a time and in simple words. Start with my business name and phone number. Then read my rules back to me and ask what to change. Ask no more than six questions, then build.';
 var SIZES = [
   { id:1, t:'Under ₹5 lakh a month', s:'Mostly you, maybe one helper', h:'Quoting eats your evenings. People ask the price and vanish.' },
   { id:2, t:'₹5 to 20 lakh a month', s:'A few staff', h:'Staff quote differently from you. Wages, advances and the day\'s cash live in a notebook.' },
@@ -1024,8 +1030,9 @@ function lock(on){ document.body.style.overflow = on ? 'hidden' : ''; }
 
 /* ------------------------------------------------------------------ index the library */
 var TRADES = {}, TOOLS_BY_ID = {}, TOTAL = 0;
-GROUPS.forEach(function(g){ g.trades.forEach(function(tr){
-  TRADES[tr.id] = tr;
+var GROUP_THEME = ['health', 'build', 'auto', 'shop', 'events', 'pro', 'farm'], TRADE_THEME = { jewellery:'jewel', architect:'interior' };
+GROUPS.forEach(function(g, gi){ g.trades.forEach(function(tr){
+  TRADES[tr.id] = tr; tr.th = TRADE_THEME[tr.id] || GROUP_THEME[gi] || 'plain';
   tr.tools.forEach(function(t, i){ t.id = tr.id + '.' + i; t.trade = tr.id; TOOLS_BY_ID[t.id] = t; TOTAL++; });
 }); });
 COMMON.forEach(function(t, i){ t.id = 'all.' + i; t.trade = 'all'; TOOLS_BY_ID[t.id] = t; TOTAL++; });
@@ -1035,14 +1042,122 @@ function has(t, flag){ return (t.f || '').indexOf(flag) > -1; }
 var WHO = { clinic:['patients','patient'], dental:['patients','patient'], hospital:['patients','patient'], education:['parents','parent'],
             insurance:['clients','client'], realestate:['buyers','buyer'], aqua:['farmers','farmer'] };
 
+/* The look each kind of business gets. Real hex values, a named texture and a font, so the AI has
+   nothing to guess and the tool does not come out looking like every other AI page. */
+var SANS = 'The phone\'s own font (system-ui) for everything, headings in bold.';
+var SERIF = 'My business name and the main figures in a serif (Georgia, or the phone\'s own serif). Everything else in the phone\'s own font (system-ui).';
+var THEMES = {
+  health:  { name:'clean clinic', bg:'#F4FAF9', line:'#D5E7E4', ink:'#0F2A2E', mute:'#5B7377', main:'#0F766E', accent:'#0B5C56', tint:'#DDF1EE', font:SANS,
+             texture:'no pattern at all. Plenty of white space, and one thin line in the main colour under the header, like a clean prescription pad.' },
+  build:   { name:'site drawing', bg:'#F3F4F1', line:'#D9DCD3', ink:'#0B1F3A', mute:'#5C6675', main:'#0B1F3A', accent:'#FFC42E', tint:'#FFF3CC', font:SANS,
+             texture:'a very faint graph-paper grid on the page background (lines #E4E7DF, 24px apart), like a drawing sheet, and a 4px strip of the accent yellow across the very top.' },
+  interior:{ name:'walnut and brass', bg:'#FAF7F2', line:'#E6DDD0', ink:'#2B211C', mute:'#7A6A5E', main:'#3B2F2A', accent:'#B8742A', tint:'#F3E7D6', font:SERIF,
+             texture:'a faint linen weave on the page background (two crossing sets of 1px lines, #EBE2D4, barely visible), and a thin accent-coloured line under the header.' },
+  auto:    { name:'showroom floor', bg:'#F5F6F8', line:'#DCE0E6', ink:'#12151A', mute:'#5E6672', main:'#C8102E', accent:'#12151A', tint:'#FBE3E7', font:SANS,
+             texture:'a near-black header band (#12151A) with very faint diagonal stripes in it. No pattern anywhere else.' },
+  shop:    { name:'shop counter', bg:'#FFFBF3', line:'#EADFCB', ink:'#1C2A1E', mute:'#6B6F5E', main:'#14532D', accent:'#D97706', tint:'#FDEFD3', font:SANS,
+             texture:'a dotted line between sections, like the tear line on a bill book. No other pattern.' },
+  jewel:   { name:'jewellery bill', bg:'#FBF6EC', line:'#E8DCC3', ink:'#2A1416', mute:'#7B6A5B', main:'#6B1D24', accent:'#B8892B', tint:'#F4E7C8', font:SERIF,
+             texture:'a thin double border in the accent gold around the result card, like a jewellery bill. No other pattern.' },
+  events:  { name:'function day', bg:'#FFF8EE', line:'#F0E0C8', ink:'#3A1A12', mute:'#7C6657', main:'#B91C1C', accent:'#D97706', tint:'#FDEBCB', font:SERIF,
+             texture:'a row of small half-circles in the accent colour hanging under the header, like a toran. No other pattern.' },
+  pro:     { name:'office ledger', bg:'#F8F7F3', line:'#E0DDD3', ink:'#17263A', mute:'#5C6470', main:'#1E3A5F', accent:'#B45309', tint:'#E6ECF4', font:SERIF,
+             texture:'faint horizontal ledger lines on the page background (#ECEAE2, 32px apart). No other pattern.' },
+  farm:    { name:'field and pond', bg:'#F5F8EF', line:'#DCE5CE', ink:'#1F2A16', mute:'#5F6B52', main:'#3F7D20', accent:'#0E7490', tint:'#E3F0D6', font:SANS,
+             texture:'one soft wave line in the accent blue under the header. No other pattern.' },
+  plain:   { name:'clean and plain', bg:'#F7F8FA', line:'#E2E5EA', ink:'#111827', mute:'#667085', main:'#1D4ED8', accent:'#111827', tint:'#E5ECFD', font:SANS,
+             texture:'no pattern. One thin line in the main colour under the header.' }
+};
+var COLOURS = [['Suggested', ''], ['Blue', '#1D4ED8'], ['Green', '#14532D'], ['Teal', '#0F766E'], ['Maroon', '#6B1D24'], ['Red', '#B91C1C'], ['Black', '#111827']];
+function themeOf(tradeId){ return THEMES[(TRADES[tradeId] && TRADES[tradeId].th) || 'plain']; }
+
 /* ------------------------------------------------------------------ prompt builder
    One function makes the prompt as labelled rows. The preview marks the parts that belong to the
    owner; the plain text is the same rows without the marks. */
 function ph(text){ return { t:'[' + text + ']', ph:true }; }
 function val(v, placeholder){ v = clean(v); return v ? { t:v, ph:false } : ph(placeholder); }
+
+/* Design, Screen, Format and After: the part that tells the AI exactly what to build. */
+function specRows(tool, th, o){
+  var sheet = o.fmt === 'sheet', cust = !!o.cust, who = o.who || ['customers', 'customer'];
+  var calc = !has(tool, 'x'), list = has(tool, 'm'), main = o.colour || th.main;
+  var D = [], S = [], F = [], A = [];
+  if (!sheet) {
+    D.push(['Style: ' + th.name + '. Page background ' + th.bg + '. Cards are white with a 1px ' + th.line + ' border and 14px rounded corners. Text ' + th.ink + ', small labels ' + th.mute + '.']);
+    D.push(['Main colour ' + main + ' for the header band, the main button and the selected option, each with white text. Accent ' + th.accent + ' only for ' + (calc ? 'the result figures and small highlights.' : 'small highlights.')]);
+    D.push(['Texture: ' + th.texture]);
+    D.push(['Type: ' + th.font + ' Body text 17px, labels 14px.' + (calc ? ' The result in bold with lined-up (tabular) digits, as large as fits on one line of a 360px-wide phone, and never above 34px.' : ' Headings 20px bold.')]);
+    D.push([(calc
+      ? 'Motion: when the result changes, count up to the new figures in 400ms. A tapped option fills with the main colour in 150ms and shrinks to 97% while pressed. The first time a result appears, it fades in over 250ms.'
+      : 'Motion: a new row or message slides in from below over 250ms. When a status changes, its chip changes colour over 200ms. Buttons shrink to 97% while pressed.') + ' Switch all motion off if the phone asks for reduced motion.']);
+
+    S.push(['One page that scrolls, in one column at most 480px wide with 16px margins, so it fits any phone.']);
+    S.push(['At the top: my business name in bold' + (cust ? ', and one line telling my ' + who[0] + ' what this is.' : '.')]);
+    if (calc) {
+      S.push(['Then one card for each thing ' + (cust ? 'the ' + who[1] + ' enters' : 'I enter') + ', in the order listed above. Choices are big tap buttons at least 48px tall, never a dropdown. If anything is typed as a number, open the number keypad and add minus and plus buttons. Start with nothing chosen.']);
+      if (cust && has(tool, 'w')) S.push(['The last card is one optional box for the ' + who[1] + '\'s name.']);
+      S.push(['A result bar stays fixed to the bottom of the screen and everything else scrolls above it. It holds ' + (has(tool, 'r') ? 'the price range' : 'the result') + (has(tool, 'w') ? ' and the Send on WhatsApp button, which stays dimmed until there is a result.' : '.') + ' Before there is a result, it says in a few words what is still missing.']);
+      S.push(['At the end of the page: a link "See how this was worked out" that opens the working line by line, then a small "Start again" link.']);
+    } else if (list) {
+      S.push(['First the list' + (/calendar/i.test(tool.r) ? ', shown as the calendar my rules describe, with the entries for the chosen day below it' : ', most urgent on top') + '. A search box sits above it.']);
+      S.push(['Each entry shows its main detail in bold and a coloured chip for its status: red #DC2626 for anything late or overdue, amber #D97706 for anything waiting or due soon, green #16A34A for anything done or confirmed, grey #6B7280 for the rest.']);
+      S.push(['An Add button fixed at the bottom right opens a short form. Tapping an entry lets me change it. Deleting asks me to confirm first.']);
+    } else {
+      S.push(['Then a short form, with the result below it.' + (has(tool, 'w') ? ' Show each message in a WhatsApp-style bubble (#D9FDD3) with Copy and Send buttons under it.' : '') + ' A small "Clear" link at the end.']);
+    }
+
+    F.push(['ONE complete HTML file with all the CSS and JavaScript inside it. No libraries, no login, no database. It must work when I open the file on my phone.']);
+    if (calc) F.push(['Keep all my rates in one block at the top of the code under the comment CHANGE YOUR RATES HERE, so they are easy to change later.']);
+    F.push([calc ? 'Amounts in Indian format like ₹1,25,000. Never show a broken or empty result.' : 'Amounts in Indian format like ₹1,25,000. When something cannot be done, say why in plain words, never in technical ones.']);
+    if (has(tool, 'r')) F.push([o.rangeLine || 'Show a price range, not one exact figure, with the line "Final quote after we talk."']);
+    if (has(tool, 'w')) {
+      if (cust) F.push(['The "Send on WhatsApp" button is #128C7E with white text, full width and 56px tall. It opens WhatsApp to ', o.wa, ' (with the country code 91) with a message already typed: my business name, the name, each answer on its own line, the result, and the words "Please confirm."']);
+      else if (calc) F.push(['The "Send on WhatsApp" button is #128C7E with white text, full width and 56px tall. It opens WhatsApp with the result already typed in neat lines, so I can choose who to send it to.']);
+      else F.push(['Sending opens WhatsApp with the message already typed. If the entry has a phone number, send it to that number with the country code 91. If not, let me choose who gets it.']);
+    }
+    if (list) {
+      F.push(['Save what I enter on this phone, so it is still there tomorrow. Tell me plainly that the list lives on this one phone and is not shared with other phones.']);
+      F.push(['An "Export" button that copies the whole list as text, so I can keep a backup in my own WhatsApp.']);
+      F.push(['A reminder cannot ring by itself. Whatever is due must show at the top each time I open the tool.']);
+    }
+    if (o.te) F.push(['Every label in Telugu and English, Telugu first.']);
+    (o.extra || []).forEach(function(x){ F.push([x]); });
+    if (cust) F.push(['At the very end, in small grey text: "Estimate only. Final price confirmed by" followed by my business name and phone number. Tapping the number dials it.']);
+
+    A.push([list ? 'When it is ready, tell me in three short lines how to open it on my phone and keep it on my home screen.'
+                 : 'When it is ready, tell me in three short lines how to open it on my phone and how to send it to others: as a link if you can publish it, otherwise as the file.']);
+    A.push(['If I say something is wrong, change only that and show me the tool again.']);
+  } else {
+    D.push(['Style: ' + th.name + '. Header rows filled ' + main + ' with white bold text.']);
+    D.push(['Cells I type in: light yellow #FFF2CC with a thin border. Calculated cells: light grey #F2F2F2. The final answer: 16pt bold on a ' + th.tint + ' fill with a thick border.']);
+    D.push(['Font Calibri 11 throughout. Column A for labels, 34 wide. Column B for values, 20 wide. Hide the gridlines on the Entry tab.']);
+    D.push(['Warnings in red #C00000 through conditional formatting, never coloured by hand.']);
+
+    S.push(['Tab 1, Entry: ' + (list ? 'one row for each entry, with filters on the header row and the totals in a block above it. Freeze the header row.' : 'labels down column A, the cells I fill in column B, and the result below them.')]);
+    S.push(['Tab 2, Rates: every rate and rule in one table, so I can change a rate without touching a formula.']);
+    if (has(tool, 'w')) S.push(['Tab 3, Share: a clean layout with my business name, the details and the result, sized to one A4 page, which I can save as a PDF or screenshot and send on WhatsApp.']);
+    if (list) S.push(['Colour a row light red #FDE2E2 when it is overdue and light amber #FFF4CC when it is due this week.']);
+
+    F.push(['An Excel file (.xlsx) that I can download and that also opens in Google Sheets. If you cannot make a file, give me the layout and every formula so I can type it into Google Sheets myself.']);
+    F.push(['Every result is a formula that reads from the Rates tab. No typed-in numbers inside formulas, and no macros.']);
+    F.push(['Every choice is a dropdown list fed from the Rates tab.']);
+    F.push(['Empty inputs must show a blank result, not an error. Amounts in Indian format like ₹1,25,000.']);
+    if (has(tool, 'r')) F.push([o.rangeLine || 'Show a price range, not one exact figure, with the line "Final quote after we talk."']);
+    if (o.te) F.push(['Every label in Telugu and English, Telugu first.']);
+    (o.extra || []).forEach(function(x){ F.push([x]); });
+    F.push(['My business name at the top of every tab.']);
+
+    A.push(['When it is ready, tell me in three short lines how to open it in Excel on my phone and in Google Sheets.']);
+    A.push(['If I say a figure is wrong, change only that formula and give me the file again.']);
+  }
+  return [['Design', D, 'list'], [sheet ? 'Tabs' : 'Screen', S, 'list'], ['Format', F, 'list'], ['After', A, 'list']];
+}
+
 function rowsFor(tool, bizSentence, o){
   o = o || {};
-  var cust = (o.who || tool.w) === 'c', who = WHO[tool.trade] || ['customers','customer'], own = tool.id === 'own';
+  var sheet = o.fmt === 'sheet';
+  var cust = (o.who || tool.w) === 'c' && !sheet;   // a spreadsheet is used by the owner, never opened by the public
+  var who = WHO[tool.trade] || ['customers','customer'], own = tool.id === 'own';
   var biz = val(bizSentence, 'your business'), town = val(o.town, 'your town');
   var task = val(o.task !== undefined ? o.task : tool.t, 'what the tool should work out');
   if (!task.ph) task.t = lowerFirst(task.t);
@@ -1052,68 +1167,56 @@ function rowsFor(tool, bizSentence, o){
   var rules = rulesText ? { t:rulesText.replace(/[.。]+$/, ''), ph:false } : ph('your rates, formula and GST');
   var calc = !has(tool, 'x');
   var job = clean(o.job);
-  var sheet = o.fmt === 'sheet';
-  if (sheet) cust = false;                       // a spreadsheet is used by the owner, never opened by the public
-  var fmt = sheet
-    ? [['Give me an Excel file (.xlsx) that I can download and that also opens in Google Sheets. If you cannot make a file, give me the layout and every formula so I can type it into Google Sheets myself.'],
-       ['One tab called Entry, with the cells I type in coloured yellow. One tab called Rates, with all my rates and rules in one place, so I can change them later without touching a formula.'],
-       ['Use formulas for every result, never typed-in numbers. Amounts in Indian format like ₹1,25,000.']]
-    : [['Give me ONE complete HTML file that opens in any browser. Nothing to install, no login, no database.'],
-       ['Made for a phone: big buttons, large text, amounts in Indian format like ₹1,25,000.']];
-  if (has(tool, 'r')) fmt.push(['Show a price range, not one exact figure, with the line "Final quote after we talk."']);
-  var wa = null;
-  if (has(tool, 'w') && !sheet) {
-    if (cust) { wa = val(o.wanum, 'your WhatsApp number'); fmt.push(['Add a "Send on WhatsApp" button that opens WhatsApp to ', wa, ' with the ' + who[1] + '\'s details and the answer already typed.']); }
-    else fmt.push(['Add a "Send on WhatsApp" button that opens WhatsApp with the result already typed, so I can choose who to send it to.']);
-  }
-  if (has(tool, 'm')) fmt.push([sheet ? 'Keep one row for each entry, so the list grows as I add to it, with totals at the top.' : 'Save what I enter on this phone, so it is still there tomorrow.']);
-  if (o.te) fmt.push(['Labels in Telugu and English.']);
-  fmt.push(['Put my business name at the top.']);
+  var wa = (has(tool, 'w') && cust) ? val(o.wanum, 'your WhatsApp number') : null;
   var rows = [
     ['Context', [['I run a ', biz, ' in ', town, '.']]],
-    ['Task', [[(sheet ? 'Build me a simple spreadsheet. ' : 'Build me a simple tool that works on a phone. ') + (own ? 'This is what I need it to do: ' : 'It should '), task, '. ' + (cust ? 'My ' + who[0] + ' will open it from a link I share on WhatsApp.' : sheet ? 'My staff and I will use it ourselves.' : 'Only my staff and I will use it, on our phones.')]]],
-    ['Ask first', [[ASK_FIRST]], 'key'],
+    ['Task', [[(sheet ? 'Build me a simple spreadsheet. ' : 'Build me a simple tool that works on a phone. ') + (own ? 'This is what I need it to do: ' : 'It should '), task, '. ' + (cust ? 'My ' + who[0] + ' will open it from a link I share on WhatsApp.' : sheet ? 'My staff and I will use it ourselves.' : has(tool, 'm') ? 'It will be used on one phone, mine or the one at the counter.' : 'Only my staff and I will use it, on our phones.')]]],
+    ['Ask first', [[calc ? ASK_FIRST : ASK_FIRST_LIST]], 'key'],
     ['Inputs', [[(cust ? 'The ' + who[1] + ' will enter: ' : 'I will enter: '), inputs, '.']]],
     ['Rules', [[(calc ? 'Calculate it like this: ' : 'Make it work like this: '), rules, '. ' + (calc ? 'These are my starting numbers. Confirm each one with me before you build.' : 'Confirm the details with me before you build.')]]],
     ['Check', [job ? ['Check your work with this job: ', { t:job, ph:false }, '. If your tool gives a different answer, fix it before you show me.']
-                   : ['Before you finish, work through one example with my numbers and ask me if the answer is right.']]],
-    ['Format', fmt, 'list']
-  ];
+                   : ['Before you finish, work through one example with my numbers and ask me if the answer is right.']]]
+  ].concat(specRows(tool, o.theme || THEMES.plain, { fmt:o.fmt, cust:cust, who:who, wa:wa, te:o.te, colour:o.colour }));
   var blanks = [biz, town, task, inputs, rules].concat(wa ? [wa] : []).filter(function(x){ return x.ph; }).length;
   return { rows:rows, blanks:blanks };
 }
 function seg(x){ return typeof x === 'string' ? x : x.t; }
+var HEADING = { After:'After you build' };
 function plainOf(p){
   return p.rows.map(function(r){
-    if (r[2] === 'list') return 'Format:\n' + r[1].map(function(l){ return '- ' + l.map(seg).join(''); }).join('\n');
+    if (r[2] === 'list') return (HEADING[r[0]] || r[0]) + ':\n' + r[1].map(function(l){ return '- ' + l.map(seg).join(''); }).join('\n');
     return r[1].map(function(l){ return l.map(seg).join(''); }).join('\n');
   }).join('\n\n');
 }
+/* in the preview, a colour code gets a dot of that colour beside it, so an owner can see what #6B1D24 is */
+function swatches(html){ return html.replace(/#[0-9A-F]{6}\b/g, function(h){ return '<span class="hex"><i style="background:' + h + '"></i>' + h + '</span>'; }); }
 function htmlOf(p){
-  function line(l){ return l.map(function(x){ return typeof x === 'string' ? esc(x) : '<mark' + (x.ph ? ' class="ph"' : '') + '>' + esc(x.t) + '</mark>'; }).join(''); }
+  function line(l){ return l.map(function(x){ return typeof x === 'string' ? swatches(esc(x)) : '<mark' + (x.ph ? ' class="ph"' : '') + '>' + esc(x.t) + '</mark>'; }).join(''); }
   return p.rows.map(function(r){
     var body = r[2] === 'list' ? '<ul>' + r[1].map(function(l){ return '<li>' + line(l) + '</li>'; }).join('') + '</ul>' : r[1].map(line).join('<br>');
     return '<dt>' + r[0] + '</dt><dd' + (r[2] === 'key' ? ' class="key"' : '') + '>' + body + '</dd>';
   }).join('');
 }
+/* the same four sections as plain text, for the fixed prompts of the sample tools */
+function specText(tool, themeKey, o){ return plainOf({ rows: specRows(tool, THEMES[themeKey], o) }); }
 function bizOf(tradeId, other){ return tradeId === 'other' ? clean(other) : (TRADES[tradeId] ? TRADES[tradeId].s : ''); }
 /* the prompt for a library row: no personal details filled in */
-function libraryPrompt(tool, tradeId){ return plainOf(rowsFor(tool, bizOf(tradeId, ''), { fmt:W.lfmt })); }
+function libraryPrompt(tool, tradeId){ return plainOf(rowsFor(tool, bizOf(tradeId, ''), { fmt:W.lfmt, theme:themeOf(tradeId) })); }
 
 /* ------------------------------------------------------------------ wizard state */
-var W = { step:1, trade:'', other:'', size:0, tool:'', town:'', wanum:'', te:false, edits:{}, more:false, lfmt:'phone' };
+var W = { step:1, trade:'', other:'', size:0, tool:'', town:'', wanum:'', te:false, edits:{}, more:false, lfmt:'phone', colour:'' };
 try { var sv = JSON.parse(load('bk-aitools-2') || 'null');
-  if (sv && typeof sv === 'object') ['trade','other','size','tool','town','wanum','te','edits'].forEach(function(k){ if (k in sv && typeof sv[k] === typeof W[k]) W[k] = sv[k]; });
+  if (sv && typeof sv === 'object') ['trade','other','size','tool','town','wanum','te','edits','colour'].forEach(function(k){ if (k in sv && typeof sv[k] === typeof W[k]) W[k] = sv[k]; });
   if (W.trade && W.trade !== 'other' && !TRADES[W.trade]) { W.trade = ''; W.tool = ''; }
   if (W.tool && !TOOLS_BY_ID[W.tool]) W.tool = '';
 } catch(e){}
-function save(){ store('bk-aitools-2', JSON.stringify({ trade:W.trade, other:W.other, size:W.size, tool:W.tool, town:W.town, wanum:W.wanum, te:W.te, edits:W.edits })); syncResume(); }
+function save(){ store('bk-aitools-2', JSON.stringify({ trade:W.trade, other:W.other, size:W.size, tool:W.tool, town:W.town, wanum:W.wanum, te:W.te, edits:W.edits, colour:W.colour })); syncResume(); }
 function tradeName(){ return W.trade === 'other' ? (clean(W.other) || 'Your business') : (TRADES[W.trade] ? TRADES[W.trade].n : ''); }
 function edit(){ if (!W.edits[W.tool]) W.edits[W.tool] = {}; return W.edits[W.tool]; }
 function currentPrompt(){
   var tool = TOOLS_BY_ID[W.tool], e = W.edits[W.tool] || {};
   /* a tool that every business shares still speaks as this owner's trade */
-  return rowsFor(tool, bizOf(W.trade, W.other), { town:W.town, wanum:W.wanum, te:W.te, rules:e.rules, job:e.job, task:e.task, inputs:e.inputs, fmt:e.fmt });
+  return rowsFor(tool, bizOf(W.trade, W.other), { town:W.town, wanum:W.wanum, te:W.te, rules:e.rules, job:e.job, task:e.task, inputs:e.inputs, fmt:e.fmt, theme:themeOf(W.trade), colour:W.colour });
 }
 function syncResume(){
   var ok = !!(W.tool && TOOLS_BY_ID[W.tool] && W.trade);
@@ -1182,6 +1285,8 @@ function renderWizard(){
         (cust && has(tool, 'w') ? '<div class="f"><label for="e-wa">Your WhatsApp number</label><input id="e-wa" type="tel" inputmode="tel" autocomplete="off" data-w="wanum" placeholder="Enquiries will come to this number" value="' + esc(W.wanum) + '"></div>' : '') +
         '<div class="f"><label for="e-rules">Your rates and rules</label><textarea id="e-rules" rows="5" data-edit="rules" placeholder="How you calculate it, with your rates">' + esc(e.rules !== undefined ? e.rules : tool.r) + '</textarea><span class="hint">' + (own ? 'This is the part only you know.' : 'These are sample numbers. Change them, or leave them: the AI will ask you to confirm each one.') + '</span></div>' +
         '<div class="f"><label for="e-job">A job you already know the answer to</label><textarea id="e-job" rows="2" data-edit="job" placeholder="Optional. The AI checks its maths against it.">' + esc(e.job || '') + '</textarea></div>' +
+        '<div class="f"><span class="lab" id="colLab">Your colour</span><div class="sw" role="group" aria-labelledby="colLab">' + COLOURS.map(function(c){
+            return '<button type="button" class="swb" data-colour="' + c[1] + '" aria-pressed="' + (W.colour === c[1]) + '" aria-label="' + c[0] + '" title="' + c[0] + '" style="--c:' + (c[1] || themeOf(W.trade).main) + '"></button>'; }).join('') + '</div><span class="hint">The header and buttons of your tool use this colour. The first is our suggestion for your trade.</span></div>' +
         '<label class="check"><input type="checkbox" id="e-te"' + (W.te ? ' checked' : '') + '><span>Telugu and English labels</span></label>' +
       '</div></details>' +
       '<dl class="prompt" id="wizPrompt" style="margin-top:18px"></dl>' +
@@ -1207,7 +1312,7 @@ function refreshPrompt(){
   var tool = TOOLS_BY_ID[W.tool], sheet = (W.edits[W.tool] || {}).fmt === 'sheet', note = $('fmtNote');
   if (note) note.textContent = sheet
     ? 'A spreadsheet with your rates on one tab and formulas you can see and change.' + (tool.w === 'c' ? ' Your customers cannot open a sheet, so you would use it yourself.' : ' Good if you already work in Excel.')
-    : 'A small app that opens from a link. ' + (tool.w === 'c' ? 'Your customers open it on their phone.' : 'You and your staff open it on your phones.');
+    : 'A small app that opens from a link. ' + (tool.w === 'c' ? 'Your customers open it on their phone.' : has(tool, 'm') ? 'The list stays on one phone. If several people must update it, choose the sheet and keep it in Google Sheets.' : 'You and your staff open it on your phones.');
   var p = currentPrompt(), text = plainOf(p), q = encodeURIComponent(text);
   $('wizPrompt').innerHTML = htmlOf(p);
   var urls = { chatgpt:'https://chatgpt.com/?q=' + q, claude:'https://claude.ai/new?q=' + q, gemini:'https://gemini.google.com/app' };
@@ -1301,14 +1406,8 @@ ASK_FIRST,
 '- Show a range from 10% below to 10% above the total, each rounded to the nearest 5,000.',
 '',
 'Check your work with this job: a 2 BHK with modular kitchen and wardrobes in Premium must show ₹3,65,000 to ₹4,45,000. If your tool gives a different answer, fix it before you show me.',
-'',
-'Format:',
-'- Give me ONE complete HTML file that opens in any browser. Nothing to install, no login, no database.',
-'- Made for a phone: big buttons, large text, amounts in Indian format like ₹3,65,000.',
-'- Show the range with the line "Final quote after a site visit."',
-'- Add a "Send on WhatsApp" button that opens WhatsApp to [your WhatsApp number] with the customer\'s choices and the range already typed.',
-'- Put my business name at the top.'
-].join('\n'),
+''
+].join('\n') + '\n' + specText({ w:'c', f:'rw' }, 'interior', { cust:true, wa:ph('your WhatsApp number'), rangeLine:'Show the range with the line "Final quote after a site visit."' }),
 quote: [
 'I run a [your business] in [your town].',
 '',
@@ -1321,13 +1420,8 @@ ASK_FIRST,
 'Calculate it like this: amount = quantity x rate. Subtotal = sum of all amounts. Take the discount off the subtotal, then add GST on what is left.',
 '',
 'Check your work with this job: 2 x ₹1,500 and 1 x ₹4,000 is ₹7,000. Less 10% discount is ₹6,300. Plus 18% GST of ₹1,134 is ₹7,434. If your tool gives a different answer, fix it before you show me.',
-'',
-'Format:',
-'- Give me ONE complete HTML file that opens in any browser. Nothing to install, no login, no database.',
-'- Made for a phone: big buttons, large text, amounts in Indian format like ₹1,25,000.',
-'- Add a "Share on WhatsApp" button that opens WhatsApp with the full quote already typed, neatly lined up.',
-'- Add the line "Valid for 7 days" at the bottom of the quote.'
-].join('\n'),
+''
+].join('\n') + '\n' + specText({ w:'s', f:'w' }, 'plain', { extra:['Add the line "Valid for 7 days" at the bottom of the quote.'] }),
 discount: [
 'I run a [your business] in [your town].',
 '',
@@ -1340,12 +1434,8 @@ ASK_FIRST,
 'Calculate it like this: profit now = price minus cost. Profit after discount = discounted price minus cost. Extra sales needed to earn the same money = profit now ÷ profit after, minus 1, shown as a percentage. If profit after discount is zero or less, show a clear warning that this discount wipes out my profit.',
 '',
 'Check your work with this job: price ₹1,000, cost ₹700, discount 10%. Profit drops from ₹300 to ₹200, and I must sell 50% more to earn the same. If your tool gives a different answer, fix it before you show me.',
-'',
-'Format:',
-'- Give me ONE complete HTML file that opens in any browser. Nothing to install, no login, no database.',
-'- Made for a phone: big buttons, large text, amounts in Indian format like ₹1,25,000.',
-'- Show the answer in one plain sentence, like "If you sell 100 today, you now need to sell 150."'
-].join('\n'),
+''
+].join('\n') + '\n' + specText({ w:'s', f:'' }, 'plain', { extra:['Show the answer in one plain sentence, like "If you sell 100 today, you now need to sell 150."'] }),
 breakeven: [
 'I run a [your business] in [your town].',
 '',
@@ -1358,12 +1448,8 @@ ASK_FIRST,
 'Calculate it like this: total costs = rent + salaries + EMIs + other. Break-even sales = total costs ÷ margin %. Target sales = (total costs + target profit) ÷ margin %. Per day = monthly figure ÷ working days.',
 '',
 'Check your work with this job: costs of ₹1,50,000, margin 25%, 26 working days. Break-even is ₹6,00,000 a month, ₹23,077 a day. With a ₹1,00,000 target profit it is ₹10,00,000 a month, ₹38,462 a day. If your tool gives a different answer, fix it before you show me.',
-'',
-'Format:',
-'- Give me ONE complete HTML file that opens in any browser. Nothing to install, no login, no database.',
-'- Made for a phone: big buttons, large text, amounts in Indian format like ₹1,25,000.',
-'- Show the two daily figures largest, since those are what I will look at every morning.'
-].join('\n')
+''
+].join('\n') + '\n' + specText({ w:'s', f:'' }, 'plain', { extra:['Show the two daily figures largest, since those are what I will look at every morning.'] })
 };
 /* which library entry "Change it for my business" opens */
 var DEMO_TO_LIB = { estimator:['architect', 'Interiors estimator'], quote:['', 'Quotation maker'], discount:['', 'Discount checker'], breakeven:['', 'Break-even and daily target'] };
@@ -1596,6 +1682,7 @@ document.addEventListener('click', function(e){
   if (d.size) { W.size = +d.size; W.more = false; wizGo(3); return; }
   if (b.id === 'moreProblems') { W.more = true; var y = $('wizBody').scrollTop; renderWizard(); $('wizBody').scrollTop = y; return; }
   if (d.toolPick) { W.tool = d.toolPick; wizGo(4); return; }
+  if (b.classList.contains('swb')) { W.colour = d.colour; save(); all('#wizMount .swb').forEach(function(x){ x.setAttribute('aria-pressed', String(x.dataset.colour === W.colour)); }); refreshPrompt(); return; }
   if (d.fmt) { edit().fmt = d.fmt; save(); all('#wizMount [data-fmt]').forEach(function(x){ x.setAttribute('aria-pressed', String(x.dataset.fmt === d.fmt)); }); refreshPrompt(); return; }
   if (d.lfmt) { W.lfmt = d.lfmt; all('[data-lfmt]').forEach(function(x){ x.setAttribute('aria-pressed', String(x.dataset.lfmt === d.lfmt)); }); toast(d.lfmt === 'sheet' ? 'Copy now gives the Excel version.' : 'Copy now gives the phone tool version.'); return; }
   if (b.id === 'wizCopy') { copyFrom(b, plainOf(currentPrompt())); return; }
