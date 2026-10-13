@@ -752,6 +752,8 @@ mark.ed:focus::after{content:""}
       </div>
     </div>
 
+    <button class="viewall" id="dashOpen" type="button" aria-expanded="false" aria-controls="dashBody" style="margin-top:22px"><span><b>Get the dashboard prompt</b><small>Say what is in your sheet, then copy</small></span><i aria-hidden="true">+</i></button>
+    <div id="dashBody" hidden>
     <div class="dq"><span class="lab" id="dkLab">What is in your sheet?</span><div class="chips" id="dkinds" role="group" aria-labelledby="dkLab"></div></div>
     <div class="dq"><span class="lab" id="dwLab">Where do you want to see it?</span>
       <div class="seg" role="group" aria-labelledby="dwLab"><button type="button" data-dwhere="page" aria-pressed="true">On my phone</button><button type="button" data-dwhere="tab" aria-pressed="false">Inside the same sheet</button></div>
@@ -768,6 +770,7 @@ mark.ed:focus::after{content:""}
       <li><span class="n">03</span><span><b>New data next week?</b> <span>Attach the new file and say "update the dashboard". Or choose "Inside the same sheet" and it updates by itself.</span></span></li>
     </ol>
     <p class="note" style="margin-top:16px">Take out anything private before you attach a file, such as customer phone numbers you do not need on the dashboard.</p>
+    </div>
   </div>
 </section>
 
@@ -778,29 +781,6 @@ mark.ed:focus::after{content:""}
     <h2>Tools we built using these prompts.</h2>
     <p class="sub">Four working tools, each made from one prompt. Tap a card to see the prompt behind it.</p>
     <div class="tcards" id="toolCards"></div>
-  </div>
-</section>
-
-<!-- LIMITS -->
-<section id="limits">
-  <div class="wrap">
-    <span class="k b">Be honest about it</span>
-    <h2>Where this works, and where it stops.</h2>
-    <p class="sub">AI is good at tools where numbers go in and an answer comes out. It is weak where data must be saved and shared by many people every day.</p>
-    <div class="split">
-      <div><h3>Ask for a phone tool</h3><ul><li>Opens from a link, like an app</li><li>Customers and staff can use it</li><li>Big buttons, nothing to break</li></ul></div>
-      <div><h3>Ask for Excel or a Google Sheet</h3><ul><li>You see and change every formula</li><li>Right for lists and ledgers that grow</li><li>A Dashboard tab can sit on top</li></ul></div>
-    </div>
-    <p class="note" style="margin-top:14px">Every prompt here can be copied either way. You choose on the last step.</p>
-    <div class="split" style="margin-top:30px">
-      <div><h3>Build yourself</h3><ul><li>Price estimators</li><li>Quote makers</li><li>Daily calculators</li><li>Checklists and reminders</li></ul></div>
-      <div class="buy"><h3>Keep buying</h3><ul><li>Accounts and GST billing</li><li>Inventory</li><li>Tools many staff share</li></ul></div>
-    </div>
-    <ol class="tips">
-      <li><span class="n">A</span><span><b>The rates in these prompts are samples.</b> <span>Every prompt tells the AI to confirm each number with you. Give it your real ones.</span></span></li>
-      <li><span class="n">B</span><span><b>Only share numbers you are happy to make public.</b> <span>Your competitors can open the same link your customers do.</span></span></li>
-      <li><span class="n">C</span><span><b>Cannot find the Share button?</b> <span>Ask the AI: "How do I share this as a link?" It will tell you where it is.</span></span></li>
-    </ol>
   </div>
 </section>
 
@@ -1998,6 +1978,8 @@ document.addEventListener('click', function(e){
   if (b.id === 'resume') { openWizard(4); return; }
   if (d.go) { if (d.go === 'library') showAll(true); go(d.go); return; }
   if (b.id === 'viewAll') { showAll($('library').hidden); return; }
+  if (b.id === 'dashOpen') { var db = $('dashBody'), on = db.hidden; db.hidden = !on; b.setAttribute('aria-expanded', String(on));
+    b.querySelector('i').textContent = on ? '−' : '+'; b.querySelector('small').textContent = on ? 'Tap to close' : 'Say what is in your sheet, then copy'; return; }
   if (d.card) {
     var body = $('cardb-' + d.card), open = body.hidden;
     if (open) body.querySelector('pre').textContent = PROMPTS[d.card];
