@@ -162,7 +162,7 @@ footer p{color:var(--ink-2);font-size:.95rem;margin-top:10px;max-width:34em}
 /* tool sheet */
 .sheet{position:fixed;inset:0;z-index:60;background:var(--paper);display:none;flex-direction:column}
 .sheet.on{display:flex}
-.shead{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 16px;border-bottom:1px solid var(--rule)}
+.shead{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 16px;padding-top:calc(12px + env(safe-area-inset-top, 0px));border-bottom:1px solid var(--rule)}
 .shead .k{display:block}
 .shead b{font-family:var(--display);font-size:1.05rem;letter-spacing:-.01em}
 .x{width:44px;height:44px;border-radius:50%;display:grid;place-items:center;background:var(--wash);flex:none;font-size:1.2rem;line-height:1}
@@ -274,9 +274,9 @@ footer p{color:var(--ink-2);font-size:.95rem;margin-top:10px;max-width:34em}
         <div class="acts">
           <button class="btn blue full" type="button" id="copyMain"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy my prompt</span></button>
           <div class="paste">
-            <button class="btn line sm" type="button" data-open="chatgpt">ChatGPT</button>
-            <button class="btn line sm" type="button" data-open="claude">Claude</button>
-            <button class="btn line sm" type="button" data-open="gemini">Gemini</button>
+            <a class="btn line sm" data-open="chatgpt" target="_blank" rel="noopener" href="#">ChatGPT</a>
+            <a class="btn line sm" data-open="claude" target="_blank" rel="noopener" href="#">Claude</a>
+            <a class="btn line sm" data-open="gemini" target="_blank" rel="noopener" href="#">Gemini</a>
           </div>
         </div>
         <p class="note">The three buttons copy your prompt and open that assistant. If the box is empty when it opens, press and hold, then paste.</p>
@@ -555,6 +555,9 @@ function render(){
   var left = $('left');
   left.textContent = p.blanks ? p.blanks + (p.blanks === 1 ? ' blank left' : ' blanks left') : 'Ready to copy';
   left.classList.toggle('ok', !p.blanks);
+  var text = plain(), q = encodeURIComponent(text);
+  var urls = { chatgpt:'https://chatgpt.com/?q=' + q, claude:'https://claude.ai/new?q=' + q, gemini:'https://gemini.google.com/app' };
+  Array.prototype.forEach.call(document.querySelectorAll('a[data-open]'), function(a){ a.href = urls[a.dataset.open]; });
   store('bk-aitools', JSON.stringify(state));
 }
 
@@ -723,6 +726,8 @@ function quoText(){
   L.push('*Total: ' + inr(c.total) + '*', '', 'Valid for 7 days.');
   return L.join('\n');
 }
+function quoHref(){ return 'https://wa.me/?text=' + encodeURIComponent(quoText()); }
+function quoRefresh(){ $('quoTotals').innerHTML = quoTotals(); $('quoShare').href = quoHref(); }
 function quoTotals(){
   var c = quoCalc(quo);
   return '<div class="rows"><div><span>Subtotal</span><span>' + inr(c.sub) + '</span></div>' +
@@ -741,7 +746,7 @@ RENDER.quote = function(m){
     '<button class="btn line sm" type="button" data-add="1" style="justify-self:start">+ Add item</button>' +
     '<div class="two">' + field('q-disc', 'Discount %', quo.disc, ' data-quo="disc"') + field('q-gst', 'GST %', quo.gst, ' data-quo="gst"') + '</div>' +
     '<div class="res"><span class="k">Quote</span><div id="quoTotals">' + quoTotals() + '</div></div>' +
-    '<div class="two"><button class="btn wa" type="button" data-quoshare="1">Share on WhatsApp</button><button class="btn line" type="button" data-quocopy="1"><span>Copy quote</span></button></div></div>';
+    '<div class="two"><a class="btn wa" id="quoShare" target="_blank" rel="noopener" href="' + quoHref() + '">Share on WhatsApp</a><button class="btn line" type="button" data-quocopy="1"><span>Copy quote</span></button></div></div>';
 };
 
 /* C · discount checker */
@@ -838,27 +843,21 @@ writeForm(); render();
 document.addEventListener('input', function(e){
   var t = e.target;
   if (t.closest && t.closest('.form')) { readForm(); $('wanumbox').style.display = state.wa ? '' : 'none'; render(); return; }
-  if (t.dataset.quo) { quo[t.dataset.quo] = t.value; $('quoTotals').innerHTML = quoTotals(); return; }
-  if (t.dataset.it) { quo.items[+t.dataset.it][t.dataset.k] = t.value; $('quoTotals').innerHTML = quoTotals(); return; }
+  if (t.dataset.quo) { quo[t.dataset.quo] = t.value; quoRefresh(); return; }
+  if (t.dataset.it) { quo.items[+t.dataset.it][t.dataset.k] = t.value; quoRefresh(); return; }
   if (t.dataset.dis) { dis[t.dataset.dis] = t.value; $('disOut').innerHTML = disOut();
     Array.prototype.forEach.call(document.querySelectorAll('[data-pick="disq"] button'), function(b){ b.setAttribute('aria-pressed', String(b.dataset.v === String(num(dis.d)))); }); return; }
   if (t.dataset.be) { be[t.dataset.be] = t.value; $('beOut').innerHTML = beOut(); return; }
 });
 document.addEventListener('click', function(e){
-  var b = e.target.closest && e.target.closest('button,[data-go]'); if (!b) return;
+  var b = e.target.closest && e.target.closest('button,[data-go],a[data-open]'); if (!b) return;
   var d = b.dataset;
   if (d.go) { go(d.go); return; }
   if (d.who) { state.who = d.who; syncWho(); render(); return; }
   if (b.classList.contains('chip')) { var s = STARTERS.filter(function(x){ return x.id === d.id; })[0]; applyPreset(s, s.id); return; }
   if (b.id === 'copyMain') { readForm(); copyFrom(b, plain()); return; }
-  if (d.open) {
-    readForm(); var text = plain();
-    var url = d.open === 'chatgpt' ? 'https://chatgpt.com/?q=' + encodeURIComponent(text)
-            : d.open === 'claude' ? 'https://claude.ai/new?q=' + encodeURIComponent(text)
-            : 'https://gemini.google.com/app';
-    var w = window.open(url, '_blank', 'noopener');
-    copy(text).then(function(ok){ if (ok) toast('Prompt copied. Paste it if the box is empty.'); });
-    if (!w) { /* popup blocked: the copy above still happened */ }
+  if (d.open) { /* a real link: the browser opens it; we only copy alongside */
+    copy(plain()).then(function(ok){ if (ok) toast('Prompt copied. Paste it if the box is empty.'); });
     return;
   }
   if (d.copy) { copyFrom(b, PROMPTS[d.copy]); return; }
@@ -878,7 +877,6 @@ document.addEventListener('click', function(e){
   if (p === 'disq') { dis.d = d.v; RENDER.discount($('toolMount')); return; }
   if (d.add) { quo.items.push({n:'', q:'1', r:''}); RENDER.quote($('toolMount')); var ins = document.querySelectorAll('[data-k="n"]'); ins[ins.length - 1].focus(); return; }
   if (d.del !== undefined && d.del !== '') { quo.items.splice(+d.del, 1); if (!quo.items.length) quo.items.push({n:'', q:'1', r:''}); RENDER.quote($('toolMount')); return; }
-  if (d.quoshare) { window.open('https://wa.me/?text=' + encodeURIComponent(quoText()), '_blank', 'noopener'); return; }
   if (d.quocopy) { copy(quoText()).then(function(ok){ if (ok) { flash(b); toast('Quote copied.'); } }); return; }
 });
 document.addEventListener('keydown', function(e){ if (e.key === 'Escape' && $('sheet').classList.contains('on')) closeTool(); });
