@@ -9,7 +9,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&family=Hanken+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
 <style>
 /* The web half of the printed handout: white paper, ink, one blue, and the yellow marker that
-   always means "this part is yours". One blue block on the page is the way in: Build my prompt. */
+   always means "this part is yours". One blue block on the page is the way in: Find my prompt. */
 :root{
   --paper:#ffffff; --wash:#f5f7fa; --ink:#10151f; --ink-2:#4b5364; --ink-3:#7b8494;
   --rule:#dfe3ea; --rule-2:#eceff4; --blue:#1b45f5; --blue-d:#1233c4; --tint:#eef2ff;
@@ -44,7 +44,7 @@ mark.ph{background:var(--mark-soft);color:var(--ink-2)}
 .wm i{font-style:normal;color:var(--blue)}
 
 /* hero + the one blue block */
-.hero{padding:22px 0 40px}
+.hero{padding:22px 0 34px}
 .hero h1{margin-top:14px}
 .hero p.lead{margin-top:14px;font-size:1.06rem;color:var(--ink-2);max-width:32em}
 .entry{position:relative;display:block;width:100%;margin-top:26px;padding:22px 22px 20px;border-radius:20px;background:var(--blue);color:#fff;overflow:hidden;transition:transform .12s,background .15s;box-shadow:0 14px 34px -14px rgba(27,69,245,.7)}
@@ -318,7 +318,7 @@ footer p{color:var(--ink-2);font-size:.95rem;margin-top:10px;max-width:34em}
 .tut .raw:not(.open) pre{-webkit-mask-image:linear-gradient(#000 55%,transparent);mask-image:linear-gradient(#000 55%,transparent)}
 .lnk{margin-top:8px;font-size:.9rem;color:var(--ink-2);padding:6px 0;border-bottom:1px solid var(--rule)}
 .lnk:hover{color:var(--blue);border-color:var(--blue)}
-.entry{margin-top:30px}
+.entry{margin-top:22px}
 /* phone tool or spreadsheet */
 .seg{display:grid;grid-template-columns:1fr 1fr;border:1px solid var(--ink);border-radius:10px;overflow:hidden}
 .seg button{min-height:48px;padding:8px 10px;font-weight:600;font-size:.95rem;background:#fff;text-align:center;line-height:1.2}
@@ -337,7 +337,7 @@ footer p{color:var(--ink-2);font-size:.95rem;margin-top:10px;max-width:34em}
 .bk::before{content:"";position:absolute;inset:0;z-index:-1;background:radial-gradient(rgba(16,21,31,.16) 1px,transparent 1.3px) 0 0/13px 13px;
   -webkit-mask-image:linear-gradient(115deg,transparent 35%,#000 100%);mask-image:linear-gradient(115deg,transparent 35%,#000 100%)}
 .bk::after{content:"";position:absolute;z-index:-1;right:-96px;top:-96px;width:210px;height:210px;border-radius:50%;box-shadow:inset 0 0 0 1px rgba(16,21,31,.22),inset 0 0 0 26px rgba(255,255,255,.14),inset 0 0 0 27px rgba(16,21,31,.14)}
-.bk .k{color:var(--ink);opacity:.72;display:block}
+.bk .k{color:var(--ink);opacity:.72;display:block;padding-right:8.5em}
 .bk h3{font-size:1.62rem;font-weight:800;line-height:1.08;margin-top:10px;letter-spacing:-.03em;text-wrap:balance;max-width:13em}
 .bk p{color:rgba(16,21,31,.82);font-size:.97rem;margin-top:12px;max-width:30em}
 .bk p b{color:var(--ink);font-weight:700}
@@ -346,7 +346,7 @@ footer p{color:var(--ink-2);font-size:.95rem;margin-top:10px;max-width:34em}
 .bk .btn:hover{background:#000}
 .bk .btn.ghost{background:rgba(255,255,255,.34);color:var(--ink);box-shadow:inset 0 0 0 1.5px var(--ink)}
 .bk .btn.ghost:hover{background:rgba(255,255,255,.6)}
-.bk .free{display:inline-flex;align-items:center;gap:8px;margin-top:16px;background:var(--ink);color:var(--mark);font-weight:700;font-size:.95rem;padding:5px 12px;border-radius:999px}
+.bk .free{position:absolute;right:16px;top:16px;display:inline-flex;align-items:center;gap:8px;background:var(--ink);color:var(--mark);font-weight:700;font-size:.95rem;padding:5px 12px;border-radius:999px}
 .bk .free::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--mark)}
 .bk .inv{margin-top:10px}
 .bk .pass{display:inline-block;margin-top:16px;font-size:.9rem;color:var(--ink);font-weight:600}
@@ -454,11 +454,47 @@ footer p{color:var(--ink-2);font-size:.95rem;margin-top:10px;max-width:34em}
 .sw{display:flex;flex-wrap:wrap;gap:12px;padding:4px 2px}
 .swb{width:40px;height:40px;border-radius:50%;background:var(--c);box-shadow:inset 0 0 0 3px #fff,0 0 0 1px var(--rule);transition:box-shadow .12s}
 .swb[aria-pressed="true"]{box-shadow:inset 0 0 0 3px #fff,0 0 0 3px var(--ink)}
+.chaps{list-style:none;display:grid;gap:8px;margin-top:24px}
+.chaps button{display:grid;grid-template-columns:2.2em minmax(0,1fr) auto;align-items:center;gap:0 4px;width:100%;padding:12px 14px;border-radius:14px;box-shadow:inset 0 0 0 1px var(--rule);min-height:60px;transition:box-shadow .12s}
+.chaps button:hover{box-shadow:inset 0 0 0 1.5px var(--ink)}
+.chaps .n{grid-row:1/3;font-family:var(--display);font-weight:800;font-size:1.5rem;color:var(--blue);line-height:1}
+.chaps b{font-weight:600;font-size:1.02rem}
+.chaps small{grid-column:2;color:var(--ink-2);font-size:.86rem}
+.chaps button::after{content:"↓";grid-column:3;grid-row:1/3;color:var(--ink-3)}
+.viewall{display:flex;align-items:center;gap:12px;width:100%;margin-top:12px;padding:14px 16px;border-radius:14px;box-shadow:inset 0 0 0 1.5px var(--ink);min-height:62px}
+.viewall span{flex:1}
+.viewall b{display:block;font-weight:600;font-size:1.05rem}
+.viewall small{display:block;color:var(--ink-2);font-size:.86rem}
+.viewall i{font-style:normal;font-size:1.5rem;line-height:1;color:var(--blue)}
+.viewall[aria-expanded="true"]{background:var(--ink);color:#fff}
+.viewall[aria-expanded="true"] small{color:rgba(255,255,255,.72)}
+.viewall[aria-expanded="true"] i{color:#fff}
+/* sample tool cards */
+.tcards{display:grid;gap:12px;margin-top:22px}
+.tc{border:1px solid var(--ink);border-radius:16px;overflow:hidden;background:#fff}
+.tch{display:grid;gap:12px;width:100%;padding:16px}
+.tch .tg{font-family:var(--mono);font-size:10.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--blue)}
+.tch h3{font-size:1.25rem;margin-top:4px}
+.tch p{color:var(--ink-2);font-size:.95rem;margin-top:4px}
+.tres{border-radius:12px;padding:12px 14px;background:var(--tc,var(--wash))}
+.tres small{display:block;font-size:.8rem;color:var(--ink-2)}
+.tres b{display:block;font-family:var(--display);font-weight:800;font-size:1.45rem;letter-spacing:-.03em;line-height:1.15;font-variant-numeric:tabular-nums}
+.tcx{display:flex;justify-content:space-between;align-items:center;font-weight:600;font-size:.95rem;color:var(--blue);padding-top:12px;border-top:1px solid var(--rule)}
+.tcx i{font-style:normal;font-size:1.3rem;line-height:1}
+.tcb{padding:0 16px 16px}
+.tcb .raw{margin-top:0}
+.tcb .raw pre{max-height:260px}
+.tcb .acts3{display:grid;gap:8px;margin-top:10px}
+#app{padding-top:10px;border-top:0}
+#app .bk{margin-top:0}
 @media(min-width:560px){
   .tgrid{grid-template-columns:repeat(3,1fr)}
   .lr{grid-template-columns:minmax(0,1fr) auto;align-items:center}
 }
 @media(min-width:700px){
+  .chaps{grid-template-columns:repeat(3,1fr)}
+  .tcards{grid-template-columns:1fr 1fr;align-items:start}
+  .tch{grid-template-columns:1fr}
   .hfacts{grid-template-columns:repeat(4,1fr)}
   .homead .scrim{background:linear-gradient(to top,rgba(9,12,18,.94) 0%,rgba(9,12,18,.7) 34%,rgba(9,12,18,.1) 70%),linear-gradient(to right,rgba(9,12,18,.72) 0%,rgba(9,12,18,0) 62%)}
   .homead .hin{padding-top:260px;padding-bottom:48px}
@@ -516,47 +552,48 @@ footer p{color:var(--ink-2);font-size:.95rem;margin-top:10px;max-width:34em}
 
   <header class="hero">
     <span class="k b">From the card you are holding</span>
-    <h1>Get the AI prompt for your business.</h1>
-    <p class="lead">Start with the one from the talk. Then build one for your own trade.</p>
+    <h1>Describe your business problem. AI builds the tool.</h1>
+    <p class="lead">You do not need a software team. You need the right prompt: the instruction you paste into ChatGPT, Claude or Gemini. Here are <span data-count="tools"></span> of them, for <span data-count="trades"></span> kinds of business.</p>
+    <ol class="chaps">
+      <li><button type="button" data-go="find"><span class="n">1</span><b>Find a prompt</b><small>For your trade and your problem</small></button></li>
+      <li><button type="button" data-go="howto"><span class="n">2</span><b>Use the prompt</b><small>A help guide, six steps</small></button></li>
+      <li><button type="button" data-go="dash"><span class="n">3</span><b>Build on your Excel data</b><small>Your sheet as a dashboard</small></button></li>
+    </ol>
+  </header>
+</div>
 
-    <div class="tut" id="talk">
-      <span class="k">01 · The prompt from the talk</span>
-      <h2>Customer estimator</h2>
-      <p>Customers answer three questions, see a price range, and send you the enquiry on WhatsApp.</p>
-      <div class="raw" id="stageRaw">
-        <pre id="stagePre"></pre>
-        <div class="bar">
-          <button class="btn sm" type="button" data-copy="estimator"><span>Copy this prompt</span></button>
-          <button class="btn line sm" type="button" data-tool="estimator">Try the tool</button>
-        </div>
-      </div>
-      <button class="lnk" type="button" data-more="stageRaw">Read the full prompt</button>
-    </div>
+<!-- CHAPTER 1: FIND A PROMPT -->
+<section id="find">
+  <div class="wrap">
+    <span class="k b">Chapter 1</span>
+    <h2>Find a prompt.</h2>
+    <p class="sub">Answer three questions about your business and we hand you the prompt written for it.</p>
 
     <button class="entry" id="entry" type="button">
-      <span class="k">02 · Now one for you</span>
-      <span class="et">Build my prompt</span>
-      <span class="es">3 questions. About 30 seconds.</span>
+      <span class="k">Start here</span>
+      <span class="et">Find my prompt</span>
+      <span class="es">3 questions. Takes only 30 seconds.</span>
       <span class="trail"><i>Your trade</i><i>Your size</i><i>Your problem</i><b>Your prompt</b></span>
       <span class="go" aria-hidden="true">→</span>
     </button>
     <button class="resume" id="resume" type="button" hidden><span><small>Your last prompt</small><b id="resumeName"></b></span><i>Open</i></button>
 
-    <div class="also">
-      <button type="button" data-go="howto">How to use the prompt</button>
-      <button type="button" data-go="dash">Dashboard from my Excel</button>
-      <button type="button" data-go="tools">Try sample tools</button>
-      <button type="button" data-go="library">All <span data-count="tools"></span> prompts</button>
+    <button class="viewall" id="viewAll" type="button" aria-expanded="false" aria-controls="library"><span><b>View all <span data-count="tools"></span> prompts</b><small>Browse by trade, or search</small></span><i aria-hidden="true">+</i></button>
+    <div id="library" hidden>
+      <div class="f lfind"><label for="lq">Search by trade or problem</label><input id="lq" type="search" autocomplete="off" placeholder="gold, cement, clinic, wages…"></div>
+      <div class="lfmt"><div class="seg" role="group" aria-label="Copy the prompts as"><button type="button" data-lfmt="phone" aria-pressed="true">Phone tool</button><button type="button" data-lfmt="sheet" aria-pressed="false">Excel or Google Sheet</button></div></div>
+      <p class="lcount" id="lcount" role="status"></p>
+      <div id="lib"></div>
     </div>
-  </header>
-</div>
+  </div>
+</section>
 
 <!-- HOW TO USE -->
 <section id="howto">
   <div class="wrap wide">
-    <span class="k b">How to use it</span>
-    <h2>Six steps. No software skills.</h2>
-    <p class="sub">Watch it once with the prompt from the talk. Tap a number to see that step again.</p>
+    <span class="k b">Chapter 2 · A help guide</span>
+    <h2>Using the prompt.</h2>
+    <p class="sub">Six steps, no software skills. Shown with the customer estimator from the talk. Tap a number to see a step again.</p>
     <div class="how" id="how">
       <div class="phone" aria-hidden="true">
         <!-- 1 copy, on this page -->
@@ -654,7 +691,7 @@ footer p{color:var(--ink-2);font-size:.95rem;margin-top:10px;max-width:34em}
       </div>
       <div class="howctl">
         <button class="btn line sm" type="button" id="howPlay">Pause</button>
-        <button class="btn blue sm" type="button" data-wiz="1">Build my prompt</button>
+        <button class="btn blue sm" type="button" data-wiz="1">Find my prompt</button>
       </div>
     </div>
     <p class="demonote">The chat screens are drawn to look like Claude. ChatGPT and Gemini work the same way.</p>
@@ -664,9 +701,9 @@ footer p{color:var(--ink-2);font-size:.95rem;margin-top:10px;max-width:34em}
 <!-- DASHBOARD FROM A SHEET -->
 <section id="dash">
   <div class="wrap">
-    <span class="k b">Already keep it in Excel?</span>
-    <h2>See your sheet as a dashboard.</h2>
-    <p class="sub">If your sales, dues or stock already sit in Excel or Google Sheets, you do not need a new tool. Give the AI the file and this prompt.</p>
+    <span class="k b">Chapter 3</span>
+    <h2>Building a tool on your Excel data.</h2>
+    <p class="sub">If your sales, dues or stock already sit in Excel or Google Sheets, you do not need to start again. Give the AI the file and this prompt, and see your sheet as a dashboard.</p>
 
     <div class="d2d" id="d2d" aria-hidden="true">
       <div class="xl">
@@ -703,27 +740,13 @@ footer p{color:var(--ink-2);font-size:.95rem;margin-top:10px;max-width:34em}
   </div>
 </section>
 
-<!-- LIVE TOOLS -->
+<!-- SAMPLE TOOLS -->
 <section id="tools">
   <div class="wrap">
-    <span class="k b">See what you get</span>
-    <h2>Four tools, built this way. Try them.</h2>
-    <p class="sub">Each one works right here on your phone. The first is the one from the talk.</p>
-    <ol class="tools" id="toolList"></ol>
-  </div>
-</section>
-
-<!-- LIBRARY -->
-<section id="library">
-  <div class="wrap">
-    <span class="k b">The full list</span>
-    <h2><span data-count="tools"></span> prompts for <span data-count="trades"></span> kinds of business.</h2>
-    <p class="sub">Find your trade, open it, and copy any prompt. Each one spells out the rules, the colours, the layout and the motion, and tells the AI to question you first.</p>
-    <div class="f lfind"><label for="lq">Search by trade or problem</label><input id="lq" type="search" autocomplete="off" placeholder="gold, cement, clinic, wages…"></div>
-    <div class="lfmt"><div class="seg" role="group" aria-label="Copy the prompts as"><button type="button" data-lfmt="phone" aria-pressed="true">Phone tool</button><button type="button" data-lfmt="sheet" aria-pressed="false">Excel or Google Sheet</button></div></div>
-    <p class="lcount" id="lcount" role="status"></p>
-    <div id="lib"></div>
-    <div id="libBk"></div>
+    <span class="k b">Sample tools</span>
+    <h2>Tools we built using these prompts.</h2>
+    <p class="sub">Four working tools, each made from one prompt. Tap a card to see the prompt behind it.</p>
+    <div class="tcards" id="toolCards"></div>
   </div>
 </section>
 
@@ -748,6 +771,11 @@ footer p{color:var(--ink-2);font-size:.95rem;margin-top:10px;max-width:34em}
       <li><span class="n">C</span><span><b>Cannot find the Share button?</b> <span>Ask the AI: "How do I share this as a link?" It will tell you where it is.</span></span></li>
     </ol>
   </div>
+</section>
+
+<!-- BRIKLAY APP -->
+<section id="app">
+  <div class="wrap"><div id="libBk"></div></div>
 </section>
 
 <!-- HOME BUILDING AD -->
@@ -1438,10 +1466,10 @@ function briklaySlot(tradeId){
   var mine = tradeId === 'builder' || tradeId === 'contractor';
   var ask = 'https://wa.me/' + BRIKLAY_WA + '?text=' + encodeURIComponent('Hi Briklay, I am a builder and I would like an invitation.');
   var share = 'https://wa.me/?text=' + encodeURIComponent('Briklay: an AI site engineer and accountant that works inside WhatsApp. Free to use, by invitation. https://briklay.app');
-  return '<aside class="bk"><span class="k">' + (mine ? 'One more thing, since you build' : 'One more thing') + '</span>' +
+  return '<aside class="bk"><span class="free">Free to use</span><span class="k">' + (mine ? 'One more thing, since you build' : 'One more thing') + '</span>' +
     '<h3>' + (mine ? 'You build. You do not need a prompt. You have the Briklay App.' : 'Builders do not need a prompt. They have the Briklay App.') + '</h3>' +
     '<p><b>An AI site engineer and accountant, inside WhatsApp.</b> Supervisors text the way they always do. Briklay writes down the work, the materials and every rupee.</p>' +
-    '<span class="free">Completely free to use</span>' +
+    
     '<p class="inv">We open it by invitation, a few builders at a time. Look around, tell us you are interested, and your invitation follows.</p>' +
     '<div class="bkrow"><a class="btn" href="https://briklay.app/" target="_top">Explore Briklay</a><a class="btn ghost" href="' + ask + '" target="_blank" rel="noopener">Ask for an invitation</a></div>' +
     (mine ? '' : '<a class="pass" href="' + share + '" target="_blank" rel="noopener">Not a builder? Send this to one you know.</a>') + '</aside>';
@@ -1558,6 +1586,11 @@ function howPlay(on){
 }
 
 /* ------------------------------------------------------------------ library */
+function showAll(on){
+  $('library').hidden = !on; var v = $('viewAll'); v.setAttribute('aria-expanded', String(on));
+  v.querySelector('i').textContent = on ? '−' : '+';
+  v.querySelector('small').textContent = on ? 'Tap to close the list' : 'Browse by trade, or search';
+}
 function renderLibrary(q){
   q = clean(q).toLowerCase();
   var shown = 0, tradesShown = 0;
@@ -1578,7 +1611,7 @@ function renderLibrary(q){
   }).join('');
   var common = rowsOf(COMMON, 'all', 'every business any shop office');
   if (common) html += '<div class="lgrp"><span class="k">Every business</span><details class="lt"' + (q ? ' open' : '') + '><summary><span>Tools any business can use</span><small>' + (q ? '' : COMMON.length + ' prompts') + '</small></summary>' + common + '</details></div>';
-  $('lib').innerHTML = html || '<p class="none">Nothing matches. Tap Build my prompt and describe your own problem.</p>';
+  $('lib').innerHTML = html || '<p class="none">Nothing matches. Tap Find my prompt and describe your own problem.</p>';
   $('lcount').textContent = q ? shown + (shown === 1 ? ' prompt matches' : ' prompts match') : '';
 }
 
@@ -1814,8 +1847,15 @@ function openPrompt(toolId, tradeId){
 /* ------------------------------------------------------------------ first paint */
 all('[data-count="tools"]').forEach(function(e){ e.textContent = TOTAL; });
 all('[data-count="trades"]').forEach(function(e){ e.textContent = Object.keys(TRADES).length; });
-$('toolList').innerHTML = DEMOS.map(function(t, i){
-  return '<li><span class="n">0' + (i + 1) + '</span><div>' + (t.tag ? '<span class="demo-tag" style="margin-bottom:6px">' + t.tag + '</span>' : '') + '<h3>' + esc(t.name) + '</h3><p>' + esc(t.line) + '</p></div><div class="row"><button class="btn sm" type="button" data-tool="' + t.id + '">Try it</button><button class="btn line sm" type="button" data-copy="' + t.id + '"><span>Copy its prompt</span></button></div></li>';
+var CARD_LOOK = { estimator:['Rough estimate', '₹3,65,000 to ₹4,45,000', '#F3E7D6'], quote:['Total', '₹7,434', '#E5ECFD'], discount:['To give 10% off', 'Sell 50% more', '#FDEFD3'], breakeven:['Sell every working day', '₹23,077', '#E3F0D6'] };
+$('toolCards').innerHTML = DEMOS.map(function(t){
+  var L = CARD_LOOK[t.id];
+  return '<article class="tc" id="card-' + t.id + '"><button class="tch" type="button" data-card="' + t.id + '" aria-expanded="false" aria-controls="cardb-' + t.id + '">' +
+    '<span><span class="tg">' + (t.tag || 'Sample tool') + '</span><h3>' + esc(t.name) + '</h3><p>' + esc(t.line) + '</p></span>' +
+    '<span class="tres" style="--tc:' + L[2] + '"><small>' + L[0] + '</small><b>' + L[1] + '</b></span>' +
+    '<span class="tcx"><span>See the prompt that built it</span><i aria-hidden="true">+</i></span></button>' +
+    '<div class="tcb" id="cardb-' + t.id + '" hidden><div class="raw"><pre></pre></div>' +
+    '<div class="acts3"><button class="btn sm" type="button" data-copy="' + t.id + '"><span>Copy this prompt</span></button><button class="btn line sm" type="button" data-tool="' + t.id + '">Try the tool</button><button class="btn line sm" type="button" data-mine="' + t.id + '">Change it for my business</button></div></div></article>';
 }).join('');
 $('askLink').href = 'https://wa.me/' + OWNER_WA + '?text=' + encodeURIComponent('Hi Chandu, I am trying the AI business tools page and I am stuck on my prompt.');
 renderLibrary('');
@@ -1823,7 +1863,6 @@ $('dkinds').innerHTML = DKINDS.map(function(k){ return '<button class="chip" typ
 renderDash();
 (function(){ var el = $('d2d'); if (!('IntersectionObserver' in window) || HOW.reduced) { el.classList.add('in'); return; }
   new IntersectionObserver(function(en, io){ if (en[0].isIntersecting) { el.classList.add('in'); io.disconnect(); } }, { threshold:0.5 }).observe(el); })();
-$('stagePre').textContent = PROMPTS.estimator;
 $('libBk').innerHTML = briklaySlot('');
 syncResume();
 howShow(0);
@@ -1887,7 +1926,16 @@ document.addEventListener('click', function(e){
   /* page */
   if (b.id === 'entry' || d.wiz) { openWizard(1); return; }
   if (b.id === 'resume') { openWizard(4); return; }
-  if (d.go) { go(d.go); return; }
+  if (d.go) { if (d.go === 'library') showAll(true); go(d.go); return; }
+  if (b.id === 'viewAll') { showAll($('library').hidden); return; }
+  if (d.card) {
+    var body = $('cardb-' + d.card), open = body.hidden;
+    if (open) body.querySelector('pre').textContent = PROMPTS[d.card];
+    body.hidden = !open; b.setAttribute('aria-expanded', String(open));
+    b.querySelector('.tcx span').textContent = open ? 'Hide the prompt' : 'See the prompt that built it'; b.querySelector('.tcx i').textContent = open ? '−' : '+';
+    return;
+  }
+  if (d.mine) { var mm = DEMO_TO_LIB[d.mine], ml = findTool(mm[0], mm[1]); openPrompt(ml.id, mm[0] || 'all'); return; }
   if (d.step !== undefined) { howShow(+d.step); return; }
   if (b.id === 'howPlay') { howPlay(!HOW.playing); return; }
 

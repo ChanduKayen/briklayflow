@@ -8,10 +8,10 @@
  * the app. It needs nothing from the app: no session, no Supabase, no router state.
  * Public: rendered before every auth gate (see App.tsx), like /privacy and /demo.
  *
- * What is on the page: the estimator prompt from the talk, a three-question prompt builder
- * (trade, business size, problem) whose result can be copied as a phone tool or as an
- * Excel / Google Sheet, an animated "how to use it" walkthrough, four working sample tools,
- * and the full prompt library by trade. All content lives in the .html: the library is the
+ * The page runs in three chapters: 1) find a prompt (a three-question finder by trade,
+ * business size and problem, plus the full library by trade), 2) using the prompt (an
+ * animated six-step help guide), 3) building a dashboard on existing Excel data. Then four
+ * sample tools as cards with their prompts, the Briklay App block and the home-building ad. All content lives in the .html: the library is the
  * GROUPS / COMMON data at the top of its script, and the demo WhatsApp number is OWNER_WA.
  * Its two images (the home-building ad and the Briklay App block background) are served from
  * public/aibusinesstools/.
