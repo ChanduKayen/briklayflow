@@ -107,6 +107,8 @@ import Terms from './pages/Terms';
 import DataDeletion from './pages/DataDeletion';
 // No-auth demo record for landing prospects (the WhatsApp "see it work" flow). Public like the legal pages.
 import DemoRecord from './pages/DemoRecord';
+// Public handout page — the QR on the printed "AI business tools" card lands here. No auth, no app data.
+import AiBusinessTools from './pages/AiBusinessTools';
 const ResetPassword = lazy(() => import('./pages/ResetPassword'));
 const ProcurementRequests = lazy(() => import('./pages/ProcurementRequests'));
 const ProcurementQuotes = lazy(() => import('./pages/ProcurementQuotes'));
@@ -401,6 +403,12 @@ function App() {
   // Public: renders regardless of session (they arrive from WhatsApp's own browser, no cookies).
   if (location.pathname === '/demo') {
     return <DemoRecord />;
+  }
+  // Public handout page (printed QR → briklay.app/aibusinesstools). Renders regardless of session:
+  // visitors scan it from paper with their phone camera. Case and a trailing slash are forgiven
+  // because people also type it from the card.
+  if (location.pathname.toLowerCase().replace(/\/+$/, '') === '/aibusinesstools') {
+    return <AiBusinessTools />;
   }
 
   if (!routerReady) {

@@ -1,0 +1,891 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Build your own business tools with AI · Briklay</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&family=Hanken+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<style>
+/* The web half of the printed handout: white paper, ink, one blue, and the yellow
+   marker that always means "this part is yours to fill in". Phone first. */
+:root{
+  --paper:#ffffff; --wash:#f5f7fa; --ink:#10151f; --ink-2:#4b5364; --ink-3:#7b8494;
+  --rule:#dfe3ea; --rule-2:#eceff4; --blue:#1b45f5; --blue-d:#1233c4; --tint:#eef2ff;
+  --mark:#ffe14a; --mark-soft:#fff6c2; --wa:#0a8f6c; --red:#b23a2a;
+  --display:"Bricolage Grotesque","Avenir Next","Segoe UI",system-ui,sans-serif;
+  --body:"Hanken Grotesk","Segoe UI",system-ui,-apple-system,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,"SFMono-Regular",Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{background:var(--paper);color:var(--ink);font-family:var(--body);font-size:16px;line-height:1.55;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+button,input,textarea,select{font:inherit;color:inherit}
+button{cursor:pointer;border:0;background:none}
+a{color:inherit}
+::selection{background:var(--mark)}
+:focus-visible{outline:2px solid var(--blue);outline-offset:2px;border-radius:4px}
+.wrap{max-width:720px;margin:0 auto;padding:0 20px}
+.wide{max-width:1080px}
+.k{font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-2)}
+.k.b{color:var(--blue)}
+h1,h2,h3{font-family:var(--display);letter-spacing:-.025em;line-height:1.08;text-wrap:balance}
+h1{font-size:clamp(2.1rem,9vw,3.4rem);font-weight:800}
+h2{font-size:clamp(1.6rem,6.4vw,2.2rem);font-weight:700}
+h3{font-size:1.08rem;font-weight:700;letter-spacing:-.01em}
+p{text-wrap:pretty}
+mark{background:var(--mark);color:inherit;padding:.04em .28em;border-radius:.22em;-webkit-box-decoration-break:clone;box-decoration-break:clone}
+mark.ph{background:var(--mark-soft);color:var(--ink-2)}
+
+/* top bar */
+.top{display:flex;justify-content:space-between;align-items:center;padding:18px 0}
+.wm{font-family:var(--display);font-weight:800;font-size:1.3rem;letter-spacing:-.03em;text-decoration:none}
+.wm i{font-style:normal;color:var(--blue)}
+
+/* hero */
+.hero{padding:26px 0 34px}
+.hero h1{margin-top:14px}
+.hero p.lead{margin-top:16px;font-size:1.06rem;color:var(--ink-2);max-width:34em}
+.jump{list-style:none;margin-top:26px;border-top:1px solid var(--ink)}
+.jump li{border-bottom:1px solid var(--rule)}
+.jump button{display:flex;align-items:center;gap:14px;width:100%;text-align:left;padding:14px 2px;min-height:56px}
+.jump .n{font-family:var(--mono);font-weight:600;font-size:12px;color:var(--blue);width:1.6em;flex:none}
+.jump b{font-weight:600;font-size:1.02rem;flex:1}
+.jump small{display:block;font-size:.86rem;color:var(--ink-2);font-weight:400}
+.jump .ar{color:var(--ink-3);font-size:1.1rem;transition:transform .18s}
+.jump button:hover .ar{transform:translateY(3px);color:var(--blue)}
+
+section{padding:44px 0;border-top:1px solid var(--rule)}
+section > .wrap > .k{display:block;margin-bottom:10px}
+.sub{margin-top:10px;color:var(--ink-2);max-width:36em}
+
+/* buttons */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:50px;padding:12px 20px;border-radius:10px;font-weight:600;font-size:1rem;background:var(--ink);color:#fff;text-decoration:none;transition:background .15s,transform .1s}
+.btn:hover{background:#000}
+.btn:active{transform:scale(.985)}
+.btn.blue{background:var(--blue)}
+.btn.blue:hover{background:var(--blue-d)}
+.btn.line{background:#fff;color:var(--ink);box-shadow:inset 0 0 0 1px var(--ink)}
+.btn.line:hover{background:var(--wash)}
+.btn.wa{background:var(--wa)}
+.btn.sm{min-height:42px;padding:8px 14px;font-size:.92rem;border-radius:8px}
+.btn.full{width:100%}
+.btn.done{background:var(--wa)!important;color:#fff!important;box-shadow:none!important}
+.btn svg{width:18px;height:18px;flex:none}
+
+/* builder */
+.starters{margin:22px -20px 0;padding:2px 20px 6px;display:flex;gap:8px;overflow-x:auto;scrollbar-width:none}
+.starters::-webkit-scrollbar{display:none}
+.chip{flex:none;min-height:38px;padding:7px 14px;border-radius:999px;box-shadow:inset 0 0 0 1px var(--rule);background:#fff;font-size:.92rem;font-weight:500;white-space:nowrap;transition:box-shadow .15s,background .15s}
+.chip:hover{box-shadow:inset 0 0 0 1px var(--ink)}
+.chip[aria-pressed="true"]{background:var(--ink);color:#fff;box-shadow:none}
+.build{display:grid;gap:30px;margin-top:22px}
+.form{display:grid;gap:18px;min-width:0}
+.f label,.f .lab{display:block;font-weight:600;font-size:.95rem;margin-bottom:6px}
+.f .hint{display:block;font-size:.84rem;color:var(--ink-2);margin-top:5px;font-weight:400}
+.f input[type=text],.f input[type=tel],.f input[type=number],.f textarea{width:100%;background:#fff;border:1px solid var(--rule);border-radius:10px;padding:12px 13px;font-size:16px;line-height:1.45;transition:border-color .15s,box-shadow .15s}
+.f textarea{resize:vertical;min-height:76px}
+.f input:focus,.f textarea:focus{outline:0;border-color:var(--blue);box-shadow:0 0 0 3px var(--tint)}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.seg{display:grid;grid-template-columns:1fr 1fr;gap:0;border:1px solid var(--ink);border-radius:10px;overflow:hidden}
+.seg button{min-height:46px;padding:8px 10px;font-weight:600;font-size:.95rem;background:#fff}
+.seg button + button{border-left:1px solid var(--ink)}
+.seg button[aria-pressed="true"]{background:var(--ink);color:#fff}
+.opts{display:grid;gap:2px}
+.f label.opt{display:flex;gap:12px;align-items:flex-start;padding:10px 0;margin:0;cursor:pointer;font-weight:400}
+.opt input{appearance:none;-webkit-appearance:none;flex:none;width:22px;height:22px;border:1.5px solid var(--ink);border-radius:5px;margin-top:1px;background:#fff;display:grid;place-items:center}
+.opt input:checked{background:var(--blue);border-color:var(--blue)}
+.opt input:checked::after{content:"";width:10px;height:5px;border-left:2px solid #fff;border-bottom:2px solid #fff;transform:rotate(-45deg) translate(1px,-1px)}
+.opt span{font-size:.95rem;line-height:1.4;font-weight:600}
+.opt small{display:block;color:var(--ink-2);font-size:.84rem;font-weight:400}
+.wanum{margin:0 0 6px 34px}
+
+.out{min-width:0}
+.outhead{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:10px}
+.prompt{display:grid;grid-template-columns:5.2em minmax(0,1fr);border:1px solid var(--ink);border-radius:12px;overflow:hidden;background:#fff}
+.prompt dt,.prompt dd{padding:11px 12px;border-top:1px solid var(--rule)}
+.prompt dt:first-of-type,.prompt dt:first-of-type + dd{border-top:0}
+.prompt dt{font-family:var(--mono);font-size:10.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--blue);background:var(--tint);padding-top:14px}
+.prompt dd{font-size:.95rem;line-height:1.5;min-width:0;overflow-wrap:anywhere}
+.prompt dd.key{font-weight:700}
+.prompt dd ul{list-style:none}
+.prompt dd li{padding-left:1em;position:relative}
+.prompt dd li::before{content:"";position:absolute;left:0;top:.62em;width:.38em;height:.38em;background:var(--blue)}
+.acts{display:grid;gap:10px;margin-top:14px}
+.paste{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.note{font-size:.86rem;color:var(--ink-2);margin-top:10px}
+.left{font-family:var(--mono);font-size:11px;font-weight:600;color:var(--ink-2);white-space:nowrap}
+.left.ok{color:var(--wa)}
+
+/* raw prompt block (stage + tool prompts) */
+.raw{position:relative;margin-top:20px;border:1px solid var(--ink);border-radius:12px;background:#fff;overflow:hidden}
+.raw pre{font-family:var(--body);font-size:.94rem;line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere;padding:16px 16px 18px;max-height:320px;overflow:auto}
+.raw.open pre{max-height:none}
+.raw .bar{display:flex;gap:8px;padding:10px;border-top:1px solid var(--rule);background:var(--wash)}
+.raw .bar .btn{flex:1}
+.raw .more{flex:none}
+
+/* gallery */
+.tools{list-style:none;margin-top:22px;border-top:1px solid var(--ink)}
+.tools li{display:grid;grid-template-columns:2em minmax(0,1fr);gap:4px 10px;padding:18px 0;border-bottom:1px solid var(--rule)}
+.tools .n{font-family:var(--mono);font-weight:600;font-size:12px;color:var(--blue);padding-top:5px}
+.tools p{color:var(--ink-2);font-size:.95rem;margin-top:4px}
+.tools .for{font-size:.84rem;color:var(--ink-3);margin-top:6px}
+.tools .row{grid-column:2;display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+
+/* limits */
+.split{display:grid;grid-template-columns:1fr 1fr;gap:22px;margin-top:22px}
+.split ul{list-style:none;margin-top:8px;font-size:.95rem}
+.split li{padding:3px 0 3px 1.15em;position:relative}
+.split li::before{content:"";position:absolute;left:0;top:.72em;width:.5em;height:.5em;background:var(--blue)}
+.split .buy,.split .buy h3{color:var(--ink-2)}
+.split .buy li::before{background:none;box-shadow:inset 0 0 0 1px var(--ink-2)}
+.tips{list-style:none;margin-top:26px;display:grid;gap:14px}
+.tips li{display:grid;grid-template-columns:2em 1fr;gap:10px;font-size:.95rem}
+.tips .n{font-family:var(--mono);font-weight:600;font-size:12px;color:var(--blue);padding-top:3px}
+.tips b{font-weight:600}
+.tips span span{color:var(--ink-2)}
+
+/* footer */
+footer{border-top:1px solid var(--ink);padding:34px 0 44px;background:var(--wash)}
+footer p{color:var(--ink-2);font-size:.95rem;margin-top:10px;max-width:34em}
+.doors{display:grid;gap:0;margin-top:22px;border-top:1px solid var(--rule)}
+.doors a{display:flex;align-items:center;gap:12px;padding:14px 2px;border-bottom:1px solid var(--rule);text-decoration:none;min-height:60px}
+.doors small{display:block;font-size:.84rem;color:var(--ink-2)}
+.doors b{font-weight:600}
+.doors span{flex:1}
+.doors i{font-style:normal;color:var(--ink-3);transition:transform .18s,color .18s}
+.doors a:hover i{transform:translateX(3px);color:var(--blue)}
+.fine{font-size:.8rem!important;color:var(--ink-3)!important;margin-top:22px!important}
+
+/* tool sheet */
+.sheet{position:fixed;inset:0;z-index:60;background:var(--paper);display:none;flex-direction:column}
+.sheet.on{display:flex}
+.shead{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 16px;border-bottom:1px solid var(--rule)}
+.shead .k{display:block}
+.shead b{font-family:var(--display);font-size:1.05rem;letter-spacing:-.01em}
+.x{width:44px;height:44px;border-radius:50%;display:grid;place-items:center;background:var(--wash);flex:none;font-size:1.2rem;line-height:1}
+.sbody{flex:1;overflow:auto;-webkit-overflow-scrolling:touch;padding:20px 0 40px}
+.sbody .wrap{max-width:560px}
+.demo-tag{display:inline-block;font-family:var(--mono);font-size:10.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-2);background:var(--mark-soft);padding:3px 8px;border-radius:4px;margin-bottom:14px}
+.tool{display:grid;gap:18px}
+.tool h3{font-size:1.35rem}
+.q .lab{font-weight:600;font-size:.95rem;margin-bottom:8px;display:block}
+.pick{display:flex;flex-wrap:wrap;gap:8px}
+.pick button{min-height:46px;padding:8px 15px;border-radius:10px;box-shadow:inset 0 0 0 1px var(--rule);background:#fff;font-weight:500;font-size:.95rem}
+.pick button[aria-pressed="true"]{background:var(--ink);color:#fff;box-shadow:none}
+.res{border:1px solid var(--ink);border-radius:12px;padding:16px;background:#fff}
+.res .k{display:block}
+.big{font-family:var(--display);font-weight:800;font-size:clamp(1.6rem,7.4vw,2.2rem);letter-spacing:-.03em;line-height:1.1;margin-top:6px;font-variant-numeric:tabular-nums}
+.big.red{color:var(--red)}
+.res p{color:var(--ink-2);font-size:.9rem;margin-top:8px}
+.rows{display:grid;gap:0;margin-top:12px;border-top:1px solid var(--rule)}
+.rows div{display:flex;justify-content:space-between;gap:12px;padding:9px 0;border-bottom:1px solid var(--rule-2);font-size:.95rem}
+.rows div span:last-child{font-variant-numeric:tabular-nums;font-weight:600;white-space:nowrap}
+.rows div.t{border-bottom:0;font-weight:700;font-size:1.05rem;padding-top:12px}
+.items{display:grid;gap:8px}
+.item{display:grid;grid-template-columns:minmax(0,1fr) 3.6em 5.6em 34px;gap:6px;align-items:center}
+.item input{width:100%;border:1px solid var(--rule);border-radius:8px;padding:10px 9px;font-size:16px;min-width:0;background:#fff}
+.item input:focus{outline:0;border-color:var(--blue)}
+.item button{width:34px;height:42px;color:var(--ink-3);font-size:1.1rem}
+.ihead{font-family:var(--mono);font-size:10.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3)}
+.ihead span{padding-left:2px}
+.behind{margin-top:34px;padding-top:24px;border-top:1px solid var(--ink)}
+.behind p{color:var(--ink-2);font-size:.95rem;margin-top:8px}
+.toast{position:fixed;left:50%;bottom:22px;transform:translate(-50%,20px);background:var(--ink);color:#fff;padding:10px 16px;border-radius:999px;font-size:.92rem;font-weight:500;opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;z-index:80;white-space:nowrap}
+.toast.on{opacity:1;transform:translate(-50%,0)}
+
+@media(min-width:560px){
+  .acts{grid-template-columns:1fr}
+  .tools .row .btn{min-width:150px}
+}
+@media(min-width:980px){
+  .build{grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:48px;align-items:start}
+  .out{position:sticky;top:20px}
+  .starters{margin-inline:0;padding-inline:0;flex-wrap:wrap}
+}
+@media(max-width:380px){
+  .split{grid-template-columns:1fr}
+  .paste{grid-template-columns:1fr}
+}
+@media(prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important}}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <div class="top">
+    <a class="wm" href="https://briklay.app/" target="_top" aria-label="Briklay">Briklay<i>.</i></a>
+    <span class="k">AI business tools</span>
+  </div>
+
+  <header class="hero">
+    <span class="k b">The rest of the card you are holding</span>
+    <h1>Build your own business tool with AI.</h1>
+    <p class="lead">Fill in the <mark>yellow</mark> parts for your business, copy the prompt, and paste it into ChatGPT, Claude or Gemini. No software team. Nothing to install.</p>
+    <ol class="jump">
+      <li><button type="button" data-go="builder"><span class="n">01</span><b>Build your prompt<small>Answer six questions about your business</small></b><span class="ar">↓</span></button></li>
+      <li><button type="button" data-go="stage"><span class="n">02</span><b>Copy the prompt from the talk<small>The customer estimator, word for word</small></b><span class="ar">↓</span></button></li>
+      <li><button type="button" data-go="tools"><span class="n">03</span><b>Try five ready tools<small>Each one with the prompt that builds it</small></b><span class="ar">↓</span></button></li>
+    </ol>
+  </header>
+</div>
+
+<!-- 01 BUILDER -->
+<section id="builder">
+  <div class="wrap wide">
+    <span class="k b">01 · Prompt builder</span>
+    <h2>Describe your business. Get your prompt.</h2>
+    <p class="sub">Start from a trade close to yours, then change the words and numbers to match how you really work.</p>
+    <div class="starters" id="starters" role="group" aria-label="Start from a trade"></div>
+
+    <div class="build">
+      <div class="form">
+        <div class="two">
+          <div class="f"><label for="biz">Your business</label><input id="biz" type="text" autocomplete="off" placeholder="catering service"></div>
+          <div class="f"><label for="town">Your town</label><input id="town" type="text" autocomplete="off" placeholder="Kakinada"></div>
+        </div>
+        <div class="f">
+          <span class="lab" id="wholab">Who will use the tool?</span>
+          <div class="seg" role="group" aria-labelledby="wholab">
+            <button type="button" data-who="customer" aria-pressed="true">My customers</button>
+            <button type="button" data-who="staff" aria-pressed="false">Me and my staff</button>
+          </div>
+        </div>
+        <div class="f"><label for="task">What should it work out?</label><textarea id="task" rows="2" placeholder="show a rough price for an event, per plate and in total"></textarea></div>
+        <div class="f"><label for="inputs">What gets typed in or chosen?</label><textarea id="inputs" rows="2" placeholder="number of guests, veg or non-veg, menu level"></textarea><span class="hint">Three to five things. More than that and people stop filling it.</span></div>
+        <div class="f"><label for="rules">Your rates and rules</label><textarea id="rules" rows="4" placeholder="Veg ₹220 per plate, non-veg ₹320. Below 100 guests add 15%."></textarea><span class="hint">This is the part only you know. Starter numbers are samples, so put your own.</span></div>
+        <div class="f"><label for="check">A job you already know the answer to</label><textarea id="check" rows="2" placeholder="200 guests, veg, regular menu = ₹50,400"></textarea><span class="hint">The AI uses this to check its own maths. Optional, but it catches most mistakes.</span></div>
+        <div class="f">
+          <span class="lab">Add to the tool</span>
+          <div class="opts">
+            <label class="opt"><input type="checkbox" id="o-wa" checked><span>Send on WhatsApp button<small>The answer lands in your chat, already typed.</small></span></label>
+            <div class="wanum f" id="wanumbox"><input id="wanum" type="tel" inputmode="tel" autocomplete="off" placeholder="Your WhatsApp number" aria-label="Your WhatsApp number"></div>
+            <label class="opt"><input type="checkbox" id="o-range" checked><span>Show a price range, not one figure<small>Safer when customers see it before a site visit.</small></span></label>
+            <label class="opt"><input type="checkbox" id="o-te"><span>Telugu and English labels</span></label>
+          </div>
+        </div>
+      </div>
+
+      <div class="out" id="out">
+        <div class="outhead"><span class="k">Your prompt</span><span class="left" id="left"></span></div>
+        <dl class="prompt" id="preview"></dl>
+        <div class="acts">
+          <button class="btn blue full" type="button" id="copyMain"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy my prompt</span></button>
+          <div class="paste">
+            <button class="btn line sm" type="button" data-open="chatgpt">ChatGPT</button>
+            <button class="btn line sm" type="button" data-open="claude">Claude</button>
+            <button class="btn line sm" type="button" data-open="gemini">Gemini</button>
+          </div>
+        </div>
+        <p class="note">The three buttons copy your prompt and open that assistant. If the box is empty when it opens, press and hold, then paste.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 02 STAGE PROMPT -->
+<section id="stage">
+  <div class="wrap">
+    <span class="k b">02 · From the talk</span>
+    <h2>The customer estimator, word for word.</h2>
+    <p class="sub">A link your customer opens at 11 pm. They answer three questions, see a price range, and tap a button that sends you the enquiry on WhatsApp. This prompt builds it.</p>
+    <div class="raw" id="stageRaw">
+      <pre id="stagePre"></pre>
+      <div class="bar">
+        <button class="btn sm" type="button" data-copy="estimator">Copy this prompt</button>
+        <button class="btn line sm more" type="button" data-more="stageRaw">Show all</button>
+      </div>
+    </div>
+    <div class="acts" style="grid-template-columns:1fr 1fr">
+      <button class="btn line" type="button" data-tool="estimator">Try the tool</button>
+      <button class="btn line" type="button" data-mine="estimator">Make it mine</button>
+    </div>
+  </div>
+</section>
+
+<!-- 03 TOOLS -->
+<section id="tools">
+  <div class="wrap">
+    <span class="k b">03 · Ready tools</span>
+    <h2>Five tools you can build this week.</h2>
+    <p class="sub">Each one works right here on your phone. Try it, then copy the prompt behind it and change the numbers to yours.</p>
+    <ol class="tools" id="toolList"></ol>
+  </div>
+</section>
+
+<!-- LIMITS -->
+<section id="limits">
+  <div class="wrap">
+    <span class="k b">Be honest about it</span>
+    <h2>Where this works, and where it stops.</h2>
+    <p class="sub">AI is good at tools where numbers go in and an answer comes out. It is weak where data must be saved and shared every day.</p>
+    <div class="split">
+      <div><h3>Build yourself</h3><ul><li>Price estimators</li><li>Quote makers</li><li>Daily calculators</li><li>Checklists</li></ul></div>
+      <div class="buy"><h3>Keep buying</h3><ul><li>Accounts and GST billing</li><li>Inventory</li><li>Tools many staff share</li></ul></div>
+    </div>
+    <ol class="tips">
+      <li><span class="n">A</span><span><b>Test with a job you already know.</b> <span>If the tool does not give the figure you billed last week, tell the AI what is wrong and it will fix it.</span></span></li>
+      <li><span class="n">B</span><span><b>Only share numbers you are happy to make public.</b> <span>Your competitors can open the same link your customers do.</span></span></li>
+      <li><span class="n">C</span><span><b>To put the tool on your phone,</b> <span>ask the AI: "How do I share this as a link?" Most assistants can publish it for you in one tap.</span></span></li>
+    </ol>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <a class="wm" href="https://briklay.app/" target="_top">Briklay<i>.</i></a>
+    <p>This page is from Briklay Engineering, Kakinada. We build homes, and we wrote the software that runs our own sites.</p>
+    <div class="doors">
+      <a href="https://briklay.app/" target="_top"><span><b>Running construction sites?</b><small>Briklay keeps your site records and accounts, from WhatsApp.</small></span><i>→</i></a>
+      <a href="https://briklay.in/costestimator" target="_blank" rel="noopener"><span><b>Building a home?</b><small>See what it would cost, in two minutes.</small></span><i>→</i></a>
+      <a id="askLink" href="#" target="_blank" rel="noopener"><span><b>Stuck on your prompt?</b><small>WhatsApp Chandu and he will take a look.</small></span><i>→</i></a>
+    </div>
+    <p class="fine">Rates and prices inside the sample tools are made up for the demo. They are not quotes.</p>
+  </div>
+</footer>
+
+<!-- tool sheet -->
+<div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
+  <div class="shead">
+    <div><span class="k">Sample tool</span><b id="sheetTitle"></b></div>
+    <button class="x" type="button" id="sheetClose" aria-label="Close">✕</button>
+  </div>
+  <div class="sbody" id="sbody"><div class="wrap">
+    <div id="toolMount"></div>
+    <div class="behind">
+      <span class="k b">The prompt that builds this</span>
+      <p id="behindNote"></p>
+      <div class="raw" id="toolRaw">
+        <pre id="toolPre"></pre>
+        <div class="bar">
+          <button class="btn sm" type="button" id="toolCopy">Copy this prompt</button>
+          <button class="btn line sm more" type="button" data-more="toolRaw">Show all</button>
+        </div>
+      </div>
+      <div class="acts"><button class="btn line full" type="button" id="toolMine">Change it for my business</button></div>
+    </div>
+  </div></div>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+(function(){
+'use strict';
+/* ------------------------------------------------------------------ config */
+var OWNER_WA = '918330972705';          // where "Send on WhatsApp" in the demo estimator and "Stuck?" go
+var ASK_FIRST = 'Before you build anything, ask me questions about my business, one at a time, until you understand how I price and work. Then build.';
+
+/* ------------------------------------------------------------------ helpers */
+function $(id){ return document.getElementById(id); }
+function esc(s){ return String(s).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+function inr(n){ return '₹' + Math.round(n).toLocaleString('en-IN'); }
+function num(v){ var n = parseFloat(String(v).replace(/,/g,'')); return isFinite(n) ? n : 0; }
+function clean(s){ return String(s || '').trim().replace(/\s+/g,' ').replace(/[.。]+$/,''); }
+function lowerFirst(s){ return s ? s.charAt(0).toLowerCase() + s.slice(1) : s; }
+var toastT;
+function toast(msg){ var t = $('toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toastT); toastT = setTimeout(function(){ t.classList.remove('on'); }, 1900); }
+function copy(text){
+  function legacy(){
+    var ta = document.createElement('textarea'); ta.value = text; ta.setAttribute('readonly','');
+    ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0'; document.body.appendChild(ta);
+    ta.select(); ta.setSelectionRange(0, text.length);
+    var ok = false; try { ok = document.execCommand('copy'); } catch(e){}
+    document.body.removeChild(ta); return ok;
+  }
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    return navigator.clipboard.writeText(text).then(function(){ return true; }, function(){ return legacy(); });
+  }
+  return Promise.resolve(legacy());
+}
+function flash(btn, label){
+  var span = btn.querySelector('span') || btn; var old = span.textContent;
+  span.textContent = label || 'Copied'; btn.classList.add('done');
+  setTimeout(function(){ span.textContent = old; btn.classList.remove('done'); }, 1600);
+}
+function copyFrom(btn, text){
+  copy(text).then(function(ok){
+    if (ok) { flash(btn); toast('Copied. Paste it into your AI assistant.'); }
+    else toast('Could not copy. Press and hold the text to copy it.');
+  });
+}
+function go(id){ var el = $(id); if (el) el.scrollIntoView({behavior:'smooth', block:'start'}); }
+function store(k, v){ try { localStorage.setItem(k, v); } catch(e){} }
+function load(k){ try { return localStorage.getItem(k); } catch(e){ return null; } }
+
+/* ------------------------------------------------------------------ starters */
+var STARTERS = [
+  { id:'interiors', name:'Interiors', who:'customer', biz:'home interiors studio',
+    task:'show a customer a rough price range for their home interiors',
+    inputs:'home type (1 BHK, 2 BHK, 3 BHK, villa), what they need (kitchen, wardrobes, TV unit, false ceiling, painting), finish (Essential, Premium, Luxury)',
+    rules:'For a 2 BHK: modular kitchen ₹1,60,000, wardrobes ₹70,000 per bedroom, TV unit and living ₹80,000, false ceiling ₹80,000, painting ₹60,000. Premium finish x1.35, Luxury x1.8.',
+    check:'2 BHK, kitchen and wardrobes, Premium = about ₹4,05,000', wa:true, range:true },
+  { id:'catering', name:'Catering', who:'customer', biz:'catering service',
+    task:'show a rough price for an event, per plate and in total',
+    inputs:'number of guests, veg or non-veg, menu level (regular, special, premium), event date',
+    rules:'Veg ₹220 per plate, non-veg ₹320. Special menu +₹80 per plate, premium +₹160. Below 100 guests add 15%. Service staff ₹800 each, one for every 25 guests.',
+    check:'200 guests, veg, regular menu = ₹44,000 food + 8 staff ₹6,400 = ₹50,400', wa:true, range:true },
+  { id:'solar', name:'Solar', who:'customer', biz:'rooftop solar dealership',
+    task:'tell a home owner what size solar system they need, what it costs and what they save each month',
+    inputs:'monthly electricity bill, roof type (RCC or sheet)',
+    rules:'Units per month = bill ÷ ₹7. System size = units ÷ 120, rounded up to the next 0.5 kW. Cost ₹60,000 per kW. Monthly saving = 90% of the bill. Payback in years = cost ÷ yearly saving.',
+    check:'Bill ₹4,200 = 600 units = 5 kW = ₹3,00,000, saving ₹3,780 a month, payback about 6.6 years', wa:true, range:true },
+  { id:'travel', name:'Travel', who:'customer', biz:'tours and travels agency',
+    task:'give a rough package price for a trip',
+    inputs:'number of people, number of days, hotel grade (budget, 3-star, 4-star), vehicle (sedan, SUV, tempo traveller)',
+    rules:'Hotel per room per night: ₹1,800 budget, ₹3,200 3-star, ₹5,500 4-star. Two people per room, nights = days minus one. Vehicle per day: ₹3,000 sedan, ₹4,500 SUV, ₹7,000 tempo. Food ₹600 per person per day. Add 10% service charge.',
+    check:'4 people, 3 days, 3-star, SUV = ₹12,800 rooms + ₹13,500 vehicle + ₹7,200 food = ₹33,500, plus 10% = ₹36,850', wa:true, range:true },
+  { id:'jewellery', name:'Jewellery', who:'staff', biz:'jewellery shop',
+    task:'make a gold price quote at the counter, including old gold exchange',
+    inputs:"weight in grams, today's rate per gram, wastage %, making charge %, old gold weight and purity %",
+    rules:'Gold value = weight x rate. Add wastage % and making % on the gold value. Add GST 3% on that total. Then subtract old gold: old weight x purity % x rate.',
+    check:'10 g at ₹10,000 per gram, wastage 8%, making 10%, no old gold = ₹1,18,000 + GST ₹3,540 = ₹1,21,540', wa:true, range:false },
+  { id:'printing', name:'Flex printing', who:'staff', biz:'flex and digital printing shop',
+    task:'price a flex banner order',
+    inputs:'width in feet, height in feet, material (normal, star, backlit), number of pieces',
+    rules:'₹12 per sq ft normal, ₹18 star, ₹35 backlit. Minimum bill ₹150. 10 pieces or more get 10% off.',
+    check:'6 x 3 ft star flex, 2 pieces = 36 sq ft x ₹18 = ₹648', wa:true, range:false },
+  { id:'tiles', name:'Tiles', who:'staff', biz:'tiles and sanitary showroom',
+    task:'tell a customer how many boxes of tiles to buy for a room, and the bill',
+    inputs:'room length in feet, room width in feet, tile size, price per box',
+    rules:'Area = length x width. Add 10% for wastage. A box of 2 x 2 ft tiles covers 16 sq ft, a box of 2 x 4 ft covers 16 sq ft, a box of 1 x 1 ft covers 10 sq ft. Round boxes up to a whole number.',
+    check:'12 x 10 ft room, 2 x 2 ft tiles = 120 + 10% = 132 sq ft ÷ 16 = 8.25, so 9 boxes', wa:true, range:false },
+  { id:'emi', name:'Loans', who:'customer', biz:'loan and insurance agency',
+    task:'show the monthly EMI, total interest and total payment for a loan',
+    inputs:'loan amount, yearly interest rate, number of years',
+    rules:'Use the standard reducing-balance EMI formula with monthly compounding. Show EMI, total interest and total amount paid. Add a line: rate depends on the bank and your profile.',
+    check:'₹10,00,000 at 9% for 10 years = EMI ₹12,668', wa:true, range:false },
+  { id:'photo', name:'Photography', who:'customer', biz:'photography studio',
+    task:'give a rough package price for an event shoot',
+    inputs:'event type, number of hours, number of photographers, video yes or no, album yes or no',
+    rules:'Photographer ₹2,500 per hour each. Video adds ₹3,500 per hour. Album ₹12,000. Outstation adds ₹5,000.',
+    check:'Wedding, 6 hours, 2 photographers, video and album = ₹30,000 + ₹21,000 + ₹12,000 = ₹63,000', wa:true, range:true },
+  { id:'wages', name:'Weekly wages', who:'staff', biz:'business with daily-wage workers',
+    task:'work out the weekly payment for each worker',
+    inputs:'worker name, days worked, daily rate, advance taken',
+    rules:'Pay = days x daily rate minus advance. Let me add many workers, then show each payout and the total cash I need on Saturday.',
+    check:'6 days x ₹800 minus ₹1,000 advance = ₹3,800', wa:true, range:false }
+];
+/* builder presets for the non-estimator sample tools ("Change it for my business") */
+var TOOL_PRESETS = {
+  estimator: 'interiors',
+  quote: { who:'staff', biz:'', task:'make a clean quotation I can send to a customer in one minute',
+    inputs:'customer name, items with quantity and rate, discount %, GST %',
+    rules:'Amount = quantity x rate. Subtotal = sum of amounts. Take the discount off the subtotal, then add GST on what is left.',
+    check:'2 x ₹1,500 + 1 x ₹4,000 = ₹7,000. Less 10% = ₹6,300. Plus 18% GST ₹1,134 = ₹7,434', wa:true, range:false },
+  discount: { who:'staff', biz:'', task:'show me what a discount really costs before I agree to it',
+    inputs:'selling price, my cost, discount % the customer is asking for',
+    rules:'Profit now = price minus cost. Profit after = discounted price minus cost. Extra sales needed to earn the same = profit now ÷ profit after, minus 1. If profit after is zero or less, say the discount wipes out my profit.',
+    check:'Price ₹1,000, cost ₹700, discount 10% = profit drops from ₹300 to ₹200, I must sell 50% more', wa:false, range:false },
+  breakeven: { who:'staff', biz:'', task:'tell me how much I must sell every day to cover my costs and reach my profit target',
+    inputs:'monthly rent, salaries, loan EMIs, other costs, average margin %, working days in a month, target profit',
+    rules:'Break-even sales = total monthly costs ÷ margin %. Target sales = (costs + target profit) ÷ margin %. Per day = monthly figure ÷ working days.',
+    check:'Costs ₹1,50,000, margin 25%, 26 days = break-even ₹6,00,000 a month, ₹23,077 a day. With ₹1,00,000 target profit = ₹10,00,000 a month, ₹38,462 a day', wa:false, range:false }
+};
+
+/* ------------------------------------------------------------------ builder state */
+var F = ['biz','town','task','inputs','rules','check','wanum'];
+var state = { who:'customer', biz:'', town:'', task:'', inputs:'', rules:'', check:'', wanum:'', wa:true, range:true, te:false, starter:'' };
+
+function readForm(){
+  F.forEach(function(k){ state[k] = $(k).value; });
+  state.wa = $('o-wa').checked; state.range = $('o-range').checked; state.te = $('o-te').checked;
+}
+function writeForm(){
+  F.forEach(function(k){ $(k).value = state[k] || ''; });
+  $('o-wa').checked = !!state.wa; $('o-range').checked = !!state.range; $('o-te').checked = !!state.te;
+  syncWho(); $('wanumbox').style.display = state.wa ? '' : 'none';
+  Array.prototype.forEach.call(document.querySelectorAll('#starters .chip'), function(c){ c.setAttribute('aria-pressed', String(c.dataset.id === state.starter)); });
+}
+function syncWho(){
+  Array.prototype.forEach.call(document.querySelectorAll('[data-who]'), function(b){ b.setAttribute('aria-pressed', String(b.dataset.who === state.who)); });
+}
+function applyPreset(p, id){
+  ['who','task','inputs','rules','check','wa','range'].forEach(function(k){ state[k] = p[k]; });
+  if (p.biz) state.biz = p.biz;
+  state.starter = id || '';
+  writeForm(); render();
+}
+
+/* Build the prompt once as parts; the same parts feed the preview (with marks) and the plain text. */
+function parts(){
+  var s = state;
+  function v(val, ph){ val = clean(val); return val ? {t:val, ph:false} : {t:ph, ph:true}; }
+  var biz = v(s.biz, 'your business'), town = v(s.town, 'your town');
+  var task = v(s.task, 'what it should work out'), inputs = v(s.inputs, 'the 3 to 5 things that get typed in');
+  var rules = v(s.rules, 'your rates, formula, GST'), check = clean(s.check);
+  task.t = task.ph ? task.t : lowerFirst(task.t);
+  var use = s.who === 'customer'
+    ? 'My customers will open it from a link I share on WhatsApp.'
+    : 'Only my staff and I will use it, on our phones.';
+  var fmt = ['Give me ONE complete HTML file that opens in any browser. Nothing to install, no login, no database.',
+             'Made for a phone: big buttons, large text, amounts in Indian format like ₹1,25,000.'];
+  if (s.range) fmt.push('Show a price range, not one exact figure, with the line "Final quote after we talk."');
+  var wa = null;
+  if (s.wa) { wa = v(s.wanum, 'your WhatsApp number'); fmt.push(['Add a "Send on WhatsApp" button that opens WhatsApp to ', wa, ' with the details and the answer already typed.']); }
+  if (s.te) fmt.push('Labels in Telugu and English.');
+  fmt.push('Put my business name at the top.');
+  var rows = [
+    ['Context', [['I run a ', biz, ' in ', town, '.']]],
+    ['Task', [['Build me a simple tool that works on a phone. It should ', task, '. ' + use]]],
+    ['Ask first', [[ASK_FIRST]], 'key'],
+    ['Inputs', [[(s.who === 'customer' ? 'The customer will enter: ' : 'I will enter: '), inputs, '.']]],
+    ['Rules', [['Calculate it like this: ', rules, '.']]]
+  ];
+  if (check) rows.push(['Check', [['Check your work with this job: ', {t:check, ph:false}, '. If your tool gives a different answer, fix it before you show me.']]]);
+  rows.push(['Format', fmt.map(function(f){ return Array.isArray(f) ? f : [f]; }), 'list']);
+  var blanks = [biz, town, task, inputs, rules].concat(wa ? [wa] : []).filter(function(x){ return x.ph; }).length;
+  return { rows:rows, blanks:blanks };
+}
+function seg(x){ return typeof x === 'string' ? x : x.t; }
+function plain(){
+  return parts().rows.map(function(r){
+    if (r[2] === 'list') return 'Format:\n' + r[1].map(function(l){ return '- ' + l.map(seg).join(''); }).join('\n');
+    return r[1].map(function(l){ return l.map(seg).join(''); }).join('\n');
+  }).join('\n\n');
+}
+function render(){
+  var p = parts();
+  function html(l){ return l.map(function(x){ return typeof x === 'string' ? esc(x) : '<mark' + (x.ph ? ' class="ph"' : '') + '>' + esc(x.t) + '</mark>'; }).join(''); }
+  $('preview').innerHTML = p.rows.map(function(r){
+    var body = r[2] === 'list' ? '<ul>' + r[1].map(function(l){ return '<li>' + html(l) + '</li>'; }).join('') + '</ul>' : r[1].map(html).join('<br>');
+    return '<dt>' + r[0] + '</dt><dd' + (r[2] === 'key' ? ' class="key"' : '') + '>' + body + '</dd>';
+  }).join('');
+  var left = $('left');
+  left.textContent = p.blanks ? p.blanks + (p.blanks === 1 ? ' blank left' : ' blanks left') : 'Ready to copy';
+  left.classList.toggle('ok', !p.blanks);
+  store('bk-aitools', JSON.stringify(state));
+}
+
+/* ------------------------------------------------------------------ tool prompts */
+var PROMPTS = {
+estimator: [
+'I run a home interiors studio in Kakinada.',
+'',
+'Build me a simple cost estimator that my customers open on their phone from a link I share on WhatsApp. It should show them a rough price range for their interiors and send me their enquiry.',
+'',
+ASK_FIRST,
+'',
+'The customer will choose:',
+'1. Home type: 1 BHK, 2 BHK, 3 BHK or Villa',
+'2. What they need, more than one allowed: modular kitchen, wardrobes, TV unit and living room, false ceiling, full-home painting',
+'3. Finish: Essential, Premium or Luxury',
+'',
+'Calculate it like this. Rates are in rupees, for 1 BHK / 2 BHK / 3 BHK / Villa:',
+'- Modular kitchen: 1,20,000 / 1,60,000 / 2,00,000 / 2,80,000',
+'- Wardrobes: 70,000 per bedroom (1 / 2 / 3 / 4 bedrooms)',
+'- TV unit and living room: 60,000 / 80,000 / 1,00,000 / 1,50,000',
+'- False ceiling: 50,000 / 80,000 / 1,10,000 / 1,80,000',
+'- Full-home painting: 40,000 / 60,000 / 85,000 / 1,40,000',
+'- Finish multiplier: Essential x1, Premium x1.35, Luxury x1.8',
+'- Show a range from 10% below to 10% above the total, each rounded to the nearest 5,000.',
+'',
+'Check your work with this job: a 2 BHK with modular kitchen and wardrobes in Premium must show ₹3,65,000 to ₹4,45,000. If your tool gives a different answer, fix it before you show me.',
+'',
+'Format:',
+'- Give me ONE complete HTML file that opens in any browser. Nothing to install, no login, no database.',
+'- Made for a phone: big buttons, large text, amounts in Indian format like ₹3,65,000.',
+'- Show the range with the line "Final quote after a site visit."',
+'- Add a "Send on WhatsApp" button that opens WhatsApp to [your WhatsApp number] with the customer\'s choices and the range already typed.',
+'- Put my business name at the top.'
+].join('\n'),
+quote: [
+'I run a [your business] in [your town].',
+'',
+'Build me a simple quotation maker that works on my phone. I should be able to make a clean quote and send it to a customer in one minute.',
+'',
+ASK_FIRST,
+'',
+'I will enter: my business name, the customer name, items with quantity and rate, a discount % and a GST %. I must be able to add and remove items.',
+'',
+'Calculate it like this: amount = quantity x rate. Subtotal = sum of all amounts. Take the discount off the subtotal, then add GST on what is left.',
+'',
+'Check your work with this job: 2 x ₹1,500 and 1 x ₹4,000 is ₹7,000. Less 10% discount is ₹6,300. Plus 18% GST of ₹1,134 is ₹7,434. If your tool gives a different answer, fix it before you show me.',
+'',
+'Format:',
+'- Give me ONE complete HTML file that opens in any browser. Nothing to install, no login, no database.',
+'- Made for a phone: big buttons, large text, amounts in Indian format like ₹1,25,000.',
+'- Add a "Share on WhatsApp" button that opens WhatsApp with the full quote already typed, neatly lined up.',
+'- Add the line "Valid for 7 days" at the bottom of the quote.'
+].join('\n'),
+discount: [
+'I run a [your business] in [your town].',
+'',
+'Build me a simple tool for my phone that shows what a discount really costs me, so I can decide before I say yes to a customer.',
+'',
+ASK_FIRST,
+'',
+'I will enter: selling price, my cost, and the discount % the customer is asking for.',
+'',
+'Calculate it like this: profit now = price minus cost. Profit after discount = discounted price minus cost. Extra sales needed to earn the same money = profit now ÷ profit after, minus 1, shown as a percentage. If profit after discount is zero or less, show a clear warning that this discount wipes out my profit.',
+'',
+'Check your work with this job: price ₹1,000, cost ₹700, discount 10%. Profit drops from ₹300 to ₹200, and I must sell 50% more to earn the same. If your tool gives a different answer, fix it before you show me.',
+'',
+'Format:',
+'- Give me ONE complete HTML file that opens in any browser. Nothing to install, no login, no database.',
+'- Made for a phone: big buttons, large text, amounts in Indian format like ₹1,25,000.',
+'- Show the answer in one plain sentence, like "If you sell 100 today, you now need to sell 150."'
+].join('\n'),
+breakeven: [
+'I run a [your business] in [your town].',
+'',
+'Build me a simple tool for my phone that tells me how much I must sell every day to cover my costs, and how much to reach my profit target.',
+'',
+ASK_FIRST,
+'',
+'I will enter: monthly rent, salaries, loan EMIs, other monthly costs, my average margin %, working days in a month, and the profit I want to take home.',
+'',
+'Calculate it like this: total costs = rent + salaries + EMIs + other. Break-even sales = total costs ÷ margin %. Target sales = (total costs + target profit) ÷ margin %. Per day = monthly figure ÷ working days.',
+'',
+'Check your work with this job: costs of ₹1,50,000, margin 25%, 26 working days. Break-even is ₹6,00,000 a month, ₹23,077 a day. With a ₹1,00,000 target profit it is ₹10,00,000 a month, ₹38,462 a day. If your tool gives a different answer, fix it before you show me.',
+'',
+'Format:',
+'- Give me ONE complete HTML file that opens in any browser. Nothing to install, no login, no database.',
+'- Made for a phone: big buttons, large text, amounts in Indian format like ₹1,25,000.',
+'- Show the two daily figures largest, since those are what I will look at every morning.'
+].join('\n'),
+builder: [
+'Build me a prompt builder for small business owners, as a simple tool that works on a phone.',
+'',
+ASK_FIRST,
+'',
+'The owner will enter: their business, their town, who will use the tool (customers or staff), what the tool should work out, what gets typed in, their rates and rules, and one job they already know the answer to.',
+'',
+'As they type, show the finished prompt below the form. Lay it out in labelled rows: Context, Task, Ask first, Inputs, Rules, Check, Format. Highlight every part the owner filled in, and show what is still blank in a paler highlight. The "Ask first" row always says: "Before you build anything, ask me questions about my business, one at a time. Then build." The "Format" row always asks for one complete HTML file made for a phone.',
+'',
+'Format:',
+'- Give me ONE complete HTML file that opens in any browser. Nothing to install, no login, no database.',
+'- Made for a phone: big buttons, large text.',
+'- Add a "Copy prompt" button, and a few starter buttons that fill the form with an example for common trades.'
+].join('\n')
+};
+
+var TOOLS = [
+  { id:'estimator', name:'Customer estimator', line:'Customers answer three questions, see a price range, and send you the enquiry on WhatsApp.', fit:'Interiors, catering, solar, travel, events, photography', note:'This is the prompt from the talk. The tool above was built to these exact rates.' },
+  { id:'quote', name:'Quotation maker', line:'Items, discount and GST in. A clean quote out, ready to share on WhatsApp.', fit:'Any business that sends quotes', note:'Replace the blanks with your business. Add your own terms, like delivery time or advance.' },
+  { id:'discount', name:'Discount checker', line:'See what a discount really costs, and how much more you must sell to earn the same.', fit:'Shops, traders, distributors', note:'A small tool, but it changes how you answer "konchem thagginchandi".' },
+  { id:'breakeven', name:'Break-even and daily target', line:'Rent, salaries and EMIs in. The sales you need every day out.', fit:'Any business with fixed monthly costs', note:'Use your real costs. The daily figure is the one worth looking at every morning.' },
+  { id:'builder', name:'Prompt builder', line:'The tool at the top of this page. It was built with a prompt too.', fit:'Anyone who writes the same kind of prompt often', note:'This is the prompt for a tool like the one at the top of this page.' }
+];
+
+/* ------------------------------------------------------------------ sample tools */
+function pick(name, opts, sel, multi){
+  return '<div class="pick" data-pick="' + name + '"' + (multi ? ' data-multi="1"' : '') + '>' + opts.map(function(o){
+    var on = multi ? sel.indexOf(o) > -1 : sel === o;
+    return '<button type="button" data-v="' + esc(o) + '" aria-pressed="' + on + '">' + esc(o) + '</button>';
+  }).join('') + '</div>';
+}
+function field(id, label, val, extra){
+  return '<div class="f"><label for="' + id + '">' + label + '</label><input id="' + id + '" type="text" inputmode="decimal" autocomplete="off" value="' + esc(val) + '"' + (extra || '') + '></div>';
+}
+var RENDER = {};
+
+/* A · customer estimator */
+var EST = {
+  homes:['1 BHK','2 BHK','3 BHK','Villa'],
+  items:{ 'Modular kitchen':[120000,160000,200000,280000], 'Wardrobes':[70000,140000,210000,280000], 'TV unit and living':[60000,80000,100000,150000], 'False ceiling':[50000,80000,110000,180000], 'Full-home painting':[40000,60000,85000,140000] },
+  finish:{ 'Essential':1, 'Premium':1.35, 'Luxury':1.8 }
+};
+var est = { home:'2 BHK', need:['Modular kitchen','Wardrobes'], finish:'Premium' };
+function estCalc(s){
+  var i = EST.homes.indexOf(s.home), total = 0;
+  s.need.forEach(function(n){ total += EST.items[n][i]; });
+  total *= EST.finish[s.finish];
+  var r = function(x){ return Math.round(x / 5000) * 5000; };
+  return { total:total, low:r(total * 0.9), high:r(total * 1.1) };
+}
+RENDER.estimator = function(m){
+  var c = estCalc(est), has = est.need.length > 0;
+  var msg = 'Hi, I tried the sample interiors estimator on briklay.app/aibusinesstools.\n' + est.home + ' · ' + est.need.join(', ') + ' · ' + est.finish + '\nEstimate: ' + inr(c.low) + ' to ' + inr(c.high);
+  m.innerHTML = '<div class="tool"><div><span class="demo-tag">Demo · sample rates</span><h3>Sample Interiors, Kakinada</h3></div>' +
+    '<div class="q"><span class="lab">1. Your home</span>' + pick('home', EST.homes, est.home) + '</div>' +
+    '<div class="q"><span class="lab">2. What do you need?</span>' + pick('need', Object.keys(EST.items), est.need, true) + '</div>' +
+    '<div class="q"><span class="lab">3. Finish</span>' + pick('finish', Object.keys(EST.finish), est.finish) + '</div>' +
+    '<div class="res"><span class="k">Rough estimate</span>' +
+      (has ? '<div class="big">' + inr(c.low) + ' to ' + inr(c.high) + '</div><p>Final quote after a site visit.</p>' : '<div class="big">Pick at least one item</div>') + '</div>' +
+    (has ? '<a class="btn wa full" target="_blank" rel="noopener" href="https://wa.me/' + OWNER_WA + '?text=' + encodeURIComponent(msg) + '">Send on WhatsApp</a><p class="note" style="margin-top:-8px">In this demo the message goes to Chandu at Briklay. In your tool it comes to you.</p>' : '') + '</div>';
+};
+
+/* B · quotation maker */
+var quo = { biz:'Your Business', cust:'', items:[{n:'Item one',q:'2',r:'1500'},{n:'Item two',q:'1',r:'4000'}], disc:'10', gst:'18' };
+function quoCalc(s){
+  var sub = 0; s.items.forEach(function(i){ sub += num(i.q) * num(i.r); });
+  var d = sub * num(s.disc) / 100, after = sub - d, g = after * num(s.gst) / 100;
+  return { sub:sub, disc:d, after:after, gst:g, total:after + g };
+}
+function quoText(){
+  var c = quoCalc(quo), L = ['*' + (clean(quo.biz) || 'Quotation') + '*', 'Quotation' + (clean(quo.cust) ? ' for ' + clean(quo.cust) : ''), ''];
+  quo.items.forEach(function(i){ if (num(i.q) * num(i.r) > 0) L.push((clean(i.n) || 'Item') + ': ' + num(i.q) + ' x ' + inr(num(i.r)) + ' = ' + inr(num(i.q) * num(i.r))); });
+  L.push('', 'Subtotal: ' + inr(c.sub));
+  if (c.disc) L.push('Discount ' + num(quo.disc) + '%: -' + inr(c.disc));
+  if (c.gst) L.push('GST ' + num(quo.gst) + '%: ' + inr(c.gst));
+  L.push('*Total: ' + inr(c.total) + '*', '', 'Valid for 7 days.');
+  return L.join('\n');
+}
+function quoTotals(){
+  var c = quoCalc(quo);
+  return '<div class="rows"><div><span>Subtotal</span><span>' + inr(c.sub) + '</span></div>' +
+    '<div><span>Discount ' + num(quo.disc) + '%</span><span>-' + inr(c.disc) + '</span></div>' +
+    '<div><span>GST ' + num(quo.gst) + '%</span><span>' + inr(c.gst) + '</span></div>' +
+    '<div class="t"><span>Total</span><span>' + inr(c.total) + '</span></div></div>';
+}
+RENDER.quote = function(m){
+  m.innerHTML = '<div class="tool"><div><span class="demo-tag">Demo</span><h3>Quotation maker</h3></div>' +
+    '<div class="two"><div class="f"><label for="q-biz">Your business</label><input id="q-biz" type="text" data-quo="biz" value="' + esc(quo.biz) + '"></div>' +
+    '<div class="f"><label for="q-cust">Customer</label><input id="q-cust" type="text" data-quo="cust" placeholder="Name" value="' + esc(quo.cust) + '"></div></div>' +
+    '<div class="items"><div class="item ihead"><span>Item</span><span>Qty</span><span>Rate ₹</span><span></span></div>' +
+    quo.items.map(function(it, i){
+      return '<div class="item"><input type="text" aria-label="Item name" data-it="' + i + '" data-k="n" value="' + esc(it.n) + '"><input type="text" inputmode="decimal" aria-label="Quantity" data-it="' + i + '" data-k="q" value="' + esc(it.q) + '"><input type="text" inputmode="decimal" aria-label="Rate" data-it="' + i + '" data-k="r" value="' + esc(it.r) + '"><button type="button" aria-label="Remove item" data-del="' + i + '">✕</button></div>';
+    }).join('') + '</div>' +
+    '<button class="btn line sm" type="button" data-add="1" style="justify-self:start">+ Add item</button>' +
+    '<div class="two">' + field('q-disc', 'Discount %', quo.disc, ' data-quo="disc"') + field('q-gst', 'GST %', quo.gst, ' data-quo="gst"') + '</div>' +
+    '<div class="res"><span class="k">Quote</span><div id="quoTotals">' + quoTotals() + '</div></div>' +
+    '<div class="two"><button class="btn wa" type="button" data-quoshare="1">Share on WhatsApp</button><button class="btn line" type="button" data-quocopy="1"><span>Copy quote</span></button></div></div>';
+};
+
+/* C · discount checker */
+var dis = { price:'1000', cost:'700', d:'10' };
+function disCalc(s){
+  var p = num(s.price), c = num(s.cost), d = num(s.d);
+  var now = p - c, np = p * (1 - d / 100), after = np - c;
+  return { now:now, after:after, np:np, margin: p ? now / p * 100 : 0, extra: after > 0 ? (now / after - 1) * 100 : null };
+}
+function disOut(){
+  var c = disCalc(dis), ok = c.extra !== null && c.now > 0;
+  var head = c.now <= 0 ? '<div class="big red">No profit to begin with</div><p>Your cost is not below your selling price.</p>'
+    : !ok ? '<div class="big red">This discount wipes out your profit</div><p>At ' + inr(c.np) + ' you earn ' + inr(c.after) + ' on each sale.</p>'
+    : '<div class="big">Sell ' + (Math.round(c.extra * 10) / 10) + '% more</div><p>to earn what you earn today. If you sell 100 now, you need to sell ' + Math.ceil(100 * (1 + c.extra / 100) - 1e-9) + '.</p>';
+  return '<span class="k">To give this discount</span>' + head +
+    '<div class="rows"><div><span>Profit per sale now</span><span>' + inr(c.now) + '</span></div>' +
+    '<div><span>Price after discount</span><span>' + inr(c.np) + '</span></div>' +
+    '<div><span>Profit per sale after</span><span>' + inr(c.after) + '</span></div>' +
+    '<div><span>Your margin today</span><span>' + (Math.round(c.margin * 10) / 10) + '%</span></div></div>';
+}
+RENDER.discount = function(m){
+  m.innerHTML = '<div class="tool"><div><span class="demo-tag">Demo</span><h3>What does this discount cost me?</h3></div>' +
+    '<div class="two">' + field('d-price', 'Selling price ₹', dis.price, ' data-dis="price"') + field('d-cost', 'My cost ₹', dis.cost, ' data-dis="cost"') + '</div>' +
+    field('d-d', 'Discount asked %', dis.d, ' data-dis="d"') +
+    '<div class="q">' + pick('disq', ['5','10','15','20'], dis.d) + '</div>' +
+    '<div class="res" id="disOut">' + disOut() + '</div></div>';
+};
+
+/* D · break-even */
+var be = { rent:'40000', sal:'80000', emi:'20000', other:'10000', margin:'25', days:'26', target:'100000' };
+function beCalc(s){
+  var fixed = num(s.rent) + num(s.sal) + num(s.emi) + num(s.other), m = num(s.margin) / 100, d = num(s.days) || 1;
+  if (m <= 0) return { fixed:fixed, bad:true };
+  var bm = fixed / m, tm = (fixed + num(s.target)) / m;
+  return { fixed:fixed, bm:bm, bd:bm / d, tm:tm, td:tm / d };
+}
+function beOut(){
+  var c = beCalc(be);
+  if (c.bad) return '<span class="k">Every working day</span><div class="big red">Enter your margin %</div>';
+  return '<span class="k">Sell this much every working day</span>' +
+    '<div class="big">' + inr(c.bd) + '</div><p>to cover your costs. Below this, the month is a loss.</p>' +
+    '<div class="big" style="margin-top:14px">' + inr(c.td) + '</div><p>to take home ' + inr(num(be.target)) + ' this month.</p>' +
+    '<div class="rows"><div><span>Monthly costs</span><span>' + inr(c.fixed) + '</span></div>' +
+    '<div><span>Break-even sales a month</span><span>' + inr(c.bm) + '</span></div>' +
+    '<div><span>Target sales a month</span><span>' + inr(c.tm) + '</span></div></div>';
+}
+RENDER.breakeven = function(m){
+  m.innerHTML = '<div class="tool"><div><span class="demo-tag">Demo</span><h3>How much must I sell every day?</h3></div>' +
+    '<div class="two">' + field('b-rent', 'Rent ₹', be.rent, ' data-be="rent"') + field('b-sal', 'Salaries ₹', be.sal, ' data-be="sal"') + '</div>' +
+    '<div class="two">' + field('b-emi', 'Loan EMIs ₹', be.emi, ' data-be="emi"') + field('b-other', 'Other costs ₹', be.other, ' data-be="other"') + '</div>' +
+    '<div class="two">' + field('b-margin', 'Average margin %', be.margin, ' data-be="margin"') + field('b-days', 'Working days', be.days, ' data-be="days"') + '</div>' +
+    field('b-target', 'Profit I want this month ₹', be.target, ' data-be="target"') +
+    '<div class="res" id="beOut">' + beOut() + '</div></div>';
+};
+
+/* ------------------------------------------------------------------ sheet */
+var current = null, lastFocus = null;
+function openTool(id){
+  if (id === 'builder') { go('builder'); return; }
+  var t = TOOLS.filter(function(x){ return x.id === id; })[0]; if (!t) return;
+  current = id; lastFocus = document.activeElement;
+  $('sheetTitle').textContent = t.name; $('behindNote').textContent = t.note;
+  $('toolPre').textContent = PROMPTS[id]; $('toolRaw').classList.remove('open');
+  document.querySelector('[data-more="toolRaw"]').textContent = 'Show all';
+  RENDER[id]($('toolMount'));
+  $('sheet').classList.add('on'); document.body.style.overflow = 'hidden'; $('sbody').scrollTop = 0; $('sheetClose').focus();
+}
+function closeTool(){
+  $('sheet').classList.remove('on'); document.body.style.overflow = ''; current = null;
+  if (lastFocus && lastFocus.focus) lastFocus.focus();
+}
+function makeMine(id){
+  var p = TOOL_PRESETS[id];
+  if (typeof p === 'string') { var s = STARTERS.filter(function(x){ return x.id === p; })[0]; applyPreset(s, s.id); }
+  else if (p) applyPreset(p, '');
+  if ($('sheet').classList.contains('on')) closeTool();
+  setTimeout(function(){ go('builder'); toast('Loaded into the builder. Change the yellow parts.'); }, 60);
+}
+
+/* ------------------------------------------------------------------ wiring */
+$('starters').innerHTML = STARTERS.map(function(s){ return '<button class="chip" type="button" data-id="' + s.id + '" aria-pressed="false">' + esc(s.name) + '</button>'; }).join('');
+$('toolList').innerHTML = TOOLS.map(function(t, i){
+  var b = t.id === 'builder'
+    ? '<button class="btn sm" type="button" data-go="builder">Go to the builder</button><button class="btn line sm" type="button" data-copy="builder">Copy its prompt</button>'
+    : '<button class="btn sm" type="button" data-tool="' + t.id + '">Try it</button><button class="btn line sm" type="button" data-copy="' + t.id + '">Copy its prompt</button>';
+  return '<li><span class="n">0' + (i + 1) + '</span><div><h3>' + esc(t.name) + '</h3><p>' + esc(t.line) + '</p><p class="for">Good for: ' + esc(t.fit) + '</p></div><div class="row">' + b + '</div></li>';
+}).join('');
+$('stagePre').textContent = PROMPTS.estimator;
+$('askLink').href = 'https://wa.me/' + OWNER_WA + '?text=' + encodeURIComponent('Hi Chandu, I am trying the AI business tools page and I am stuck on my prompt.');
+
+try { var saved = JSON.parse(load('bk-aitools') || 'null'); if (saved && typeof saved === 'object') Object.keys(state).forEach(function(k){ if (k in saved && typeof saved[k] === typeof state[k]) state[k] = saved[k]; }); } catch(e){}
+writeForm(); render();
+
+document.addEventListener('input', function(e){
+  var t = e.target;
+  if (t.closest && t.closest('.form')) { readForm(); $('wanumbox').style.display = state.wa ? '' : 'none'; render(); return; }
+  if (t.dataset.quo) { quo[t.dataset.quo] = t.value; $('quoTotals').innerHTML = quoTotals(); return; }
+  if (t.dataset.it) { quo.items[+t.dataset.it][t.dataset.k] = t.value; $('quoTotals').innerHTML = quoTotals(); return; }
+  if (t.dataset.dis) { dis[t.dataset.dis] = t.value; $('disOut').innerHTML = disOut();
+    Array.prototype.forEach.call(document.querySelectorAll('[data-pick="disq"] button'), function(b){ b.setAttribute('aria-pressed', String(b.dataset.v === String(num(dis.d)))); }); return; }
+  if (t.dataset.be) { be[t.dataset.be] = t.value; $('beOut').innerHTML = beOut(); return; }
+});
+document.addEventListener('click', function(e){
+  var b = e.target.closest && e.target.closest('button,[data-go]'); if (!b) return;
+  var d = b.dataset;
+  if (d.go) { go(d.go); return; }
+  if (d.who) { state.who = d.who; syncWho(); render(); return; }
+  if (b.classList.contains('chip')) { var s = STARTERS.filter(function(x){ return x.id === d.id; })[0]; applyPreset(s, s.id); return; }
+  if (b.id === 'copyMain') { readForm(); copyFrom(b, plain()); return; }
+  if (d.open) {
+    readForm(); var text = plain();
+    var url = d.open === 'chatgpt' ? 'https://chatgpt.com/?q=' + encodeURIComponent(text)
+            : d.open === 'claude' ? 'https://claude.ai/new?q=' + encodeURIComponent(text)
+            : 'https://gemini.google.com/app';
+    var w = window.open(url, '_blank', 'noopener');
+    copy(text).then(function(ok){ if (ok) toast('Prompt copied. Paste it if the box is empty.'); });
+    if (!w) { /* popup blocked: the copy above still happened */ }
+    return;
+  }
+  if (d.copy) { copyFrom(b, PROMPTS[d.copy]); return; }
+  if (d.more) { var r = $(d.more), on = r.classList.toggle('open'); b.textContent = on ? 'Show less' : 'Show all'; return; }
+  if (d.tool) { openTool(d.tool); return; }
+  if (d.mine) { makeMine(d.mine); return; }
+  if (b.id === 'sheetClose') { closeTool(); return; }
+  if (b.id === 'toolCopy') { copyFrom(b, PROMPTS[current]); return; }
+  if (b.id === 'toolMine') { makeMine(current); return; }
+
+  /* inside sample tools */
+  var p = b.parentNode && b.parentNode.dataset && b.parentNode.dataset.pick;
+  if (p === 'home') { est.home = d.v; RENDER.estimator($('toolMount')); return; }
+  if (p === 'finish') { est.finish = d.v; RENDER.estimator($('toolMount')); return; }
+  if (p === 'need') { var i = est.need.indexOf(d.v); if (i > -1) est.need.splice(i, 1); else est.need.push(d.v);
+    est.need.sort(function(a, c){ var k = Object.keys(EST.items); return k.indexOf(a) - k.indexOf(c); }); RENDER.estimator($('toolMount')); return; }
+  if (p === 'disq') { dis.d = d.v; RENDER.discount($('toolMount')); return; }
+  if (d.add) { quo.items.push({n:'', q:'1', r:''}); RENDER.quote($('toolMount')); var ins = document.querySelectorAll('[data-k="n"]'); ins[ins.length - 1].focus(); return; }
+  if (d.del !== undefined && d.del !== '') { quo.items.splice(+d.del, 1); if (!quo.items.length) quo.items.push({n:'', q:'1', r:''}); RENDER.quote($('toolMount')); return; }
+  if (d.quoshare) { window.open('https://wa.me/?text=' + encodeURIComponent(quoText()), '_blank', 'noopener'); return; }
+  if (d.quocopy) { copy(quoText()).then(function(ok){ if (ok) { flash(b); toast('Quote copied.'); } }); return; }
+});
+document.addEventListener('keydown', function(e){ if (e.key === 'Escape' && $('sheet').classList.contains('on')) closeTool(); });
+
+/* test hook: lets the build check the maths without clicking through the UI */
+window.__bkTools = { estCalc:estCalc, quoCalc:quoCalc, disCalc:disCalc, beCalc:beCalc, plain:plain, state:state, PROMPTS:PROMPTS };
+})();
+</script>
+</body>
+</html>
