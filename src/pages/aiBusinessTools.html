@@ -341,6 +341,42 @@ footer p{color:var(--ink-2);font-size:.95rem;margin-top:10px;max-width:34em}
 .bk .btn:hover{background:var(--mark)}
 .bk .btn.ghost{background:transparent;color:#fff;box-shadow:inset 0 0 0 1px rgba(255,255,255,.4)}
 .bk .btn.ghost:hover{background:rgba(255,255,255,.1)}
+.bk .free{display:inline-block;margin-top:16px;background:var(--mark);color:var(--ink);font-weight:700;font-size:.95rem;padding:4px 11px;border-radius:6px}
+.bk .inv{margin-top:10px}
+.bk .pass{display:inline-block;margin-top:16px;font-size:.88rem;color:#93a6ff}
+/* dashboard from a sheet */
+.d2d{display:grid;grid-template-columns:minmax(0,1fr);gap:8px;margin-top:26px;font-size:12.5px;line-height:1.3;max-width:420px}
+.xl{border:1px solid #b7c4bb;border-radius:8px;overflow:hidden;background:#fff}
+.xlr{display:grid;grid-template-columns:.8fr 1.25fr .95fr}
+.xlr span{padding:5px 6px;border-top:1px solid #e3e8e4;border-left:1px solid #e3e8e4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.xlr span:first-child{border-left:0}
+.xlr span:last-child{text-align:right;font-variant-numeric:tabular-nums}
+.xlr.hd span{background:#1d6f42;color:#fff;font-weight:700;border-color:#1d6f42}
+.xlr.fade{opacity:.45}
+.d2d .arw{font-size:1.4rem;color:var(--blue);font-weight:700;justify-self:center;transform:rotate(90deg)}
+.db{border:1px solid var(--ink);border-radius:12px;background:#fff;padding:9px;display:grid;gap:8px}
+.dbt{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.dbt div{background:var(--wash);border-radius:8px;padding:7px 8px}
+.dbt small{display:block;color:var(--ink-2);font-size:11px}
+.dbt b{display:block;font-family:var(--display);font-size:20px;letter-spacing:-.02em;line-height:1.15;white-space:nowrap}
+.dbt i{font-style:normal;font-weight:600;font-size:11px;color:#16a34a}
+.dbt i.dn{color:#dc2626}
+.bars{display:flex;align-items:flex-end;gap:6px;height:72px;padding-top:4px;border-bottom:1px solid var(--rule)}
+.bars span{flex:1;height:0;background:var(--blue);border-radius:3px 3px 0 0;transition:height .6s cubic-bezier(.2,.8,.3,1)}
+.d2d.in .bars span{height:var(--h)}
+.bars span:nth-child(2){transition-delay:.05s}.bars span:nth-child(3){transition-delay:.1s}.bars span:nth-child(4){transition-delay:.15s}.bars span:nth-child(5){transition-delay:.2s}.bars span:nth-child(6){transition-delay:.25s}.bars span:nth-child(7){transition-delay:.3s}
+.db > small{color:var(--ink-2);font-size:11px}
+.dq{margin-top:26px}
+.dq .lab{display:block;font-weight:600;font-size:.95rem;margin-bottom:8px}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{min-height:42px;padding:8px 14px;border-radius:999px;box-shadow:inset 0 0 0 1px var(--rule);background:#fff;font-size:.93rem;font-weight:500;transition:box-shadow .12s}
+.chip:hover{box-shadow:inset 0 0 0 1px var(--ink)}
+.chip[aria-pressed="true"]{background:var(--ink);color:#fff;box-shadow:none}
+.dsteps{list-style:none;margin-top:22px;display:grid;gap:12px}
+.dsteps li{display:grid;grid-template-columns:2em 1fr;gap:10px;font-size:.95rem}
+.dsteps .n{font-family:var(--mono);font-weight:600;font-size:12px;color:var(--blue);padding-top:3px}
+.dsteps b{font-weight:600}
+.dsteps span span{color:var(--ink-2)}
 /* the demo screens in the phone, drawn in the look of the Claude app */
 .cl{--c-bg:#faf9f5;--c-ink:#1f1e1d;--c-mute:#77756e;--c-line:#e6e3da;--c-user:#efece3;--c-or:#d97757;background:var(--c-bg);color:var(--c-ink)}
 .c-top{flex:none;display:flex;align-items:center;justify-content:space-between;padding:10px 12px 8px;font-weight:600;font-size:12px}
@@ -396,6 +432,10 @@ footer p{color:var(--ink-2);font-size:.95rem;margin-top:10px;max-width:34em}
 @media(min-width:560px){
   .tgrid{grid-template-columns:repeat(3,1fr)}
   .lr{grid-template-columns:minmax(0,1fr) auto;align-items:center}
+}
+@media(min-width:700px){
+  .d2d{grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;max-width:none;gap:14px}
+  .d2d .arw{transform:none}
 }
 @media(min-width:860px){
   .demonote{text-align:left}
@@ -474,6 +514,7 @@ footer p{color:var(--ink-2);font-size:.95rem;margin-top:10px;max-width:34em}
 
     <div class="also">
       <button type="button" data-go="howto">How to use the prompt</button>
+      <button type="button" data-go="dash">Dashboard from my Excel</button>
       <button type="button" data-go="tools">Try sample tools</button>
       <button type="button" data-go="library">All <span data-count="tools"></span> prompts</button>
     </div>
@@ -590,6 +631,48 @@ footer p{color:var(--ink-2);font-size:.95rem;margin-top:10px;max-width:34em}
   </div>
 </section>
 
+<!-- DASHBOARD FROM A SHEET -->
+<section id="dash">
+  <div class="wrap">
+    <span class="k b">Already keep it in Excel?</span>
+    <h2>See your sheet as a dashboard.</h2>
+    <p class="sub">If your sales, dues or stock already sit in Excel or Google Sheets, you do not need a new tool. Give the AI the file and this prompt.</p>
+
+    <div class="d2d" id="d2d" aria-hidden="true">
+      <div class="xl">
+        <div class="xlr hd"><span>Date</span><span>Customer</span><span>Amount</span></div>
+        <div class="xlr"><span>02 Oct</span><span>Ravi Stores</span><span>18,400</span></div>
+        <div class="xlr"><span>02 Oct</span><span>Sri Sai Traders</span><span>6,250</span></div>
+        <div class="xlr"><span>03 Oct</span><span>Lakshmi Agencies</span><span>41,000</span></div>
+        <div class="xlr"><span>04 Oct</span><span>Ravi Stores</span><span>9,900</span></div>
+        <div class="xlr fade"><span>05 Oct</span><span>Durga Enterprises</span><span>27,300</span></div>
+      </div>
+      <span class="arw">→</span>
+      <div class="db">
+        <div class="dbt"><div><small>This month</small><b>₹4.2 L</b><i>▲ 12%</i></div><div><small>Still due</small><b>₹86,000</b><i class="dn">7 late</i></div></div>
+        <div class="bars"><span style="--h:38%"></span><span style="--h:62%"></span><span style="--h:45%"></span><span style="--h:88%"></span><span style="--h:54%"></span><span style="--h:71%"></span><span style="--h:96%"></span></div>
+        <small>Sales by day</small>
+      </div>
+    </div>
+
+    <div class="dq"><span class="lab" id="dkLab">What is in your sheet?</span><div class="chips" id="dkinds" role="group" aria-labelledby="dkLab"></div></div>
+    <div class="dq"><span class="lab" id="dwLab">Where do you want to see it?</span>
+      <div class="seg" role="group" aria-labelledby="dwLab"><button type="button" data-dwhere="page" aria-pressed="true">On my phone</button><button type="button" data-dwhere="tab" aria-pressed="false">Inside the same sheet</button></div>
+      <p class="note" id="dashNote"></p>
+    </div>
+
+    <dl class="prompt" id="dashPrompt" style="margin-top:18px"></dl>
+    <div class="after" style="margin-top:12px"><button class="btn blue full" type="button" id="dashCopy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy the dashboard prompt</span></button></div>
+
+    <ol class="dsteps">
+      <li><span class="n">01</span><span><b>Attach your file.</b> <span>In Claude or ChatGPT, tap the + beside the message box and pick your Excel file. From Google Sheets, save it as Excel first.</span></span></li>
+      <li><span class="n">02</span><span><b>Paste this prompt and send.</b> <span>It tells you what it found in your sheet and asks a few questions.</span></span></li>
+      <li><span class="n">03</span><span><b>New data next week?</b> <span>Attach the new file and say "update the dashboard". Or choose "Inside the same sheet" and it updates by itself.</span></span></li>
+    </ol>
+    <p class="note" style="margin-top:16px">Take out anything private before you attach a file, such as customer phone numbers you do not need on the dashboard.</p>
+  </div>
+</section>
+
 <!-- LIVE TOOLS -->
 <section id="tools">
   <div class="wrap">
@@ -622,7 +705,7 @@ footer p{color:var(--ink-2);font-size:.95rem;margin-top:10px;max-width:34em}
     <p class="sub">AI is good at tools where numbers go in and an answer comes out. It is weak where data must be saved and shared by many people every day.</p>
     <div class="split">
       <div><h3>Ask for a phone tool</h3><ul><li>Opens from a link, like an app</li><li>Customers and staff can use it</li><li>Big buttons, nothing to break</li></ul></div>
-      <div><h3>Ask for Excel or a Google Sheet</h3><ul><li>You see and change every formula</li><li>Right for lists and ledgers that grow</li><li>Works in the Excel you already use</li></ul></div>
+      <div><h3>Ask for Excel or a Google Sheet</h3><ul><li>You see and change every formula</li><li>Right for lists and ledgers that grow</li><li>A Dashboard tab can sit on top</li></ul></div>
     </div>
     <p class="note" style="margin-top:14px">Every prompt here can be copied either way. You choose on the last step.</p>
     <div class="split" style="margin-top:30px">
@@ -978,6 +1061,7 @@ var COMMON = [
 ];
 
 /* ------------------------------------------------------------------ config */
+var BRIKLAY_WA = '917330872705';        // Briklay's own WhatsApp line (the one the landing page uses): invitation requests go here
 var OWNER_WA = '918330972705';          // where "Send on WhatsApp" in the demo estimator and "Stuck?" go
 var ASK_FIRST = 'Before you build anything, ask me questions about my business, one at a time and in simple words. Start with my business name and phone number. Then read my rates back to me and ask which ones to change. Ask no more than six questions, then build.';
 var ASK_FIRST_LIST = 'Before you build anything, ask me questions about my business, one at a time and in simple words. Start with my business name and phone number. Then read my rules back to me and ask what to change. Ask no more than six questions, then build.';
@@ -1136,6 +1220,7 @@ function specRows(tool, th, o){
     S.push(['Tab 1, Entry: ' + (list ? 'one row for each entry, with filters on the header row and the totals in a block above it. Freeze the header row.' : 'labels down column A, the cells I fill in column B, and the result below them.')]);
     S.push(['Tab 2, Rates: every rate and rule in one table, so I can change a rate without touching a formula.']);
     if (has(tool, 'w')) S.push(['Tab 3, Share: a clean layout with my business name, the details and the result, sized to one A4 page, which I can save as a PDF or screenshot and send on WhatsApp.']);
+    if (list) S.push(['A last tab, Dashboard: three or four tiles with the totals and two charts, all driven by formulas, so they update as I add rows.']);
     if (list) S.push(['Colour a row light red #FDE2E2 when it is overdue and light amber #FFF4CC when it is due this week.']);
 
     F.push(['An Excel file (.xlsx) that I can download and that also opens in Google Sheets. If you cannot make a file, give me the layout and every formula so I can type it into Google Sheets myself.']);
@@ -1181,7 +1266,7 @@ function rowsFor(tool, bizSentence, o){
   return { rows:rows, blanks:blanks };
 }
 function seg(x){ return typeof x === 'string' ? x : x.t; }
-var HEADING = { After:'After you build' };
+var HEADING = { After:'After you build', 'Show me':'What I want to see' };
 function plainOf(p){
   return p.rows.map(function(r){
     if (r[2] === 'list') return (HEADING[r[0]] || r[0]) + ':\n' + r[1].map(function(l){ return '- ' + l.map(seg).join(''); }).join('\n');
@@ -1204,13 +1289,13 @@ function bizOf(tradeId, other){ return tradeId === 'other' ? clean(other) : (TRA
 function libraryPrompt(tool, tradeId){ return plainOf(rowsFor(tool, bizOf(tradeId, ''), { fmt:W.lfmt, theme:themeOf(tradeId) })); }
 
 /* ------------------------------------------------------------------ wizard state */
-var W = { step:1, trade:'', other:'', size:0, tool:'', town:'', wanum:'', te:false, edits:{}, more:false, lfmt:'phone', colour:'' };
+var W = { step:1, trade:'', other:'', size:0, tool:'', town:'', wanum:'', te:false, edits:{}, more:false, lfmt:'phone', colour:'', dkind:'sales', dwhere:'page' };
 try { var sv = JSON.parse(load('bk-aitools-2') || 'null');
   if (sv && typeof sv === 'object') ['trade','other','size','tool','town','wanum','te','edits','colour'].forEach(function(k){ if (k in sv && typeof sv[k] === typeof W[k]) W[k] = sv[k]; });
   if (W.trade && W.trade !== 'other' && !TRADES[W.trade]) { W.trade = ''; W.tool = ''; }
   if (W.tool && !TOOLS_BY_ID[W.tool]) W.tool = '';
 } catch(e){}
-function save(){ store('bk-aitools-2', JSON.stringify({ trade:W.trade, other:W.other, size:W.size, tool:W.tool, town:W.town, wanum:W.wanum, te:W.te, edits:W.edits, colour:W.colour })); syncResume(); }
+function save(){ if ($('dashPrompt')) renderDash(); store('bk-aitools-2', JSON.stringify({ trade:W.trade, other:W.other, size:W.size, tool:W.tool, town:W.town, wanum:W.wanum, te:W.te, edits:W.edits, colour:W.colour })); syncResume(); }
 function tradeName(){ return W.trade === 'other' ? (clean(W.other) || 'Your business') : (TRADES[W.trade] ? TRADES[W.trade].n : ''); }
 function edit(){ if (!W.edits[W.tool]) W.edits[W.tool] = {}; return W.edits[W.tool]; }
 function currentPrompt(){
@@ -1302,11 +1387,77 @@ function renderWizard(){
    everyone else gets it as something to pass on. */
 function briklaySlot(tradeId){
   var mine = tradeId === 'builder' || tradeId === 'contractor';
-  var share = 'https://wa.me/?text=' + encodeURIComponent('Briklay: an AI site engineer and accountant that works inside WhatsApp. Made by a builder in Kakinada, for builders. https://briklay.app');
+  var ask = 'https://wa.me/' + BRIKLAY_WA + '?text=' + encodeURIComponent('Hi Briklay, I am a builder and I would like an invitation.');
+  var share = 'https://wa.me/?text=' + encodeURIComponent('Briklay: an AI site engineer and accountant that works inside WhatsApp. Free to use, by invitation. https://briklay.app');
   return '<aside class="bk"><span class="k">' + (mine ? 'One more thing, since you build' : 'One more thing') + '</span>' +
-    '<h3>' + (mine ? 'You build. So this one is already built for you.' : 'Builders do not need a prompt. They have Briklay.') + '</h3>' +
+    '<h3>' + (mine ? 'You build. You do not need a prompt. You have the Briklay App.' : 'Builders do not need a prompt. They have the Briklay App.') + '</h3>' +
     '<p><b>An AI site engineer and accountant, inside WhatsApp.</b> Supervisors text the way they always do. Briklay writes down the work, the materials and every rupee.</p>' +
-    '<div class="bkrow"><a class="btn" href="https://briklay.app/" target="_top">See Briklay</a><a class="btn ghost" href="' + share + '" target="_blank" rel="noopener">' + (mine ? 'Send it to my partner' : 'Send it to a builder you know') + '</a></div></aside>';
+    '<span class="free">Completely free to use</span>' +
+    '<p class="inv">We open it by invitation, a few builders at a time. Look around, tell us you are interested, and your invitation follows.</p>' +
+    '<div class="bkrow"><a class="btn" href="https://briklay.app/" target="_top">Explore Briklay</a><a class="btn ghost" href="' + ask + '" target="_blank" rel="noopener">Ask for an invitation</a></div>' +
+    (mine ? '' : '<a class="pass" href="' + share + '" target="_blank" rel="noopener">Not a builder? Send this to one you know.</a>') + '</aside>';
+}
+
+/* ------------------------------------------------------------------ dashboard from a sheet the owner already keeps */
+var DKINDS = [
+  { id:'sales', n:'Sales', noun:'sales', see:['Total sales this month and last month, with the change between them.', 'Sales for each of the last 30 days, as bars.', 'My top 10 customers and my top 10 items.', 'Sales by staff member or branch, if my sheet has that column.'] },
+  { id:'dues', n:'Payments due', noun:'record of who owes me money', see:['The total that customers owe me today.', 'That total split by age: up to 30 days, 31 to 60, 61 to 90, and over 90 days.', 'The 10 customers who owe the most, with how many days late each one is.', 'What falls due this week.'] },
+  { id:'expenses', n:'Expenses', noun:'expenses', see:['Total spent this month and last month, with the change between them.', 'Spending by category, largest first.', 'The 10 biggest single expenses this month.', 'Spending for each day of this month, as bars.'] },
+  { id:'stock', n:'Stock', noun:'stock list', see:['Items that are below their reorder level, most urgent first.', 'Stock value by category.', 'Items with no sale in 60 days.', 'My 10 fastest-moving items.'] },
+  { id:'leads', n:'Enquiries', noun:'enquiries', see:['Enquiries this month and last month.', 'Enquiries by where they came from.', 'How many are at each stage: new, quoted, won, lost.', 'Follow-ups that are due today, and the share of enquiries I win.'] },
+  { id:'jobs', n:'Jobs or sites', noun:'list of jobs', see:['Jobs by status: not started, running, finished.', 'Jobs that are past their promised date, oldest first.', 'For each job: amount billed, amount received and what is still to come.', 'Total still to be received across all jobs.'] },
+  { id:'other', n:'Something else', noun:'records', see:null }
+];
+function dashRows(){
+  var k = DKINDS.filter(function(x){ return x.id === W.dkind; })[0] || DKINDS[0], tab = W.dwhere === 'tab';
+  var th = themeOf(W.trade), main = W.colour || th.main;
+  var biz = val(bizOf(W.trade, W.other), 'your business'), town = val(W.town, 'your town');
+  var see = k.see ? k.see.map(function(x){ return [x]; }) : [[ph('what you want to see at a glance, in your own words')]];
+  var D = [], F = [], A = [];
+  if (!tab) {
+    D.push(['Style: ' + th.name + '. Page background ' + th.bg + '. Cards are white with a 1px ' + th.line + ' border and 14px rounded corners. Text ' + th.ink + ', small labels ' + th.mute + '.']);
+    D.push(['Tiles first, two in a row: a small label, then the figure in 28px bold with lined-up digits, then the change from the period before, green #16A34A with an up arrow or red #DC2626 with a down arrow.']);
+    D.push(['Charts below, one per card, full width. Bars in ' + main + ', the value written at the end of each bar, labels in ' + th.mute + '. No 3D, no pie chart with more than five slices, no legend when there is only one series.']);
+    D.push(['A row of chips at the top to choose the period: This month, Last month, This year, All. The chosen chip is filled ' + main + ' with white text.']);
+    D.push(['Texture: ' + th.texture]);
+    D.push(['Motion: figures count up in 600ms. Bars grow from zero in 500ms, one after another 40ms apart. Tapping a bar opens the rows behind it. Switch all motion off if the phone asks for reduced motion.']);
+    F.push(['ONE complete HTML file with my data placed inside it, so it opens on my phone without the Excel file. Draw the charts yourself. No chart library, no login, no database.']);
+    F.push(['One column at most 480px wide with 16px margins. At the top: my business name, and the line "Data as on" with the latest date found in my sheet.']);
+    F.push(['Amounts in Indian format, shortened on tiles: ₹86,000, ₹4.2 L, ₹1.3 Cr. Full figures in the tables.']);
+    F.push(['If you skip any rows, say how many and why in one line at the bottom, such as "12 rows skipped: no date."']);
+    F.push(['A "Send summary on WhatsApp" button, #128C7E with white text, that opens WhatsApp with the main figures typed in five short lines.']);
+    F.push(['If I give you a "Publish to web" CSV link for my Google Sheet, try to read the data from that link each time the page opens, and fall back to the data inside the file if that fails. Tell me plainly whether it worked.']);
+    A.push(['Tell me in three short lines how to open it on my phone and how to send it to my partner or manager.']);
+    A.push(['When my data changes I will attach the new file and say "update the dashboard". Keep the same design.']);
+  } else {
+    D.push(['Add a new first tab called Dashboard. Do not change my data, except to make the header row bold and freeze it.']);
+    D.push(['A title band across the top filled ' + main + ' with my business name in white bold 14pt.']);
+    D.push(['Tiles in a row under it: a grey 10pt label with the figure below it in 20pt bold, on a ' + th.tint + ' fill with a thin border.']);
+    D.push(['Charts under the tiles: a column chart for anything over time and a bar chart for any top 10. Bars in ' + main + ', values shown on the bars, no gridlines, no 3D.']);
+    D.push(['Font Calibri 11 throughout. Hide the gridlines on the Dashboard tab. Warnings in red #C00000 through conditional formatting.']);
+    F.push(['Give me back the same file as an Excel file (.xlsx) that also opens in Google Sheets. If you cannot make a file, give me every formula and where it goes.']);
+    F.push(['A dropdown in cell B2 to choose the period: This month, Last month, This year, All. Every figure reads that cell.']);
+    F.push(['Every figure is a formula such as SUMIFS or COUNTIFS on my data tab, so the Dashboard updates by itself when I add rows. No macros, and nothing that needs a Refresh button.']);
+    F.push(['Amounts in Indian format like ₹1,25,000. Empty results show a dash, never an error.']);
+    F.push(['Set it to print on one A4 page, landscape.']);
+    A.push(['Tell me in three short lines where to type new rows so the Dashboard picks them up.']);
+    A.push(['If a figure looks wrong, show me the formula behind it in plain words.']);
+  }
+  return { rows: [
+    ['Context', [['I run a ', biz, ' in ', town, '. I keep my ' + k.noun + ' in Excel or Google Sheets, and I am attaching the file.']]],
+    ['Task', [[tab ? 'Add a dashboard inside the same sheet, so I can see the important figures at a glance and they update as I add rows.' : 'Build me a dashboard from it that I can open on my phone, so I can see the important figures at a glance.']]],
+    ['Ask first', [['First read the file. Tell me in plain words which columns you found and anything that looks wrong: blank dates, text in number columns, the same row twice. Then ask me up to five questions, one at a time, about any column you are unsure of and what I check most often. Then build.']], 'key'],
+    ['Show me', see, 'list'],
+    ['Design', D, 'list'], ['Format', F, 'list'], ['After', A, 'list']
+  ] };
+}
+function renderDash(){
+  all('[data-dkind]').forEach(function(b){ b.setAttribute('aria-pressed', String(b.dataset.dkind === W.dkind)); });
+  all('[data-dwhere]').forEach(function(b){ b.setAttribute('aria-pressed', String(b.dataset.dwhere === W.dwhere)); });
+  $('dashPrompt').innerHTML = htmlOf(dashRows());
+  $('dashNote').textContent = W.dwhere === 'tab'
+    ? 'A Dashboard tab inside your own Excel or Google Sheet. It updates by itself as you add rows.'
+    : 'A page you open on your phone. It shows the data as it was in the file you attached.';
 }
 function refreshPrompt(){
   var tool = TOOLS_BY_ID[W.tool], sheet = (W.edits[W.tool] || {}).fmt === 'sheet', note = $('fmtNote');
@@ -1619,6 +1770,10 @@ $('toolList').innerHTML = DEMOS.map(function(t, i){
 }).join('');
 $('askLink').href = 'https://wa.me/' + OWNER_WA + '?text=' + encodeURIComponent('Hi Chandu, I am trying the AI business tools page and I am stuck on my prompt.');
 renderLibrary('');
+$('dkinds').innerHTML = DKINDS.map(function(k){ return '<button class="chip" type="button" data-dkind="' + k.id + '" aria-pressed="false">' + k.n + '</button>'; }).join('');
+renderDash();
+(function(){ var el = $('d2d'); if (!('IntersectionObserver' in window) || HOW.reduced) { el.classList.add('in'); return; }
+  new IntersectionObserver(function(en, io){ if (en[0].isIntersecting) { el.classList.add('in'); io.disconnect(); } }, { threshold:0.5 }).observe(el); })();
 $('stagePre').textContent = PROMPTS.estimator;
 $('libBk').innerHTML = briklaySlot('');
 syncResume();
@@ -1684,6 +1839,9 @@ document.addEventListener('click', function(e){
   if (d.toolPick) { W.tool = d.toolPick; wizGo(4); return; }
   if (b.classList.contains('swb')) { W.colour = d.colour; save(); all('#wizMount .swb').forEach(function(x){ x.setAttribute('aria-pressed', String(x.dataset.colour === W.colour)); }); refreshPrompt(); return; }
   if (d.fmt) { edit().fmt = d.fmt; save(); all('#wizMount [data-fmt]').forEach(function(x){ x.setAttribute('aria-pressed', String(x.dataset.fmt === d.fmt)); }); refreshPrompt(); return; }
+  if (d.dkind) { W.dkind = d.dkind; renderDash(); return; }
+  if (d.dwhere) { W.dwhere = d.dwhere; renderDash(); return; }
+  if (b.id === 'dashCopy') { copyFrom(b, plainOf(dashRows()), 'Copied. Attach your Excel file in the AI app, then paste.'); return; }
   if (d.lfmt) { W.lfmt = d.lfmt; all('[data-lfmt]').forEach(function(x){ x.setAttribute('aria-pressed', String(x.dataset.lfmt === d.lfmt)); }); toast(d.lfmt === 'sheet' ? 'Copy now gives the Excel version.' : 'Copy now gives the phone tool version.'); return; }
   if (b.id === 'wizCopy') { copyFrom(b, plainOf(currentPrompt())); return; }
   if (d.open) { copy(plainOf(currentPrompt())).then(function(ok){ if (ok) toast('Prompt copied. Paste it if the box is empty.'); }); return; }
@@ -1714,7 +1872,7 @@ document.addEventListener('click', function(e){
 
 /* test hook: lets the build check the maths and every prompt without clicking through the UI */
 window.__bkTools = { estCalc:estCalc, quoCalc:quoCalc, disCalc:disCalc, beCalc:beCalc, PROMPTS:PROMPTS, W:W,
-  GROUPS:GROUPS, COMMON:COMMON, TRADES:TRADES, TOOLS_BY_ID:TOOLS_BY_ID, TOTAL:TOTAL, libraryPrompt:libraryPrompt,
+  dash:function(){ return plainOf(dashRows()); }, GROUPS:GROUPS, COMMON:COMMON, TRADES:TRADES, TOOLS_BY_ID:TOOLS_BY_ID, TOTAL:TOTAL, libraryPrompt:libraryPrompt,
   current:function(){ return plainOf(currentPrompt()); } };
 })();
 </script>
