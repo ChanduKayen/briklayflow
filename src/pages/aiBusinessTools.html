@@ -295,7 +295,7 @@ mark.ok{background:#c9f2e4}
 .tips .n{font-family:var(--mono);font-weight:600;font-size:12px;color:var(--blue);padding-top:3px}
 .tips b{font-weight:600}
 .tips span span{color:var(--ink-2)}
-footer{border-top:1px solid var(--ink);padding:34px 0 44px;background:var(--wash)}
+footer{border-top:0;padding:34px 0 44px;background:var(--wash)}
 footer p{color:var(--ink-2);font-size:.95rem;margin-top:10px;max-width:34em}
 .doors{display:grid;gap:0;margin-top:22px;border-top:1px solid var(--rule)}
 .doors a{display:flex;align-items:center;gap:12px;padding:14px 2px;border-bottom:1px solid var(--rule);text-decoration:none;min-height:60px}
@@ -331,19 +331,44 @@ footer p{color:var(--ink-2);font-size:.95rem;margin-top:10px;max-width:34em}
 .fmt .note{min-height:2.9em}
 .lfmt{margin-top:16px}
 /* Briklay's own slot: the one dark block */
-.bk{margin-top:30px;padding:22px 20px 20px;border-radius:18px;background:var(--ink);color:#fff}
-.bk .k{color:#93a6ff;display:block}
-.bk h3{font-size:1.5rem;line-height:1.12;margin-top:10px;letter-spacing:-.025em;text-wrap:balance}
-.bk p{color:rgba(255,255,255,.76);font-size:.95rem;margin-top:10px}
-.bk p b{color:#fff;font-weight:600}
-.bkrow{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
-.bk .btn{background:#fff;color:var(--ink);min-height:46px;padding:10px 16px;font-size:.95rem}
-.bk .btn:hover{background:var(--mark)}
-.bk .btn.ghost{background:transparent;color:#fff;box-shadow:inset 0 0 0 1px rgba(255,255,255,.4)}
-.bk .btn.ghost:hover{background:rgba(255,255,255,.1)}
-.bk .free{display:inline-block;margin-top:16px;background:var(--mark);color:var(--ink);font-weight:700;font-size:.95rem;padding:4px 11px;border-radius:6px}
+/* Briklay App block: the sunlit gradient image, a fine dot grid fading across it, ink type on top */
+.bk{position:relative;isolation:isolate;overflow:hidden;margin-top:30px;padding:24px 20px 22px;border-radius:20px;color:var(--ink);
+  background:#f7d615 url(/aibusinesstools/briklay-app-bg.webp) center/cover no-repeat;box-shadow:0 18px 40px -22px rgba(190,150,0,.9),inset 0 0 0 1px rgba(16,21,31,.12)}
+.bk::before{content:"";position:absolute;inset:0;z-index:-1;background:radial-gradient(rgba(16,21,31,.16) 1px,transparent 1.3px) 0 0/13px 13px;
+  -webkit-mask-image:linear-gradient(115deg,transparent 35%,#000 100%);mask-image:linear-gradient(115deg,transparent 35%,#000 100%)}
+.bk::after{content:"";position:absolute;z-index:-1;right:-96px;top:-96px;width:210px;height:210px;border-radius:50%;box-shadow:inset 0 0 0 1px rgba(16,21,31,.22),inset 0 0 0 26px rgba(255,255,255,.14),inset 0 0 0 27px rgba(16,21,31,.14)}
+.bk .k{color:var(--ink);opacity:.72;display:block}
+.bk h3{font-size:1.62rem;font-weight:800;line-height:1.08;margin-top:10px;letter-spacing:-.03em;text-wrap:balance;max-width:13em}
+.bk p{color:rgba(16,21,31,.82);font-size:.97rem;margin-top:12px;max-width:30em}
+.bk p b{color:var(--ink);font-weight:700}
+.bkrow{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}
+.bk .btn{background:var(--ink);color:#fff;min-height:48px;padding:10px 18px;font-size:.97rem}
+.bk .btn:hover{background:#000}
+.bk .btn.ghost{background:rgba(255,255,255,.34);color:var(--ink);box-shadow:inset 0 0 0 1.5px var(--ink)}
+.bk .btn.ghost:hover{background:rgba(255,255,255,.6)}
+.bk .free{display:inline-flex;align-items:center;gap:8px;margin-top:16px;background:var(--ink);color:var(--mark);font-weight:700;font-size:.95rem;padding:5px 12px;border-radius:999px}
+.bk .free::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--mark)}
 .bk .inv{margin-top:10px}
-.bk .pass{display:inline-block;margin-top:16px;font-size:.88rem;color:#93a6ff}
+.bk .pass{display:inline-block;margin-top:16px;font-size:.9rem;color:var(--ink);font-weight:600}
+/* the home-building ad: a full-bleed photograph that drifts as you scroll */
+.homead{position:relative;isolation:isolate;overflow:hidden;padding:0;border:0;background:#0b0e14;color:#fff;min-height:min(640px,92vh);display:flex;align-items:flex-end}
+.homead .plx{position:absolute;left:0;right:0;top:-12%;bottom:-12%;z-index:-2;will-change:transform}
+.homead .plx img{width:100%;height:100%;object-fit:cover;object-position:50% 38%;display:block}
+.homead .scrim{position:absolute;inset:0;z-index:-1;background:linear-gradient(to top,rgba(9,12,18,.96) 0%,rgba(9,12,18,.86) 30%,rgba(9,12,18,.38) 58%,rgba(9,12,18,.08) 78%,rgba(9,12,18,.28) 100%)}
+.homead .hin{width:100%;padding-top:230px;padding-bottom:34px;will-change:transform}
+.homead .k{color:#ffd98a;display:block}
+.homead h2{font-size:clamp(2.1rem,9.4vw,3.5rem);font-weight:800;line-height:1.02;margin-top:12px;max-width:11em;text-shadow:0 2px 24px rgba(0,0,0,.45)}
+.homead p{margin-top:12px;color:rgba(255,255,255,.86);font-size:1.04rem;max-width:30em}
+.hfacts{list-style:none;display:grid;grid-template-columns:1fr 1fr;gap:1px;margin-top:22px;background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.2);border-radius:14px;overflow:hidden;max-width:620px}
+.hfacts li{background:rgba(9,12,18,.62);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);padding:12px 14px}
+.hfacts b{display:block;font-family:var(--display);font-weight:800;font-size:1.4rem;letter-spacing:-.03em;line-height:1.1;color:#ffd98a;font-variant-numeric:tabular-nums}
+.hfacts span{display:block;font-size:.84rem;color:rgba(255,255,255,.8);margin-top:2px}
+.hrow{display:flex;flex-wrap:wrap;gap:8px;margin-top:20px}
+.homead .btn{background:#fff;color:var(--ink)}
+.homead .btn:hover{background:#ffd98a}
+.homead .btn.ghost{background:transparent;color:#fff;box-shadow:inset 0 0 0 1.5px rgba(255,255,255,.7)}
+.homead .btn.ghost:hover{background:rgba(255,255,255,.12)}
+.hcap{position:absolute;right:12px;top:12px;font-family:var(--mono);font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:rgba(255,255,255,.82);background:rgba(9,12,18,.5);padding:3px 8px;border-radius:4px}
 /* dashboard from a sheet */
 .d2d{display:grid;grid-template-columns:minmax(0,1fr);gap:8px;margin-top:26px;font-size:12.5px;line-height:1.3;max-width:420px}
 .xl{border:1px solid #b7c4bb;border-radius:8px;overflow:hidden;background:#fff}
@@ -434,6 +459,11 @@ footer p{color:var(--ink-2);font-size:.95rem;margin-top:10px;max-width:34em}
   .lr{grid-template-columns:minmax(0,1fr) auto;align-items:center}
 }
 @media(min-width:700px){
+  .hfacts{grid-template-columns:repeat(4,1fr)}
+  .homead .scrim{background:linear-gradient(to top,rgba(9,12,18,.94) 0%,rgba(9,12,18,.7) 34%,rgba(9,12,18,.1) 70%),linear-gradient(to right,rgba(9,12,18,.72) 0%,rgba(9,12,18,0) 62%)}
+  .homead .hin{padding-top:260px;padding-bottom:48px}
+  .bk{padding:30px 30px 28px}
+  .bk h3{font-size:2rem}
   .d2d{grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;max-width:none;gap:14px}
   .d2d .arw{transform:none}
 }
@@ -718,6 +748,25 @@ footer p{color:var(--ink-2);font-size:.95rem;margin-top:10px;max-width:34em}
       <li><span class="n">C</span><span><b>Cannot find the Share button?</b> <span>Ask the AI: "How do I share this as a link?" It will tell you where it is.</span></span></li>
     </ol>
   </div>
+</section>
+
+<!-- HOME BUILDING AD -->
+<section class="homead" id="home" aria-labelledby="homeH">
+  <div class="plx" id="plx"><img src="/aibusinesstools/home.webp" alt="A three-storey modern home at dusk, lit from inside, with planted balconies." decoding="async"></div>
+  <div class="scrim"></div>
+  <div class="wrap wide hin" id="hin">
+    <span class="k">Briklay Engineering · Kakinada</span>
+    <h2 id="homeH">Build your home once. Build it right.</h2>
+    <p>We design it, build it and stand behind it. You follow every stage on your phone.</p>
+    <ul class="hfacts">
+      <li><b>700+</b><span>quality checks on every home</span></li>
+      <li><b>10+ years</b><span>warranty</span></li>
+      <li><b>2,00,000+</b><span>sq ft built so far</span></li>
+      <li><b>₹2,000</b><span>per sq ft onwards</span></li>
+    </ul>
+    <div class="hrow"><a class="btn" href="https://briklay.in/costestimator" target="_blank" rel="noopener">See what your home will cost</a><a class="btn ghost" id="homeTalk" href="#" target="_blank" rel="noopener">Talk to Chandu</a></div>
+  </div>
+  <span class="hcap">Concept design</span>
 </section>
 
 <footer>
@@ -1779,6 +1828,22 @@ $('libBk').innerHTML = briklaySlot('');
 syncResume();
 howShow(0);
 if (HOW.reduced) $('howPlay').hidden = true;
+$('homeTalk').href = 'https://wa.me/' + OWNER_WA + '?text=' + encodeURIComponent('Hi Chandu, I am planning to build a home and would like to talk.');
+/* parallax for the home ad: the photograph drifts slower than the page, the words a little faster */
+(function(){
+  var sec = $('home'), img = $('plx'), txt = $('hin'), queued = false;
+  if (HOW.reduced || !sec) return;
+  function draw(){
+    queued = false;
+    var r = sec.getBoundingClientRect(), vh = window.innerHeight || 1;
+    if (r.bottom < -80 || r.top > vh + 80) return;
+    var p = Math.max(-1, Math.min(1, ((r.top + r.height / 2) - vh / 2) / vh));     // -1 above centre .. 1 below
+    img.style.transform = 'translate3d(0,' + (p * -52).toFixed(1) + 'px,0) scale(' + (1.03 + Math.abs(p) * 0.05).toFixed(3) + ')';
+    txt.style.transform = 'translate3d(0,' + (p * 16).toFixed(1) + 'px,0)';
+  }
+  function ask(){ if (!queued) { queued = true; requestAnimationFrame(draw); } }
+  window.addEventListener('scroll', ask, { passive:true }); window.addEventListener('resize', ask); draw();
+})();
 if ('IntersectionObserver' in window && !HOW.reduced) {
   new IntersectionObserver(function(en){
     var vis = en[0].isIntersecting;

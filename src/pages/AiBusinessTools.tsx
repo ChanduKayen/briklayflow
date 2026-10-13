@@ -13,6 +13,8 @@
  * Excel / Google Sheet, an animated "how to use it" walkthrough, four working sample tools,
  * and the full prompt library by trade. All content lives in the .html: the library is the
  * GROUPS / COMMON data at the top of its script, and the demo WhatsApp number is OWNER_WA.
+ * Its two images (the home-building ad and the Briklay App block background) are served from
+ * public/aibusinesstools/.
  */
 import { useEffect } from 'react';
 import pageHtml from './aiBusinessTools.html?raw';
