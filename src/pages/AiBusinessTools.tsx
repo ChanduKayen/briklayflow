@@ -8,9 +8,10 @@
  * the app. It needs nothing from the app: no session, no Supabase, no router state.
  * Public: rendered before every auth gate (see App.tsx), like /privacy and /demo.
  *
- * What is on the page: a prompt builder, the customer-estimator prompt from the talk,
- * and five working sample tools, each with the prompt that builds it. All content and
- * rates live in the .html; the demo WhatsApp number is the OWNER_WA constant there.
+ * What is on the page: a three-question prompt builder (trade, business size, problem), an
+ * animated "how to use it" walkthrough, four working sample tools with their prompts, and
+ * the full prompt library by trade. All content lives in the .html: the library is the
+ * GROUPS / COMMON data at the top of its script, and the demo WhatsApp number is OWNER_WA.
  */
 import { useEffect } from 'react';
 import pageHtml from './aiBusinessTools.html?raw';
@@ -18,7 +19,7 @@ import { markBooted } from '../components/brand/bootSignal';
 
 const TITLE = 'Build your own business tools with AI · Briklay';
 const DESCRIPTION =
-  'Fill in the blanks for your business, copy the prompt, and paste it into any AI assistant. A prompt builder and five working sample tools, from Briklay Engineering.';
+  'Pick your trade and the problem that eats your time, and get a prompt to paste into any AI assistant. 159 prompts for 50 kinds of business, from Briklay Engineering.';
 
 export default function AiBusinessTools() {
   // This page needs nothing from auth, so don't hold the boot loader over it while the session
