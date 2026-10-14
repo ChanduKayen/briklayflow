@@ -161,6 +161,9 @@ section > .wrap > .k{display:block;margin-bottom:10px}
 .pb b{display:block;font-weight:600;font-size:1.02rem;line-height:1.35}
 .pb small{display:block;margin-top:6px;font-size:.86rem;color:var(--blue);font-weight:600}
 .pb[aria-pressed="true"] small{color:#fff}
+.pb.est{box-shadow:inset 0 0 0 1.5px var(--blue);background:var(--tint)}
+.pb.est[aria-pressed="true"]{background:var(--blue);box-shadow:none}
+.tag{display:inline-block;vertical-align:middle;margin-left:6px;font-family:var(--mono);font-size:9.5px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--blue);background:var(--tint);padding:2px 7px;border-radius:4px}
 .morebtn{margin-top:14px}
 .ready{display:inline-block;background:var(--mark);padding:3px 10px;border-radius:5px;font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase}
 .yours{margin-top:22px;border:1px solid var(--rule);border-radius:12px;overflow:hidden}
@@ -597,7 +600,7 @@ mark.ed:focus::after{content:""}
   <div class="wrap">
     <span class="k b">Chapter 1</span>
     <h2>Find a prompt.</h2>
-    <p class="sub">Answer three questions about your business and we hand you the prompt written for it.</p>
+    <p class="sub">Answer three questions about your business and we hand you the prompt written for it. Every trade has an estimator your customers can open from a link: it guides them to what suits them and sends you the enquiry on WhatsApp.</p>
 
     <button class="entry" id="entry" type="button">
       <span class="k">Start here</span>
@@ -1148,6 +1151,82 @@ var COMMON = [
   { n:"Branch daily report", p:"Each branch reports in its own way, when it remembers.", t:"get the same daily numbers from every branch", i:"branch, sales, number of bills, cash, UPI and card, expenses, stock problems", r:"The same form for every branch manager. Send it to the owner's WhatsApp as one fixed layout, so I can compare branches at a glance.", w:"s", z:[4], f:"xw" }
 ];
 
+/* ------------------------------------------------------------------ one guided customer estimator per trade
+   A link the owner shares on WhatsApp or as a QR code. The customer answers a few guided questions,
+   is told what suits them and why, sees a rough price, and sends the enquiry on WhatsApp.
+   `up` upgrades a tool the trade already has; otherwise a new one is added. `gd` is how to guide. */
+var ESTIMATORS = {
+  clinic:     { up:'Procedure cost estimate', gd:'Ask what the doctor advised, then which room type they prefer. Suggest the room by what they said matters: cost, privacy or an attendant staying. Never suggest a procedure or a medicine.' },
+  dental:     { up:'Treatment plan estimate', gd:'Ask which treatments the dentist advised and for how many teeth. For crowns, explain the crown types and their price difference in plain words and let them choose by budget. Never suggest a treatment or compare how long treatments last; the dentist decides after an examination.' },
+  hospital:   { n:'Admission estimate for families', p:'Families want to know what an admission will cost before they come in.', t:'give a family a rough admission estimate and help them pick a room', i:'procedure or reason for admission from my list, room type they are thinking of, expected days, days in ICU if the doctor has said so, insurance yes or no', r:'Room per day: general ward ₹1,500, sharing ₹3,000, private ₹5,000, ICU ₹8,000. The package for each procedure I will give you. Add 20% of the package for medicines and consumables. Show a range of 10% either side. Advance = 50% of the lower figure. If insured, say the hospital will check their cover. Add the line "Estimate only. The final bill depends on the treatment needed."', gd:'Ask about the patient\'s needs first: an attendant staying, length of stay, budget. Suggest the room that fits, and say when a sharing room is enough. Never suggest a treatment.' },
+  lab:        { up:'Test package price', gd:'Ask which tests the doctor wrote. Say which need fasting, suggest home collection when a fasting test is on the list, and say when one more test takes the bill past ₹2,000 for the 10% off. Never suggest a test for a symptom.' },
+  pharmacy:   { f:'x', n:'Refill and delivery order', p:'Regular customers call to reorder and we write the wrong strength.', t:'let a customer order a refill or a delivery, and be guided to what we need from them', i:'medicine names as written on the strip or prescription, tablets a day as on the prescription, days of supply needed, photo of the prescription if they have one, delivery or pickup, address', r:'Ask for the name exactly as on the strip. For 30, 60 or 90 days of supply, say how many strips. Free delivery above ₹500, otherwise ₹30. Prescription medicines are given only against a prescription. Never suggest a medicine, a dose or a substitute.', gd:'Guide them to type the name as printed on the strip and to attach the prescription. Suggest only the days of supply the prescription covers, and delivery if they are far. Never advise on medicines.' },
+  meddist:    { f:'x', n:'Retailer order enquiry', p:'Medical shops send orders as voice notes and ask the scheme for each item.', t:'let a medical shop send me an order and see the scheme on each item', i:'shop name, items from my list with quantity, roughly how much of each they sell a month, delivery day wanted', r:'For each item show the scheme I give you, such as 10+1, and the free quantity they earn: free = (quantity ÷ paid quantity, whole number) x free quantity. Show the next quantity that unlocks a better scheme. Minimum order ₹3,000. Delivery in Kakinada next day.', gd:'Nudge the shop towards the quantity that just unlocks the next scheme, and say how much free stock that earns. Never push beyond what the shop said it sells in a month; ask that first.' },
+  optical:    { n:'Spectacle estimator', p:'Customers ask what glasses will cost before they come for the eye test.', t:'guide a customer to the right lens and show a rough price for a pair', i:'what they use glasses for (reading, distance, both, screen work), hours on a screen a day, frame budget (economy, mid, premium), do they drive at night', r:'Sample lens prices: single vision ₹600, bifocal ₹1,200, progressive ₹3,500. Coatings: anti-glare +₹400, blue cut +₹800. Frame: economy ₹800, mid ₹2,000, premium ₹4,500. Total = frame + lens + coatings. Show a range of 10% either side.', gd:'For both near and distance suggest bifocal at the lower price, with progressive as the alternative for people who do not want a visible line. Reading, distance or screen work alone need single vision; say so plainly. Blue cut for more than four hours on a screen; anti-glare for night driving. The eye test decides the power.' },
+  builder:    { up:'House construction estimator', gd:'Ask the area, the floors and the budget. Suggest the finish grade that fits the budget, and say that finish moves the rate by up to 50% while area and floors move the cost in proportion.' },
+  contractor: { up:'Per sq ft quote', gd:'Ask whether they want to buy material themselves. Suggest labour-only when they have time and a trusted supplier, with-material when they do not. Say which stages need their decision early.' },
+  architect:  { up:'Interiors estimator', gd:'Ask how long they will live in the home and what they use most. Suggest spending on the kitchen and wardrobes first, and the finish grade that fits their budget. Say what can wait for later.' },
+  cement:     { n:'Material for your house', p:'House builders ask how much cement and steel they will need and what it costs.', t:'tell a house builder roughly how much cement and steel their house needs and what it costs today', i:'built-up area per floor in sq ft, number of floors, stage (full house, only the structure, only finishing)', r:'Total area = area per floor x floors. Thumb rule for a full house: 0.4 bags of cement and 4 kg of steel per sq ft; structure only 0.25 bags and 4 kg; finishing only 0.15 bags and no steel. Rate per bag ₹380 and per tonne ₹62,000, which I will update. Show the quantity and the cost as a range of 10% either side. Add the line "Thumb-rule estimate. Your engineer\'s figure is final."', gd:'Ask the area, the floors and the stage. Say this is a thumb rule for the quantity only, and that their engineer\'s drawing decides the cement grade and the bar sizes. Do not suggest a grade or a size. Suggest buying in stages so cement does not set in storage.' },
+  timber:     { n:'Door and wood estimator', p:'House owners ask what their doors and frames will cost, and which wood to choose.', t:'guide a house owner to the right wood for each door and show a rough price', i:'number of doors by type (main door, bedroom, bathroom, pooja), size standard or large, wood preference (teak, sal, engineered, WPC, flush with laminate), budget (economy, mid, premium)', r:'Sample per door with frame: flush with laminate ₹6,000, WPC ₹7,000, engineered ₹9,000, sal ₹11,000, teak ₹22,000. Main door in teak ₹45,000, in other woods 1.5 x the door price. Large size adds 20%. Total = doors x price. Show a range of 10% either side.', gd:'Suggest teak for the main door, sal or engineered for bedrooms, and flush or WPC for bathrooms because of water. Say why spending on the main door makes sense and where it does not.' },
+  tiles:      { up:'Bathroom package quote', gd:'Ask how many people use the bathroom and whether it is for the parents. Within the range that fits the budget, suggest anti-skid tiles for the floor and a wall-hung set for a small bathroom, and say what to skip.' },
+  paints:     { up:'Painting estimate', gd:'Ask whether it is a fresh house or a repaint, and how long they will stay. Suggest premium for a home they will live in for years and economy for a rental, and say when putty is needed and when it is not.' },
+  waterproof: { up:'Waterproofing quote', gd:'Ask where it leaks and how old the surface is. Suggest the treatment by surface and age, and say which gives the warranty they want. Say when a site visit must come first.' },
+  fabrication:{ up:'Roofing shed quote', gd:'Ask what the shed is for and how hot it gets. Suggest PUF panels for a workspace, colour-coated for a parking shed, GI for a store. Say the height that suits the use.' },
+  electrical: { n:'House wiring estimator', p:'House owners ask what wiring a 2 BHK costs and which brand to pick.', t:'guide a house owner to the right wiring grade and show a rough price', i:'home type (1 BHK, 2 BHK, 3 BHK, villa), number of ACs, inverter yes or no, grade (economy, standard, premium)', r:'Points by home: 1 BHK 30, 2 BHK 45, 3 BHK 60, villa 90. Material per point: economy ₹900, standard ₹1,300, premium ₹1,900. Each AC adds ₹2,500. Inverter wiring adds ₹6,000. Show a range of 10% either side. Labour is separate. I will give you one brand per grade.', gd:'Suggest standard grade for most homes, premium where ACs and an inverter are planned, and say which items are worth paying for (wire and switches) and which are not. Suggest the brand for each only from my list.' },
+  hardware:   { n:'Hardware list for a job', p:'Customers describe a job and expect me to tell them what to buy.', t:'turn a customer\'s job into a shopping list with a rough price', i:'the job (fix a door, new bathroom fittings, fencing, a water tank, a gate), size or count, quality (economy, standard, premium)', r:'For each job I will give you my list of items and quantities. Price at my rates for the quality chosen, add 5% for extras. Show the list and the total.', gd:'Suggest the standard quality unless the job is outdoors or carries weight, then premium. Say what the customer tends to forget, such as screws, sealant or a second coat.' },
+  glass:      { up:'Window quote', gd:'Ask which rooms the windows are in and whether noise or heat is the problem. Suggest UPVC for heat and noise, aluminium for cost, toughened glass for large panes and child rooms. Say where mesh is worth it.' },
+  solar:      { up:'Solar size and savings', gd:'Ask about their bill, roof and whether they plan an AC or an electric vehicle. Suggest the size that covers today\'s bill, not the largest the roof can hold. Say that a planned AC or electric vehicle means a bigger system, sized at the site visit, and when the roof needs a structure first.' },
+  realestate: { up:'Plot total cost', gd:'Ask whether it is to build on or to invest. Suggest facing and corner only when they plan to build, and say what to check before paying an advance: approvals and road width.' },
+  showroom:   { n:'Which variant suits me?', p:'Enquiries start with "which model?" and end with the EMI, and the salesman guesses both.', t:'guide a customer to the right model and variant and show the on-road price and EMI', i:'budget, daily running in km, family size, city or highway driving, fuel preference (petrol, diesel, CNG, electric), down payment they can make, monthly EMI they are comfortable with', r:'From my list of models and variants with ex-showroom prices, pick the ones within budget. On-road = ex-showroom + road tax at my % + insurance + registration charges. Loan = on-road - down payment. EMI by the standard reducing-balance formula at my rate, shown for 36, 48 and 60 months.', gd:'Suggest the variant by daily use, not by budget: CNG or electric above 50 km a day, the base variant for city running, a bigger car only for a family of five or more. Say when the mid variant is the sweet spot, and keep the EMI within a third of what they said they can pay a month.' },
+  usedcars:   { n:'Used car finder', p:'Buyers ask "what can I get for 5 lakh?" and want the EMI in the same breath.', t:'guide a buyer to the right kind of used car for their budget and show the EMI', i:'budget, daily running in km, family size, how many years they will keep it, body type they like (hatchback, sedan, SUV), down payment', r:'From my stock list with prices, age and km, show cars within 10% of the budget. EMI by the standard reducing-balance formula at my rate for 24, 36 and 48 months. Transfer and insurance add ₹12,000.', gd:'Suggest a newer car with more km over an older one with less, a hatchback for city running, and a diesel only above 60 km a day. Say which checks to ask for before paying: service history, accident repair, and the RC.' },
+  garage:     { n:'Service estimate for customers', p:'Customers want to know what a service will cost before they bring the vehicle.', t:'guide a customer to the right service and show a rough price', i:'vehicle type (hatchback, sedan, SUV, bike), km run, months since last service, problems they notice (noise, pulling, AC weak, brakes), pickup wanted', r:'General service: hatchback ₹2,500, sedan ₹3,200, SUV ₹4,500, bike ₹900, including labour and basic consumables. Major service every 40,000 km or 2 years, whichever is first, is 1.8 times. Each problem from my list has a check charge I will give you. Pickup ₹300. Show a range of 15% either side because parts vary.', gd:'Suggest a general service unless the km or time says major. Match each problem they ticked to the check we will do, in plain words. Say that the final figure comes after we see the vehicle.' },
+  tyres:      { n:'Tyre and battery picker', p:'Customers ask which tyre or battery to buy and what it costs.', t:'guide a customer to the right tyre or battery and show the price', i:'vehicle model, what they need (tyres or battery), how they drive (city, highway, rough roads), how long they will keep the vehicle, budget (economy, mid, premium), number of tyres', r:'For each vehicle and budget I will give you my tyre and battery options with prices. Total = price x number. Old tyre exchange ₹300 each. Alignment and balancing free with four tyres. Battery fitting free.', gd:'Suggest the tyre by how they drive: a harder tyre for rough roads, a quieter one for highway. Say when changing only two tyres is fine and when all four is safer. For batteries, suggest the warranty that fits how long they keep the vehicle.' },
+  jewellery:  { n:'Jewellery budget guide', p:'Customers ask what they can get for their budget before they come to the shop.', t:'guide a customer to the right pieces for their budget and show a rough price', i:'occasion (wedding, daily wear, gift, savings), budget, pieces they have in mind (chain, bangles, earrings, necklace, ring), gold preference (22 carat, 18 carat, silver)', r:'Grams = budget ÷ (today\'s rate per gram for the carat they chose, which I will give you, x 1.12 for wastage and making x 1.03 for GST). Sample weights: chain 8 to 12 g, bangles 16 to 24 g a pair, earrings 4 to 8 g, necklace 20 to 40 g, ring 3 to 6 g. Show what the budget buys as a range of grams and pieces.', gd:'Ask about the occasion and whether they want to keep it as savings or wear it daily. Suggest lower making-charge pieces for savings, lighter pieces for daily wear, and 18 carat or silver when the budget is small and the look matters more than the gold. Say how the monthly scheme bonus works in one line.' },
+  textiles:   { n:'Wedding shopping estimator', p:'Families ask what the whole wedding shopping will come to before they visit.', t:'guide a family to a wedding shopping plan and show a rough budget', i:'occasion, number of people to shop for by role (bride, groom, parents, siblings, relatives), budget level (economy, mid, premium), events to dress for', r:'Per person per event, sample: economy ₹2,500, mid ₹6,000, premium ₹15,000; bride and groom x3. Add up each person\'s events x rate, with bride and groom at 3 x. Discount on the whole bill: above ₹50,000 5%, above ₹1,00,000 8%, above ₹2,00,000 10%. Show a range of 10% either side.', gd:'Suggest where to spend: bride and groom and the main event first, relatives and smaller events at economy. Say what they can reuse across events.' },
+  electronics:{ n:'Appliance picker', p:'Customers ask which AC or fridge to buy and what the EMI will be.', t:'guide a customer to the right appliance and show the price and EMI', i:'product (AC, fridge, TV, washing machine, phone), room size or family size, hours of use a day, budget, exchange yes or no', r:'From my list, pick the models that fit the size and budget with prices. AC: 1 ton up to 120 sq ft, 1.5 ton up to 180, 2 ton above. Fridge: 200 L for 2 people, 300 L for 4, 400 L and above for 5 or more. Exchange value by my table. No-cost EMI over 6, 9 or 12 months: EMI = net price ÷ months. Processing fee ₹199.', gd:'Suggest the size by the room or family, not the budget. Suggest the higher star rating when use is more than six hours a day, and say that it pays back in two to three years. Say when last year\'s model is the better buy.' },
+  furniture:  { up:'Custom furniture quote', gd:'Ask about the room size, how many people use it and children or pets at home. Suggest the size that fits the room with walking space, and the material that stands up to their home. Say what to order first.' },
+  supermarket:{ up:'Home delivery order form', gd:'When an item has a family pack in my list, show it next to the small pack with the saving. Suggest a delivery slot that is usually free.' },
+  sweets:     { up:'Function sweets order', gd:'Ask about the function, the guests and the weather. Suggest 100 g per guest with a meal and 250 g for take-home boxes, sweets that keep well in heat, and a mix of two or three rather than one. Say what to order a day early.' },
+  hall:       { up:'Booking quote', gd:'Ask about guests, the time of year and the kind of event. Suggest AC by the month, half day for small events, and the rooms they will really use. Say which dates to avoid for price.' },
+  catering:   { up:'Per plate estimate', gd:'Ask about the occasion, the guests and the time of day. Suggest the menu level by the occasion and a lighter menu for evening events. Say what guests tend to waste, so they do not over-order.' },
+  photo:      { up:'Package price', gd:'Ask which events, how many guests and what they will do with the photos. Suggest two photographers above 300 guests, video only for the main event, and an album only if they will print. Say what adds cost without adding value.' },
+  events:     { up:'Decor estimate', gd:'Ask about the venue, the event and what the family cares about most. Suggest spending on the stage and entrance, and lighting for evening events. Say when artificial flowers look as good and cost less.' },
+  restaurant: { up:'Party order quote', gd:'Ask about the occasion, the guests and children or elders in the group. Suggest the menu level by the occasion and the hall only above 25 guests. Say what to pre-order to avoid waiting.' },
+  travel:     { up:'Trip package price', gd:'Ask about the people, the days and what they want from the trip. Suggest the hotel grade by who is travelling, the vehicle by the head count, and the season to avoid. Say where paying more is worth it and where it is not.' },
+  ca:         { f:'x', n:'Which service do I need?', p:'People do not know whether they need GST, ITR, a company registration or just a PAN.', t:'guide a person to the service they need and send me their enquiry', i:'what they do (salaried, business, freelancer, starting a business, property sale), yearly turnover band, whether they already have GST or a company, what they want done', r:'Use my rules to map answers to a service: GST registration above ₹40 lakh turnover for goods or ₹20 lakh for services, or from the first rupee if they sell goods to other states; ITR for anyone with income above the basic limit; a company or LLP when they have partners or want to raise money. Show the service and the documents needed. Do not show fees. Add the line "A conversation decides the right plan."', gd:'Explain the service in one plain line and why it applies to them. Suggest the simplest structure that works. Never show fees or promise an outcome. Confirm the thresholds with me because they change. Share this link only with people who have asked you; ICAI rules do not allow sending it to prospects.' },
+  insurance:  { up:'Cover needed', gd:'Ask about income, loans and existing cover. Suggest term cover first and say in one line why. Say that health cover is a separate conversation. Never name a plan; I will.' },
+  loans:      { up:'EMI calculator', gd:'Ask the amount, the rate and the years. Show the EMI for the years they chose and for one shorter and one longer tenure, and say what the shorter one saves in interest. Say the rate depends on the bank and their profile.' },
+  advocate:   { f:'x', n:'Which document work do I need?', p:'People call to ask whether they need a sale deed, a gift deed or a will, and what to bring.', t:'guide a person to the document work they need and send me their enquiry', i:'what they want to do (transfer property to family, buy or sell property, make a will, rent out a property, start a partnership), who the other party is, property type', r:'Use my rules to map answers to the work: gift deed for transfer to family without money, sale deed when money changes hands, will for after death, rental agreement for letting, partnership deed for a business with partners. Show the work and my document list for it. Do not show fees.', gd:'Explain the work in one plain line and why it fits what they said. Say what to bring to the first meeting. Never give legal advice on the outcome; say that we will discuss their case. Share this only when a person has asked you; it must not be sent to prospects.' },
+  printing:   { up:'Wedding card quote', gd:'Ask about the guests, the budget and how the cards will be sent. Suggest fewer printed cards plus a digital card for outstation guests, and the card model that fits the budget. Say what to confirm before printing.' },
+  digital:    { up:'Monthly package quote', gd:'Ask what the business sells, who buys it and what they want: enquiries, walk-ins or brand. Suggest the package by the goal, and say when a smaller package with ads beats a bigger one without.' },
+  it:         { up:'CCTV quote', gd:'Ask what they want to watch, indoors or out, and whether they need to see it on the phone. Suggest the camera count by the area, outdoor cameras only where needed, and the recording days by their use. Say what is overkill for a small shop.' },
+  education:  { up:'Fee structure for a parent', gd:'Ask about the class, the distance and siblings. Suggest the bus slab by the distance, and say what the fee includes and what it does not.' },
+  packers:    { up:'House shifting quote', gd:'Ask about the home, the distance and fragile or heavy items. Suggest premium packing only for glass and electronics, and a weekday move to save. Say what to pack themselves.' },
+  salon:      { up:'Bridal package builder', gd:'Ask about the events, the venue and the time of day. Suggest the services by the event, a trial for the wedding day only, and at-venue only when the venue is far. Say what to book early.' },
+  aqua:       { up:'Crop profit estimate', gd:'Ask about the pond size, the season and their experience. Do not suggest stocking or feed; their hatchery or fisheries officer advises that. Say which costs they tend to underestimate, and that prices change and this is a guide.' },
+  rice:       { n:'Bulk rice enquiry for buyers', p:'Retailers and function buyers ask which variety suits them and what a bulk order costs.', t:'guide a buyer to the right variety and show a bulk price', i:'buyer type (retail shop, function or caterer, household), use (daily cooking, biryani, idli and dosa, festival), quantity in 26 kg bags, delivery area', r:'From my list, map use to varieties with the price per 26 kg bag. 20 bags or more take 2% off, 50 or more 4%. Delivery free within Kakinada above 10 bags. Show the total and the per kg price.', gd:'Suggest the variety by the use, not the price: a fresh variety for daily cooking, an aged one for biryani, a different one for idli. Say when a cheaper variety cooks just as well for their use.' },
+  fertiliser: { n:'Farm supply enquiry', p:'Farmers ask what to buy for their acres and expect an answer on the phone.', t:'guide a farmer to send me a clear enquiry for their crop and stage', i:'crop, acres, stage of the crop (land preparation, sowing, 30 days, flowering, harvest), the product they used last time, problem they see (pests, yellowing, weeds, none)', r:'Map crop and stage to the product groups I give you, such as basal fertiliser at land preparation or top dressing at 30 days, with my pack sizes and prices. Quantity = the dose on the label x acres, rounded up to whole packs. Never suggest a dose yourself and never suggest a pesticide for a problem. Add the line "Follow the label and your agriculture officer."', gd:'Guide the farmer to describe the crop, the stage and what they see, so the enquiry is complete. Suggest only product groups and pack counts from my list, never a dose or a chemical for a pest. Say that the agriculture officer\'s advice comes first.' }
+};
+(function(){
+  var skipped = [];
+  GROUPS.forEach(function(g){ g.trades.forEach(function(tr){
+    var e = ESTIMATORS[tr.id]; if (!e) { skipped.push(tr.id); return; }
+    var t;
+    if (e.up) {
+      t = tr.tools.filter(function(x){ return x.n === e.up; })[0];
+      if (!t) { skipped.push(tr.id + ':' + e.up); return; }
+      tr.tools.splice(tr.tools.indexOf(t), 1);
+    } else {
+      t = { n:e.n, p:e.p, t:e.t, i:e.i, r:e.r, f:e.f || '' };
+    }
+    t.gd = e.gd; t.w = 'c'; t.z = [1, 2, 3, 4];
+    var f = (t.f || '').replace(/[gwr]/g, '');
+    t.f = f + 'gw' + (/[xm]/.test(f) ? '' : 'r');     // guided, WhatsApp, and a price range unless it is a form or a list
+    tr.tools.unshift(t);
+  }); });
+  if (skipped.length) throw new Error('estimators missing: ' + skipped.join(', '));
+})();
+
 /* ------------------------------------------------------------------ config */
 var BRIKLAY_WA = '917330872705';        // Briklay's own WhatsApp line (the one the landing page uses): invitation requests go here
 var OWNER_WA = '918330972705';          // where "Send on WhatsApp" in the demo estimator and "Stuck?" go
@@ -1211,7 +1290,7 @@ COMMON.forEach(function(t, i){ t.id = 'all.' + i; t.trade = 'all'; TOOLS_BY_ID[t
 var OWN = { id:'own', trade:'own', n:'My own tool', p:'Something else.', t:'', i:'', r:'', w:'s', z:[1,2,3,4], f:'w' };
 TOOLS_BY_ID.own = OWN;
 function has(t, flag){ return (t.f || '').indexOf(flag) > -1; }
-var WHO = { clinic:['patients','patient'], dental:['patients','patient'], hospital:['patients','patient'], education:['parents','parent'],
+var WHO = { meddist:['retailers','retailer'], rice:['buyers','buyer'], fertiliser:['farmers','farmer'], clinic:['patients','patient'], dental:['patients','patient'], hospital:['patients','patient'], education:['parents','parent'],
             insurance:['clients','client'], realestate:['buyers','buyer'], aqua:['farmers','farmer'] };
 
 /* The look each kind of business gets. Real hex values, a named texture and a font, so the AI has
@@ -1252,7 +1331,7 @@ function val(v, placeholder){ v = clean(v); return v ? { t:v, ph:false } : ph(pl
 /* Design, Screen, Format and After: the part that tells the AI exactly what to build. */
 function specRows(tool, th, o){
   var sheet = o.fmt === 'sheet', cust = !!o.cust, who = o.who || ['customers', 'customer'];
-  var calc = !has(tool, 'x'), list = has(tool, 'm'), main = o.colour || th.main;
+  var calc = !has(tool, 'x'), list = has(tool, 'm'), guided = has(tool, 'g') && cust, main = o.colour || th.main;
   var D = [], S = [], F = [], A = [];
   if (!sheet) {
     D.push(['Style: ' + th.name + '. Page background ' + th.bg + '. Cards are white with a 1px ' + th.line + ' border and 14px rounded corners. Text ' + th.ink + ', small labels ' + th.mute + '.']);
@@ -1263,9 +1342,14 @@ function specRows(tool, th, o){
       ? 'Motion: when the result changes, count up to the new figures in 400ms. A tapped option fills with the main colour in 150ms and shrinks to 97% while pressed. The first time a result appears, it fades in over 250ms.'
       : 'Motion: a new row or message slides in from below over 250ms. When a status changes, its chip changes colour over 200ms. Buttons shrink to 97% while pressed.') + ' Switch all motion off if the phone asks for reduced motion.']);
 
-    S.push(['One page that scrolls, in one column at most 480px wide with 16px margins, so it fits any phone.']);
+    S.push([guided ? 'One column at most 480px wide with 16px margins, so it fits any phone. The questions are separate screens shown one at a time; the final screen scrolls.' : 'One page that scrolls, in one column at most 480px wide with 16px margins, so it fits any phone.']);
     S.push(['At the top: my business name in bold' + (cust ? ', and one line telling my ' + who[0] + ' what this is.' : '.')]);
-    if (calc) {
+    if (guided) {
+      S.push(['One question per screen, in the order listed above, with a thin progress bar at the top and a Back link. Choices are big tap buttons at least 56px tall, each with a one-line hint underneath in plain words, so a ' + who[1] + ' who does not know the terms can still choose. Never a dropdown: where I listed a number, offer three or four ranges as buttons.']);
+      S.push(['After the last question, a card titled "What suits you": the option we recommend in bold, two short reasons in plain words, and one alternative with its trade-off. ' + (has(tool, 'r') ? 'Below it, the price range in large figures.' : 'Below it, the result in large figures.')]);
+      S.push(['Then one optional box for the ' + who[1] + '\'s name, and the Send on WhatsApp button. On every screen, a small "Not sure? Ask us" link that opens WhatsApp with the answers so far.']);
+      S.push(['At the end: a link "See how this was worked out", a "Start again" link, and the line "Estimate only. We confirm after we talk."']);
+    } else if (calc) {
       S.push(['Then one card for each thing ' + (cust ? 'the ' + who[1] + ' enters' : 'I enter') + ', in the order listed above. Choices are big tap buttons at least 48px tall, never a dropdown. If anything is typed as a number, open the number keypad and add minus and plus buttons. Start with nothing chosen.']);
       if (cust && has(tool, 'w')) S.push(['The last card is one optional box for the ' + who[1] + '\'s name.']);
       S.push(['A result bar stays fixed to the bottom of the screen and everything else scrolls above it. It holds ' + (has(tool, 'r') ? 'the price range' : 'the result') + (has(tool, 'w') ? ' and the Send on WhatsApp button, which stays dimmed until there is a result.' : '.') + ' Before there is a result, it says in a few words what is still missing.']);
@@ -1281,9 +1365,9 @@ function specRows(tool, th, o){
     F.push(['ONE complete HTML file with all the CSS and JavaScript inside it. No libraries, no login, no database. It must work when I open the file on my phone.']);
     if (calc) F.push(['Keep all my rates in one block at the top of the code under the comment CHANGE YOUR RATES HERE, so they are easy to change later.']);
     F.push([calc ? 'Amounts in Indian format like ₹1,25,000. Never show a broken or empty result.' : 'Amounts in Indian format like ₹1,25,000. When something cannot be done, say why in plain words, never in technical ones.']);
-    if (has(tool, 'r')) F.push([o.rangeLine || 'Show a price range, not one exact figure, with the line "Final quote after we talk."']);
+    if (has(tool, 'r')) F.push([o.rangeLine || (guided ? 'Show a price range, not one exact figure.' : 'Show a price range, not one exact figure, with the line "Final quote after we talk."')]);
     if (has(tool, 'w')) {
-      if (cust) F.push(['The "Send on WhatsApp" button is #128C7E with white text, full width and 56px tall. It opens WhatsApp to ', o.wa, ' (with the country code 91) with a message already typed: my business name, the name, each answer on its own line, the result, and the words "Please confirm."']);
+      if (cust) F.push(['The "Send on WhatsApp" button is #128C7E with white text, full width and 56px tall. It opens WhatsApp to ', o.wa, ' (with the country code 91) with a message already typed: my business name, the name, each answer on its own line, ' + (guided ? 'the option we suggested, ' : '') + 'the result, and the words "Please confirm."']);
       else if (calc) F.push(['The "Send on WhatsApp" button is #128C7E with white text, full width and 56px tall. It opens WhatsApp with the result already typed in neat lines, so I can choose who to send it to.']);
       else F.push(['Sending opens WhatsApp with the message already typed. If the entry has a phone number, send it to that number with the country code 91. If not, let me choose who gets it.']);
     }
@@ -1294,9 +1378,10 @@ function specRows(tool, th, o){
     }
     if (o.te) F.push(['Every label in Telugu and English, Telugu first.']);
     (o.extra || []).forEach(function(x){ F.push([x]); });
-    if (cust) F.push(['At the very end, in small grey text: "Estimate only. Final price confirmed by" followed by my business name and phone number. Tapping the number dials it.']);
+    if (cust) F.push([guided ? 'At the very end, in small grey text, my business name and phone number. Tapping the number dials it.' : 'At the very end, in small grey text: "Estimate only. Final price confirmed by" followed by my business name and phone number. Tapping the number dials it.']);
 
     A.push([list ? 'When it is ready, tell me in three short lines how to open it on my phone and keep it on my home screen.'
+                 : guided ? 'When it is ready, tell me in three short lines how to share it as a link on WhatsApp, how to make a QR code of the link for my counter, and how to send it as a file if a link is not possible.'
                  : 'When it is ready, tell me in three short lines how to open it on my phone and how to send it to others: as a link if you can publish it, otherwise as the file.']);
     A.push(['If I say something is wrong, change only that and show me the tool again.']);
   } else {
@@ -1338,18 +1423,20 @@ function rowsFor(tool, bizSentence, o){
   if (!inputs.ph) inputs.t = lowerFirst(inputs.t);
   var rulesText = String(o.rules !== undefined ? o.rules : tool.r).trim().replace(/\s+/g, ' ');
   var rules = rulesText ? { t:rulesText.replace(/[.。]+$/, ''), ph:false } : ph('your rates, formula and GST'); rules.f = 'rules';
+  if (o.gd !== undefined && tool.gd) tool = Object.assign({}, tool, { gd:o.gd });
   var calc = !has(tool, 'x');
   var job = clean(o.job);
   var wa = (has(tool, 'w') && cust) ? val(o.wanum, 'your WhatsApp number') : null; if (wa) wa.f = 'wa';
   var rows = [
     ['Context', [['I run a ', biz, ' in ', town, '.']]],
-    ['Task', [[(sheet ? 'Build me a simple spreadsheet. ' : 'Build me a simple tool that works on a phone. ') + (own ? 'This is what I need it to do: ' : 'It should '), task, '. ' + (cust ? 'My ' + who[0] + ' will open it from a link I share on WhatsApp.' : sheet ? 'My staff and I will use it ourselves.' : has(tool, 'm') ? 'It will be used on one phone, mine or the one at the counter.' : 'Only my staff and I will use it, on our phones.')]]],
+    ['Task', [[(sheet ? 'Build me a simple spreadsheet. ' : 'Build me a simple tool that works on a phone. ') + (own ? 'This is what I need it to do: ' : 'It should '), task, '. ' + (cust && has(tool, 'g') ? 'My ' + who[0] + ' will open it from a link I share on WhatsApp or a QR code at my counter. It should guide them to what suits them, then send me their enquiry.' : cust ? 'My ' + who[0] + ' will open it from a link I share on WhatsApp.' : sheet ? 'My staff and I will use it ourselves.' : has(tool, 'm') ? 'It will be used on one phone, mine or the one at the counter.' : 'Only my staff and I will use it, on our phones.')]]],
     ['Ask first', [[calc ? ASK_FIRST : ASK_FIRST_LIST]], 'key'],
     ['Inputs', [[(cust ? 'The ' + who[1] + ' will enter: ' : 'I will enter: '), inputs, '.']]],
     ['Rules', [[(calc ? 'Calculate it like this: ' : 'Make it work like this: '), rules, '. ' + (calc ? 'These are my starting numbers. Confirm each one with me before you build.' : 'Confirm the details with me before you build.')]]],
+  ].concat(cust && has(tool, 'g') && tool.gd ? [['Guide', [['Guide the ' + who[1] + ' like this: ', { t:tool.gd.replace(/[.。]+$/, ''), ph:false, f:'gd' }, '. Recommend what fits their answers, not the most expensive option, and say why in one line.']]]] : []).concat([
     ['Check', [job ? ['Check your work with this job: ', { t:job, ph:false, f:'job' }, '. If your tool gives a different answer, fix it before you show me.']
                    : ['Before you finish, work through one example with my numbers and ask me if the answer is right.']]]
-  ].concat(specRows(tool, o.theme || THEMES.plain, { fmt:o.fmt, cust:cust, who:who, wa:wa, te:o.te, colour:o.colour }));
+  ]).concat(specRows(tool, o.theme || THEMES.plain, { fmt:o.fmt, cust:cust, who:who, wa:wa, te:o.te, colour:o.colour }));
   var blanks = [biz, town, task, inputs, rules].concat(wa ? [wa] : []).filter(function(x){ return x.ph; }).length;
   return { rows:rows, blanks:blanks };
 }
@@ -1394,7 +1481,7 @@ function edit(){ if (!W.edits[W.tool]) W.edits[W.tool] = {}; return W.edits[W.to
 function currentPrompt(){
   var tool = TOOLS_BY_ID[W.tool], e = W.edits[W.tool] || {};
   /* a tool that every business shares still speaks as this owner's trade */
-  return rowsFor(tool, e.biz !== undefined ? e.biz : bizOf(W.trade, W.other), { town:W.town, wanum:W.wanum, te:W.te, rules:e.rules, job:e.job, task:e.task, inputs:e.inputs, fmt:e.fmt, theme:themeOf(W.trade), colour:W.colour });
+  return rowsFor(tool, e.biz !== undefined ? e.biz : bizOf(W.trade, W.other), { town:W.town, wanum:W.wanum, te:W.te, rules:e.rules, job:e.job, task:e.task, inputs:e.inputs, gd:e.gd, fmt:e.fmt, theme:themeOf(W.trade), colour:W.colour });
 }
 function syncResume(){
   var ok = !!(W.tool && TOOLS_BY_ID[W.tool] && W.trade);
@@ -1406,7 +1493,10 @@ function syncResume(){
 function problemLists(){
   var own = W.trade !== 'other' && TRADES[W.trade] ? TRADES[W.trade].tools : [];
   function fits(t){ return !W.size || t.z.indexOf(W.size) > -1; }
+  var est = own.filter(function(t){ return has(t, 'g'); });
+  own = own.filter(function(t){ return !has(t, 'g'); });
   return {
+    est: est,
     first: own.filter(fits),
     shared: COMMON.filter(fits),
     rest: own.filter(function(t){ return !fits(t); }).concat(COMMON.filter(function(t){ return !fits(t); }))
@@ -1414,7 +1504,7 @@ function problemLists(){
 }
 
 /* ------------------------------------------------------------------ wizard rendering */
-function pbHtml(t){ return '<button class="pb" type="button" data-tool-pick="' + t.id + '" aria-pressed="' + (W.tool === t.id) + '"><b>' + esc(t.p) + '</b><small>' + esc(t.n) + ' →</small></button>'; }
+function pbHtml(t){ return '<button class="pb' + (has(t, 'g') ? ' est' : '') + '" type="button" data-tool-pick="' + t.id + '" aria-pressed="' + (W.tool === t.id) + '"><b>' + esc(t.p) + '</b><small>' + esc(t.n) + (has(t, 'g') ? ' · a link your customers open' : '') + ' →</small></button>'; }
 function renderWizard(){
   var m = $('wizMount'), s = W.step, html = '';
   $('wizLabel').textContent = s < 4 ? 'Step ' + s + ' of 3' : 'Your prompt';
@@ -1444,6 +1534,7 @@ function renderWizard(){
     var L = problemLists(), z = SIZES[W.size - 1];
     html = '<div class="wstep"><span class="k b">' + esc(tradeName()) + (z ? ' · ' + z.t : '') + '</span><h2 class="wq" style="margin-top:8px">What eats your time?</h2>' +
       '<p class="wsub">Pick the one that hurts most. You can come back for the others.</p>' +
+      (L.est.length ? '<div class="grp"><span class="k">Share with your customers</span><div class="pbs">' + L.est.map(pbHtml).join('') + '</div></div>' : '') +
       (L.first.length ? '<div class="grp"><span class="k">In your trade, at your size</span><div class="pbs">' + L.first.map(pbHtml).join('') + '</div></div>' : '') +
       (L.shared.length ? '<div class="grp"><span class="k">Every business your size</span><div class="pbs">' + L.shared.map(pbHtml).join('') + '</div></div>' : '') +
       (L.rest.length ? (W.more
@@ -1462,6 +1553,7 @@ function renderWizard(){
         '<div class="f"><label for="e-town">Your town</label><input id="e-town" type="text" autocomplete="off" data-w="town" placeholder="Kakinada" value="' + esc(W.town) + '"></div>' +
         (cust && has(tool, 'w') ? '<div class="f"><label for="e-wa">Your WhatsApp number</label><input id="e-wa" type="tel" inputmode="tel" autocomplete="off" data-w="wanum" placeholder="Enquiries will come to this number" value="' + esc(W.wanum) + '"></div>' : '') +
         '<div class="f"><label for="e-rules">Your rates and rules</label><textarea id="e-rules" rows="5" data-edit="rules" placeholder="How you calculate it, with your rates">' + esc(e.rules !== undefined ? e.rules : tool.r) + '</textarea><span class="hint">' + (own ? 'This is the part only you know.' : 'These are sample numbers. Change them, or leave them: the AI will ask you to confirm each one.') + '</span></div>' +
+        (tool.gd ? '<div class="f"><label for="e-gd">How to guide your customer</label><textarea id="e-gd" rows="4" data-edit="gd">' + esc(e.gd !== undefined ? e.gd : tool.gd) + '</textarea><span class="hint">What to suggest, and when the cheaper option is the right one.</span></div>' : '') +
         '<div class="f"><label for="e-job">A job you already know the answer to</label><textarea id="e-job" rows="2" data-edit="job" placeholder="Optional. The AI checks its maths against it.">' + esc(e.job || '') + '</textarea></div>' +
         '<div class="f"><span class="lab" id="colLab">Your colour</span><div class="sw" role="group" aria-labelledby="colLab">' + COLOURS.map(function(c){
             return '<button type="button" class="swb" data-colour="' + c[1] + '" aria-pressed="' + (W.colour === c[1]) + '" aria-label="' + c[0] + '" title="' + c[0] + '" style="--c:' + (c[1] || themeOf(W.trade).main) + '"></button>'; }).join('') + '</div><span class="hint">The header and buttons of your tool use this colour. The first is our suggestion for your trade.</span></div>' +
@@ -1615,7 +1707,7 @@ function renderLibrary(q){
   function rowsOf(tools, tradeId, tradeText){
     return tools.filter(function(t){ return !q || (tradeText + ' ' + t.n + ' ' + t.p).toLowerCase().indexOf(q) > -1; }).map(function(t){
       shown++;
-      return '<div class="lr"><div><b>' + esc(t.n) + '</b><p>' + esc(t.p) + '</p></div><div class="lb"><button class="btn sm" type="button" data-lcopy="' + t.id + '" data-ltrade="' + tradeId + '"><span>Copy</span></button><button class="btn line sm" type="button" data-lopen="' + t.id + '" data-ltrade="' + tradeId + '">Open</button></div></div>';
+      return '<div class="lr"><div><b>' + esc(t.n) + (has(t, 'g') ? ' <span class="tag">Share with customers</span>' : '') + '</b><p>' + esc(t.p) + '</p></div><div class="lb"><button class="btn sm" type="button" data-lcopy="' + t.id + '" data-ltrade="' + tradeId + '"><span>Copy</span></button><button class="btn line sm" type="button" data-lopen="' + t.id + '" data-ltrade="' + tradeId + '">Open</button></div></div>';
     }).join('');
   }
   var html = GROUPS.map(function(g){
@@ -1934,7 +2026,7 @@ document.addEventListener('input', function(e){
     all('[data-pick="disq"] button').forEach(function(b){ b.setAttribute('aria-pressed', String(b.dataset.v === String(num(dis.d)))); }); return; }
   if (d.be) { be[d.be] = t.value; $('beOut').innerHTML = beOut(); return; }
 });
-var ED_FORM = { town:'e-town', wa:'e-wa', rules:'e-rules', job:'e-job', task:'e-task', inputs:'e-inputs' };
+var ED_FORM = { town:'e-town', wa:'e-wa', rules:'e-rules', job:'e-job', task:'e-task', inputs:'e-inputs', gd:'e-gd' };
 function isEd(t){ return t && t.nodeType === 1 && t.matches && t.matches('mark.ed'); }
 function applyEd(m){
   var f = m.dataset.f, v = m.textContent.replace(/\s+/g, ' ');

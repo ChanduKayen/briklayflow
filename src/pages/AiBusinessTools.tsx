@@ -12,7 +12,8 @@
  * business size and problem, plus the full library by trade), 2) using the prompt (an
  * animated six-step help guide), 3) building a dashboard on existing Excel data. Then four
  * sample tools as cards with their prompts, the Briklay App block and the home-building ad. All content lives in the .html: the library is the
- * GROUPS / COMMON data at the top of its script, and the demo WhatsApp number is OWNER_WA.
+ * GROUPS / COMMON data at the top of its script (ESTIMATORS adds one guided, customer-facing
+ * estimator per trade), and the demo WhatsApp number is OWNER_WA.
  * Its two images (the home-building ad and the Briklay App block background) are served from
  * public/aibusinesstools/.
  */
@@ -22,7 +23,7 @@ import { markBooted } from '../components/brand/bootSignal';
 
 const TITLE = 'Build your own business tools with AI · Briklay';
 const DESCRIPTION =
-  'Pick your trade and the problem that eats your time, and get a prompt to paste into any AI assistant. 159 prompts for 50 kinds of business, from Briklay Engineering.';
+  'Pick your trade and the problem that eats your time, and get a prompt to paste into any AI assistant. Prompts for 50 kinds of business, each with a customer estimator you can share as a link, from Briklay Engineering.';
 
 export default function AiBusinessTools() {
   // This page needs nothing from auth, so don't hold the boot loader over it while the session
