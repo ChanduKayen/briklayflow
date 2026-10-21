@@ -84,7 +84,7 @@ function PayWeekSettings({ startDay, offDay, canEdit, onSave }: {
           {[1, 2, 3, 4, 5, 6, 0].map(d => <option key={d} value={d}>{DOW_LONG[d]}</option>)}
         </select>
       </div>
-      <p className="pw-note">Weeks run {range}.{!canEdit && ' Only an owner or manager can change this.'}{saving && ' Saving…'}{err && ` · ${err}`}</p>
+      <p className="pw-note">Weeks run {range}.{!canEdit && ' Only an owner, manager or accountant can change this.'}{saving && ' Saving…'}{err && ` · ${err}`}</p>
     </div>
   );
 }
@@ -95,7 +95,9 @@ export default function AttendanceSheet({ session }: { session: Session }) {
   const weekStartDay = useWeekStartDay();          // org's pay-week start (0=Sun … 6=Sat)
   const weeklyOffDay = useWeeklyOffDay();          // default day-off, or null for none
   const { setPayWeek } = useAuth();
-  const canManageWeek = useCan('manage:team');     // owner + management
+  // Owner, manager AND accountant may edit a past week and the settings drawer; everyone else is
+  // read-only on history. Current-week attendance stays open to all members (gated below by `locked`).
+  const canEditAttn = useCan('manage:attendance');
   const { show: showSnackbar } = useSnackbar();
   const byName = (session.user?.user_metadata?.name as string) || (session.user?.user_metadata?.full_name as string) || session.user?.email || 'Office';
 
@@ -122,9 +124,12 @@ export default function AttendanceSheet({ session }: { session: Session }) {
   const dates = weekDates(monday);
   const todayISO = isoOf(new Date());
   const TODAY = todayISO > dates[6] ? 6 : todayISO < dates[0] ? -1 : dates.indexOf(todayISO);
-  // A fully-passed week is SETTLED — its wages are netted and paid; freeze its cells (read-only).
+  // A past pay-week is editable only by owner/manager/accountant; others see it frozen (read-only).
+  // Individual days already folded into a contract stay read-only for everyone (see `daySettled`).
   const thisWeekStart = weekStartOf(new Date(), weekStartDay);
-  const locked = isoOf(monday) < isoOf(thisWeekStart);
+  const isPastWeek = isoOf(monday) < isoOf(thisWeekStart);
+  const locked = isPastWeek && !canEditAttn;
+  const editingPast = isPastWeek && canEditAttn;   // unlocked history — a value change moves balances
   const isThisWeek = isoOf(monday) === isoOf(thisWeekStart);
   // A column is the default day-off when its real weekday is the org's off day (so it lands correctly
   // wherever the off day falls in a window that may start on any weekday).
@@ -199,6 +204,9 @@ export default function AttendanceSheet({ session }: { session: Session }) {
   const dayVal = (r: WorkerRow, i: number) => r.lines.reduce((s, l) => s + lineVal(l, i), 0);
   const dayWage = (r: WorkerRow, i: number) => r.lines.reduce((s, l) => s + lineVal(l, i) * l.rate, 0);
   const dayWa = (r: WorkerRow, i: number) => r.lines.some(l => { const c = l.cells[i]; return c && c !== 'off' && c.src === 'wa'; });
+  // A day is SETTLED when any of the row's lines has been folded into a contract on that date — its ₹ is
+  // a frozen certification in the ledger, so the cell stays read-only even in an otherwise-editable week.
+  const daySettled = (r: WorkerRow, i: number) => r.lines.some(l => { const c = l.cells[i]; return !!(c && c !== 'off' && c.settled); });
 
   // A phase's completion reflects what's actually accounted against it — the GREATER of the ₹ certified
   // (work approved) and the ₹ already paid (allocations). A phase paid but not yet formally certified is
@@ -273,7 +281,7 @@ export default function AttendanceSheet({ session }: { session: Session }) {
 
     thead.innerHTML = `<tr><th>Worker</th>${dates.map((ds, i) => {
       const dt = new Date(ds);
-      const fillable = !locked && i < TODAY && !isOffCol(i);
+      const fillable = !locked && (i < TODAY || isPastWeek) && !isOffCol(i);
       return `<th class="${i === TODAY ? 'today ' : ''}${fillable ? 'fillable' : ''}"${fillable ? ` data-fill="${i}"` : ''}>${dowOf(i)}<span class="d">${dt.getDate()}</span></th>`;
     }).join('')}<th class="tot">Days</th><th class="tot">This week</th><th></th></tr>`;
 
@@ -310,6 +318,7 @@ export default function AttendanceSheet({ session }: { session: Session }) {
         for (let i = 0; i < 7; i++) {
           const isFuture = i > TODAY || isOffCol(i);
           const val = dayVal(r, i);
+          const settledDay = daySettled(r, i);
           let cls = 'cell', inner = '';
           if (!isFuture) {
             if (val > 0) {
@@ -318,10 +327,13 @@ export default function AttendanceSheet({ session }: { session: Session }) {
               const nz = r.lines.map(l => lineVal(l, i)).filter(v => v > 0);
               if (nz.length > 1) inner += `<span class="sub">${nz.map(v => fmtQ(v)).join(' + ')}</span>`;
               if (dayWa(r, i)) inner += '<span class="src"></span>';
+              if (settledDay) { cls += ' settled'; inner += '<span class="slock" aria-hidden="true"></span>'; }
             } else if (i < TODAY) cls += ' gap';
           }
-          const title = val > 0 ? `${inr(dayWage(r, i))} · ${dowOf(i)} ${new Date(dates[i]).getDate()}` : '';
-          const editable = !isFuture && !locked;
+          const title = settledDay
+            ? `${inr(dayWage(r, i))} · settled to a contract — read-only`
+            : (val > 0 ? `${inr(dayWage(r, i))} · ${dowOf(i)} ${new Date(dates[i]).getDate()}` : '');
+          const editable = !isFuture && !locked && !settledDay;
           html += `<td class="day ${i === TODAY ? 'today' : ''} ${isFuture ? 'future' : ''}"><div class="${cls}" ${editable ? `tabindex="0" data-w="${r.id}" data-i="${i}"` : ''} title="${title}">${inner}</div></td>`;
         }
         const wageCell = r.contractWages
@@ -847,7 +859,8 @@ export default function AttendanceSheet({ session }: { session: Session }) {
               <button aria-label="Next week" onClick={() => setMonday(m => { const d = new Date(m); d.setDate(d.getDate() + 7); return d; })}>›</button>
               <button className="now" onClick={() => setMonday(weekStartOf(new Date(), weekStartDay))} disabled={isThisWeek}>{isThisWeek ? 'this week' : 'jump to now'}</button>
             </div>
-            {locked && <span className="lockchip" title="This week is settled — its wages are already netted in the ledger and paid.">🔒 Settled</span>}
+            {locked && <span className="lockchip" title="A past week — only an owner, manager or accountant can edit it.">🔒 Past week</span>}
+            {editingPast && <span className="pastchip" title="You're editing a past week. Changing a day updates what the worker is owed in the ledger. Days already settled to a contract stay locked.">✎ Editing a past week — changes update balances</span>}
             <button className="gearbtn" onClick={() => setRcOpen(true)} aria-label="Attendance settings" title="Settings — pay week & rate card">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>
             </button>
@@ -907,7 +920,7 @@ export default function AttendanceSheet({ session }: { session: Session }) {
           <div className="rcd-head"><div><b>Settings</b><span>How this muster counts the week, and what each worker type earns a day.</span></div><button className="rcd-x" onClick={() => setRcOpen(false)} aria-label="Close">×</button></div>
           <div className="rcd-body">
             <PayWeekSettings
-              startDay={weekStartDay} offDay={weeklyOffDay} canEdit={canManageWeek}
+              startDay={weekStartDay} offDay={weeklyOffDay} canEdit={canEditAttn}
               onSave={async (s, o) => { await setPayWeek(s, o); toast('Pay week updated'); }}
             />
             <div className="rcd-section-h">Rate card <span>Daily rates by worker type — change from today; earlier weeks keep the old rate.</span></div>
@@ -958,6 +971,7 @@ const ATDX_CSS = `
 .atdx .week .now:not(:disabled):hover{color:var(--ink)}
 .atdx .week .now:disabled{cursor:default}
 .atdx .lockchip{font-size:12px;font-weight:500;color:var(--terra-ink);background:var(--terra-soft);border-radius:999px;padding:6px 12px}
+.atdx .pastchip{font-size:12px;font-weight:500;color:var(--sage-ink);background:var(--sage-soft);border-radius:999px;padding:6px 12px;white-space:nowrap}
 .atdx .link{color:var(--walnut);padding:0 10px;height:36px;display:inline-flex;align-items:center;border-radius:999px;transition:background .15s var(--ease),color .15s}
 .atdx .link:hover{color:var(--ink);background:var(--paper)}
 
@@ -1086,6 +1100,11 @@ const ATDX_CSS = `
 .atdx td.day .cell .src{position:absolute;top:5px;right:7px;width:5px;height:5px;border-radius:50%;background:var(--sage)}
 .atdx td.day .cell.filled{background:var(--sage-soft);color:var(--sage-ink);font-weight:500}
 .atdx td.day .cell.filled:hover{background:#DFE7D6}
+/* settled day — folded into a contract, read-only: muted, no pointer, a small lock in the corner */
+.atdx td.day .cell.settled{background:var(--cream);color:var(--walnut);cursor:default;box-shadow:inset 0 0 0 1px var(--hair)}
+.atdx td.day .cell.settled:hover{background:var(--cream)}
+.atdx td.day .cell.settled .slock{position:absolute;top:4px;right:6px;width:9px;height:9px;opacity:.62;
+  background:no-repeat center/contain url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236E5F51' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'><rect x='4' y='11' width='16' height='10' rx='2'/><path d='M8 11V7a4 4 0 0 1 8 0v4'/></svg>")}
 .atdx td.day .cell.gap{border:1px dashed var(--gap)}
 .atdx td.day .cell.gap::before,.atdx td.day.today .cell:not(.filled)::before{content:"+";font-family:"DM Sans";font-size:14px;color:var(--mute);opacity:0;transition:opacity .15s var(--ease)}
 .atdx td.day .cell.gap:hover{border-color:var(--hair-2);background:var(--cream)}

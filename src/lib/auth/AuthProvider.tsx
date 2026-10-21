@@ -128,19 +128,23 @@ export type Permission =
   | 'view:reports'
   | 'manage:team'
   | 'manage:org'
+  // Edit a settled/past attendance week and change the attendance settings (pay week, rate card).
+  // Current-week attendance stays open to every member; this gates only the historical weeks and the
+  // settings drawer. Owner, manager AND accountant hold it; a supervisor does not.
+  | 'manage:attendance'
 
 const ROLE_PERMISSIONS: Record<MembershipContext['role'], Permission[]> = {
   principal: [
     'view:transactions', 'create:transactions',
     'view:work_orders',  'create:work_orders',
     'view:purchase_orders', 'create:purchase_orders',
-    'view:reports', 'manage:team', 'manage:org',
+    'view:reports', 'manage:team', 'manage:org', 'manage:attendance',
   ],
   management: [
     'view:transactions', 'create:transactions',
     'view:work_orders',  'create:work_orders',
     'view:purchase_orders', 'create:purchase_orders',
-    'view:reports', 'manage:team',
+    'view:reports', 'manage:team', 'manage:attendance',
   ],
   supervisor: [
     'view:transactions',
@@ -150,7 +154,7 @@ const ROLE_PERMISSIONS: Record<MembershipContext['role'], Permission[]> = {
   accountant: [
     'view:transactions', 'create:transactions',
     'view:purchase_orders',
-    'view:reports',
+    'view:reports', 'manage:attendance',
   ],
 }
 

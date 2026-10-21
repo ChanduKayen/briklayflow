@@ -9,7 +9,10 @@ import { submitWorkCertification } from './workCertification';
 // A grid cell is either a value object, null (a gap on a working day), or 'off'
 // (a non-working day — Sundays). src distinguishes a WhatsApp report from an
 // office correction; by/at/photo are provenance shown on hover.
-export type Cell = { v: number; src: 'wa' | 'office'; by?: string; at?: string; photo?: boolean } | null | 'off';
+// `settled` marks a day-wage row that has been folded into a contract phase (labour_attendance.settled_at
+// is set): the ledger reads it as a frozen certification, not as a live wage, so the sheet shows it but
+// keeps it read-only — editing the raw value here would silently desync the muster from the ledger.
+export type Cell = { v: number; src: 'wa' | 'office'; by?: string; at?: string; photo?: boolean; settled?: boolean } | null | 'off';
 
 export const SUPERVISOR_KEY = '__supervisor__';
 
@@ -101,7 +104,7 @@ const defaultCells = (dates: string[], offDay: number | null): Cell[] =>
   dates.map(ds => (offDay != null && new Date(ds).getDay() === offDay) ? ('off' as Cell) : null);
 
 function cellFrom(row: any): Cell {
-  return { v: Number(row.value), src: row.source === 'wa' ? 'wa' : 'office', by: row.recorded_by_name || undefined, at: row.recorded_at ? timeLabel(row.recorded_at) : undefined, photo: !!row.photo_url };
+  return { v: Number(row.value), src: row.source === 'wa' ? 'wa' : 'office', by: row.recorded_by_name || undefined, at: row.recorded_at ? timeLabel(row.recorded_at) : undefined, photo: !!row.photo_url, settled: !!row.settled_at };
 }
 // Build a 7-slot cell array for one subject from its attendance rows (keyed by date).
 function cellsFor(rows: any[], dates: string[], offDay: number | null): Cell[] {

@@ -31,6 +31,10 @@ export const ATMX_CSS = `
 .atmx .stat b{display:block; font-family:var(--mono); font-size:17px; font-weight:500}
 .atmx .stat span{font-family:var(--mono); font-size:8.5px; letter-spacing:.14em; text-transform:uppercase; color:var(--soft)}
 .atmx .stat.gap b{color:var(--clay)}
+/* ---------- past-week banner ---------- */
+.atmx .pastbar{margin:0 18px 10px; padding:8px 12px; border-radius:12px; font-size:12px; font-weight:600;
+  color:var(--sage); background:var(--sage-soft); line-height:1.35}
+.atmx .pastbar.locked{color:var(--clay); background:var(--clay-soft)}
 /* ---------- date strip ---------- */
 .atmx .datestrip{position:sticky; top:0; z-index:20; background:var(--bg); padding:10px 12px 8px; display:flex; gap:6px}
 .atmx .day{flex:1; text-align:center; padding:8px 0 7px; border-radius:12px; cursor:pointer; border:1px solid transparent;

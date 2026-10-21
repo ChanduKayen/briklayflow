@@ -101,6 +101,8 @@ function workersOf(site: SiteRow, si: number): MWorker[] {
 }
 
 const countOf = (w: MWorker, di: number) => w.types.reduce((s, t) => s + val(t.cells[di]), 0);
+// A day folded into a contract: its ₹ is a frozen certification, so the cell is read-only everywhere.
+const settledAt = (w: MWorker, di: number) => w.types.some(t => { const c = t.cells[di]; return !!(c && c !== 'off' && c.settled); });
 const costOf = (w: MWorker, di: number) => w.types.reduce((s, t) => s + val(t.cells[di]) * t.rate, 0);
 const waAt = (w: MWorker, di: number): string | null => {
   for (const t of w.types) { const c = t.cells[di]; if (c && c !== 'off' && c.src === 'wa') return c.at || ''; }
@@ -136,7 +138,9 @@ export default function AttendanceMobile({ session }: { session: Session }) {
   const weekStartDay = useWeekStartDay();
   const weeklyOffDay = useWeeklyOffDay();
   const { setPayWeek } = useAuth();
-  const canManageWeek = useCan('manage:team');     // owner + management
+  // Owner, manager AND accountant may edit a past week and the settings; everyone else is read-only on
+  // history. The current week stays open to all members.
+  const canEditAttn = useCan('manage:attendance');
   const { show: showSnackbar } = useSnackbar();
   const byName = (session.user?.user_metadata?.name as string) || (session.user?.user_metadata?.full_name as string) || session.user?.email || 'Office';
 
@@ -157,6 +161,10 @@ export default function AttendanceMobile({ session }: { session: Session }) {
   const now = new Date();
   const todayISO = `${now.getFullYear()}-${`${now.getMonth() + 1}`.padStart(2, '0')}-${`${now.getDate()}`.padStart(2, '0')}`;
   const TODAY = todayISO > dates[6] ? 6 : todayISO < dates[0] ? -1 : dates.indexOf(todayISO);
+  // A past pay-week: editable only by owner/manager/accountant (pastLocked for everyone else). Days
+  // already folded into a contract stay read-only for all (see module-level `settledAt`).
+  const pastWeek = monday.getTime() < weekStartOf(now, weekStartDay).getTime();
+  const pastLocked = pastWeek && !canEditAttn;
 
   // ── rate helpers — the wage-type prefills come from the org's own card ───────
   const rateFor = useCallback((trade: string | null, cat: string): number => {
@@ -339,7 +347,7 @@ export default function AttendanceMobile({ session }: { session: Session }) {
         <span class="sdot" style="background:${SITE_DOT[si % SITE_DOT.length]}"></span>
         <b>${esc(site.label)}</b>
         <span class="scount">${onsite ? num(onsite) + ' · ' + inr(amt) : ''}</span>
-        ${(!future && gaps > 0 && workers.length) ? '<button class="markall">Mark all</button>' : ''}
+        ${(!future && !pastLocked && gaps > 0 && workers.length) ? '<button class="markall">Mark all</button>' : ''}
         <button class="addbtn" title="Add worker">＋</button>
       </div>` +
       (!workers.length ? `<div class="siteempty">Nothing yet — <b>add a worker</b> or wait for WhatsApp.</div>` : '');
@@ -363,7 +371,7 @@ export default function AttendanceMobile({ session }: { session: Session }) {
             <div class="weekdots">${dates.map((_d, di) =>
               `<span class="wd ${(w.onContract ? 0 : countOf(w, di)) ? 'on' : ''} ${di === sel ? 'tod' : ''}"></span>`).join('')}</div>
           </div>
-          <button class="ctr ${filled ? 'filled' : ''} ${(future && !cp) ? 'ro' : ''}">${face}</button>`;
+          <button class="ctr ${filled ? 'filled' : ''} ${((future || pastLocked || settledAt(w, sel)) && !cp) ? 'ro' : ''}">${face}</button>`;
         const ctr = row.querySelector('.ctr')!;
         ctr.addEventListener('click', e => {
           e.stopPropagation();
@@ -468,7 +476,7 @@ export default function AttendanceMobile({ session }: { session: Session }) {
     const startOpts = [1, 2, 3, 4, 5, 6, 0];
     const opt = (v: number | '', label: string, cur: number | '') => `<option value="${v}"${v === cur ? ' selected' : ''}>${label}</option>`;
     const off = weeklyOffDay;
-    const dis = canManageWeek ? '' : 'disabled';
+    const dis = canEditAttn ? '' : 'disabled';
     sheet.innerHTML = `<div class="grab"></div>
       <div class="sh-head"><b>Pay week</b><span>settings</span></div>
       <div class="sh-src">The labour week this muster and the weekly run count by.</div>
@@ -476,7 +484,7 @@ export default function AttendanceMobile({ session }: { session: Session }) {
         <select id="pw-start" ${dis}>${startOpts.map(d => opt(d, DOW_LONG[d], weekStartDay)).join('')}</select></div>
       <div class="pw-row"><label for="pw-off">Weekly off</label>
         <select id="pw-off" ${dis}>${opt('', 'No weekly off', off == null ? '' : off)}${startOpts.map(d => opt(d, DOW_LONG[d], off == null ? '' : off)).join('')}</select></div>
-      <div class="pw-note" id="pw-note">Weeks run ${DOW_SHORT[weekStartDay]} – ${DOW_SHORT[(weekStartDay + 6) % 7]}.${canManageWeek ? '' : ' Only an owner or manager can change this.'}</div>
+      <div class="pw-note" id="pw-note">Weeks run ${DOW_SHORT[weekStartDay]} – ${DOW_SHORT[(weekStartDay + 6) % 7]}.${canEditAttn ? '' : ' Only an owner, manager or accountant can change this.'}</div>
       <div style="height:8px"></div>
       <button class="sh-done">Done</button>`;
     showSheet();
@@ -490,7 +498,7 @@ export default function AttendanceMobile({ session }: { session: Session }) {
       try { await setPayWeek(s, o); hapt(10); toast('Pay week updated'); note.textContent = `Weeks run ${DOW_SHORT[s]} – ${DOW_SHORT[(s + 6) % 7]}.`; }
       catch (e) { note.textContent = (e as Error)?.message || 'Could not save'; }
     };
-    if (canManageWeek) { startSel.addEventListener('change', save); offSel.addEventListener('change', save); }
+    if (canEditAttn) { startSel.addEventListener('change', save); offSel.addEventListener('change', save); }
     (sheet.querySelector('.sh-done') as HTMLElement).addEventListener('click', closeSheet);
   }
 
@@ -758,13 +766,19 @@ export default function AttendanceMobile({ session }: { session: Session }) {
     const dt = new Date(dates[sel]);
     const dayLbl = `${dt.toLocaleString('en-US', { weekday: 'short' })} ${dt.getDate()}`;
     const waT = waAt(w, sel);
+    // This day is read-only when it's a past week the user can't edit, or it's been settled to a contract.
+    const dayRO = pastLocked || settledAt(w, sel);
+    const roNote = pastLocked
+      ? 'A past week — only an owner, manager or accountant can edit it.'
+      : (settledAt(w, sel) ? 'Settled to a contract — read-only.' : '');
     sheet.innerHTML = `<div class="grab"></div>
       <div class="sh-head"><b>${esc(w.name)}</b><span>${dayLbl}</span></div>
       ${waT !== null && countOf(w, sel) ? `<div class="sh-src">● filed from WhatsApp${waT ? ` at ${esc(waT)}` : ''}</div>` : ''}
+      ${roNote ? `<div class="sh-src" style="color:var(--mute)">🔒 ${esc(roNote)}</div>` : ''}
       ${w.wagesOff ? `<div class="wcon" id="s-con"><div class="t">${esc(WAGES_ASK.standingHead)}</div><div class="n">${esc(shortContract(w.crew?.stages[0]?.n || 'the contract', 44))}</div></div>` : ''}
       ${rows.map((r, ri) => `<div class="srow${r.own ? '' : ' offer'}" data-row="${ri}">
         <div class="t">${esc(r.label)}<small>${inr(r.rate)}/day${r.own ? '' : ' · not on this crew yet'}</small></div>
-        <div class="step"><button data-ti="${ri}" data-d="-1"${r.own ? '' : ' disabled'}>−</button><b id="s-${ri}">${r.own ? num(val(r.own.cells[sel])) : '0'}</b><button data-ti="${ri}" data-d="1">＋</button></div>
+        <div class="step"><button data-ti="${ri}" data-d="-1"${(r.own && !dayRO) ? '' : ' disabled'}>−</button><b id="s-${ri}">${r.own ? num(val(r.own.cells[sel])) : '0'}</b><button data-ti="${ri}" data-d="1"${dayRO ? ' disabled' : ''}>＋</button></div>
       </div>`).join('')}
       <div class="sh-foot"><span id="s-c"></span><span id="s-amt"></span></div>
       <div id="s-musterwrap"></div>
@@ -1049,6 +1063,13 @@ export default function AttendanceMobile({ session }: { session: Session }) {
       </div>
 
       <div className="datestrip" id="datestrip" />
+      {pastWeek && (
+        <div className={`pastbar${pastLocked ? ' locked' : ''}`}>
+          {pastLocked
+            ? '🔒 A past week — only an owner, manager or accountant can edit it.'
+            : '✎ Editing a past week — a change updates what the worker is owed.'}
+        </div>
+      )}
       <div id="list" />
 
       {loading && <div className="siteempty" style={{ padding: '14px 18px' }}>Loading attendance…</div>}
